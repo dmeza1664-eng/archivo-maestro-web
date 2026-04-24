@@ -1,0 +1,1 @@
+export default function App(){return <div style={{fontFamily:'Arial',padding:20}}><h1>Sistema PRO Archivo Maestro</h1><p>Listo para Vercel.</p></div>}
