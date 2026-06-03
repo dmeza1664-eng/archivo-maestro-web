@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import {
   AlertTriangle,
@@ -24,9 +25,60 @@ const INVALID_PRODUCTS = new Set([
   "SUBTOTAL",
   "SUMA",
   "SUMAS",
+  "PRODUCTO",
   "TOTAL AREA",
   "TOTAL ÁREA",
   "ESPECIALIDAD",
+  "GRANDE",
+  "MEDIANO",
+  "CHICO",
+  "FECHA",
+  "DIA",
+  "DÍA",
+  "CALENDARIO",
+  "SEMANA",
+]);
+
+const CALENDAR_WORDS = new Set([
+  "LUNES",
+  "MARTES",
+  "MIERCOLES",
+  "MIÉRCOLES",
+  "JUEVES",
+  "VIERNES",
+  "SABADO",
+  "SÁBADO",
+  "DOMINGO",
+  "MONDAY",
+  "TUESDAY",
+  "WEDNESDAY",
+  "THURSDAY",
+  "FRIDAY",
+  "SATURDAY",
+  "SUNDAY",
+  "MON",
+  "TUE",
+  "WED",
+  "THU",
+  "FRI",
+  "SAT",
+  "SUN",
+  "ENE",
+  "FEB",
+  "MAR",
+  "ABR",
+  "MAY",
+  "JUN",
+  "JUL",
+  "AGO",
+  "SEP",
+  "OCT",
+  "NOV",
+  "DIC",
+  "JAN",
+  "APR",
+  "AUG",
+  "DEC",
 ]);
 
 const STATUS_META = {
@@ -38,6 +90,16 @@ const STATUS_META = {
   Revisar: { className: "warn", label: "Revisar" },
 };
 
+const WEEKDAYS = [
+  { index: 1, label: "Lunes" },
+  { index: 2, label: "Martes" },
+  { index: 3, label: "Miércoles" },
+  { index: 4, label: "Jueves" },
+  { index: 5, label: "Viernes" },
+  { index: 6, label: "Sábado" },
+  { index: 0, label: "Domingo" },
+];
+
 function norm(value) {
   return String(value ?? "")
     .trim()
@@ -46,11 +108,52 @@ function norm(value) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function isValidProduct(value) {
+const WEEKDAY_BY_NORM = new Map(
+  WEEKDAYS.flatMap((day) => [
+    [norm(day.label), day.index],
+    [norm(day.label).slice(0, 3), day.index],
+  ])
+);
+
+function isDateLikeValue(value) {
+  if (value instanceof Date) return true;
+  if (typeof value === "number") return value > 20000 && value < 80000;
+  const raw = String(value ?? "").trim();
+  const p = norm(raw);
+  if (!p) return false;
+  if (/^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(raw)) return true;
+  if (/^\d{4}[/-]\d{1,2}[/-]\d{1,2}$/.test(raw)) return true;
+  if (/^(MON|TUE|WED|THU|FRI|SAT|SUN)\s+[A-Z]{3}\s+\d{1,2}\s+\d{4}/.test(p)) return true;
+  if (/\b(ENE|FEB|MAR|ABR|MAY|JUN|JUL|AGO|SEP|OCT|NOV|DIC|JAN|APR|AUG|DEC)\b/.test(p) && /\b(19|20)\d{2}\b/.test(p)) {
+    return true;
+  }
+  return false;
+}
+
+function looksLikeCalendarHeader(value) {
+  const p = norm(value);
+  if (!p) return false;
+  if (CALENDAR_WORDS.has(p)) return true;
+  if (p.includes("CALENDARIO") || p.includes("SEMANA") || p.includes("FECHA")) return true;
+  return false;
+}
+
+function isCalendarRow(row = []) {
+  const nonEmpty = row.filter((cell) => String(cell ?? "").trim() !== "");
+  if (nonEmpty.length < 3) return false;
+  const calendarCells = nonEmpty.filter((cell) => isDateLikeValue(cell) || looksLikeCalendarHeader(cell)).length;
+  return calendarCells >= 3 && calendarCells / nonEmpty.length >= 0.5;
+}
+
+function isValidProduct(value, row = []) {
+  if (isDateLikeValue(value) || isCalendarRow(row)) return false;
   const p = norm(value);
   if (!p) return false;
   if (INVALID_PRODUCTS.has(p)) return false;
   if (p.startsWith("TOTAL")) return false;
+  if (p.includes("PRODUCTO") || p.includes("ESPECIALIDAD")) return false;
+  if (looksLikeCalendarHeader(p)) return false;
+  if (/^\d+$/.test(p)) return false;
   return true;
 }
 
@@ -76,10 +179,68 @@ function formatPercent(value, digits = 0) {
   return `${formatNumber(value, digits)}%`;
 }
 
+function parseDateCell(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "number" && value > 20000 && value < 80000) {
+    const utcDays = Math.floor(value - 25569);
+    return new Date(utcDays * 86400 * 1000);
+  }
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function dateKey(date) {
+  const d = parseDateCell(date);
+  if (!d) return "";
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function displayDate(date) {
+  const key = dateKey(date);
+  if (!key) return "";
+  const [year, month, day] = key.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function weekdayLabel(index) {
+  return WEEKDAYS.find((day) => day.index === index)?.label || "";
+}
+
+function defaultMonthValue() {
+  const today = new Date();
+  return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function addDays(date, days) {
   const next = new Date(date);
   next.setDate(next.getDate() + days);
   return next;
+}
+
+function datesForMonth(monthValue) {
+  const [year, month] = String(monthValue || defaultMonthValue())
+    .split("-")
+    .map(Number);
+  if (!year || !month) return [];
+  const dates = [];
+  const cursor = new Date(year, month - 1, 1);
+  while (cursor.getMonth() === month - 1) {
+    dates.push(new Date(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+
+function recordWeekday(record) {
+  const parsedDate = parseDateCell(record.fecha);
+  if (parsedDate) return parsedDate.getDay();
+  const normalized = norm(record.weekday);
+  return WEEKDAY_BY_NORM.has(normalized) ? WEEKDAY_BY_NORM.get(normalized) : null;
 }
 
 function horizonWeekendFactor(days, weekendBoost) {
@@ -106,11 +267,10 @@ function parseStock(workbook) {
   const rows = rowsFromFirstSheet(workbook);
   const parsed = [];
   for (let i = 0; i < rows.length; i++) {
+    if (!isValidProduct(rows[i][0], rows[i])) continue;
     const product = norm(rows[i][0]);
     const stock = toNumber(rows[i][1]);
-    if (isValidProduct(product)) {
-      parsed.push({ producto: product, stock, orden: parsed.length + 1 });
-    }
+    parsed.push({ producto: product, stock, orden: parsed.length + 1 });
   }
   return parsed;
 }
@@ -144,8 +304,8 @@ function parseExistencias(workbook) {
 
   const parsed = [];
   for (let i = headerIndex + 1; i < rows.length; i++) {
+    if (!isValidProduct(rows[i][productCol], rows[i])) continue;
     const product = norm(rows[i][productCol]);
-    if (!isValidProduct(product)) continue;
     parsed.push({
       producto: product,
       totalSuc: toNumber(rows[i][totalSucCol]),
@@ -198,8 +358,8 @@ function parseMonthlyDailySheets(workbook, type = "ventas") {
     }
 
     for (let i = headerIndex + 1; i < rows.length; i++) {
+      if (!isValidProduct(rows[i][productCol], rows[i])) continue;
       const product = norm(rows[i][productCol]);
-      if (!isValidProduct(product)) continue;
       const cantidad = toNumber(rows[i][qtyCol]);
       const importe = amountCol >= 0 ? toNumber(rows[i][amountCol]) : 0;
       if (cantidad === 0 && importe === 0) continue;
@@ -215,8 +375,8 @@ function parseWideSales(workbook, type = "ventas") {
   const weekdays = rows[0].map(norm);
   const parsed = [];
   for (let r = 3; r < rows.length; r++) {
+    if (!isValidProduct(rows[r][0], rows[r])) continue;
     const product = norm(rows[r][0]);
-    if (!isValidProduct(product)) continue;
     for (let c = 1; c < rows[r].length; c++) {
       if (!weekdays[c]) continue;
       const cantidad = toNumber(rows[r][c]);
@@ -245,10 +405,12 @@ function parseProductionReal(workbook) {
   let headerIndex = -1;
   let productCol = 0;
   let qtyCol = 1;
+  let dateCol = -1;
 
   for (let i = 0; i < Math.min(rows.length, 15); i++) {
     const row = rows[i].map(norm);
     const p = row.findIndex((x) => x.includes("PRODUCTO") || x.includes("DESCRIPCION") || x.includes("ARTICULO"));
+    const d = row.findIndex((x) => x === "FECHA" || x.includes("FECHA") || x === "DIA" || x === "DÍA");
     const q = row.findIndex(
       (x) =>
         x.includes("PRODUCCION") ||
@@ -261,20 +423,65 @@ function parseProductionReal(workbook) {
       headerIndex = i;
       productCol = p;
       qtyCol = q;
+      dateCol = d;
       break;
     }
   }
 
   const start = headerIndex >= 0 ? headerIndex + 1 : 0;
-  const map = new Map();
+  const records = [];
   for (let i = start; i < rows.length; i++) {
+    if (!isValidProduct(rows[i][productCol], rows[i])) continue;
     const product = norm(rows[i][productCol]);
-    if (!isValidProduct(product)) continue;
     const cantidad = toNumber(rows[i][qtyCol]);
     if (cantidad === 0) continue;
-    map.set(product, (map.get(product) || 0) + cantidad);
+    const fecha = dateCol >= 0 ? parseDateCell(rows[i][dateCol]) : null;
+    records.push({
+      producto: product,
+      cantidad,
+      fecha,
+      fechaKey: fecha ? dateKey(fecha) : "",
+    });
+  }
+  return records;
+}
+
+function aggregateProductionRows(records) {
+  const map = new Map();
+  for (const item of records) {
+    if (!isValidProduct(item.producto)) continue;
+    map.set(item.producto, (map.get(item.producto) || 0) + toNumber(item.cantidad));
   }
   return [...map.entries()].map(([producto, cantidad]) => ({ producto, cantidad }));
+}
+
+function aggregateDailyProductionRows(records) {
+  const map = new Map();
+  for (const item of records) {
+    if (!item.fechaKey || !isValidProduct(item.producto)) continue;
+    const key = `${item.producto}|${item.fechaKey}`;
+    map.set(key, (map.get(key) || 0) + toNumber(item.cantidad));
+  }
+  return map;
+}
+
+async function parseProductionRealFile(file) {
+  if (!file) return [];
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.endsWith(".zip")) {
+    const zip = await JSZip.loadAsync(await file.arrayBuffer());
+    const records = [];
+    for (const entry of Object.values(zip.files)) {
+      if (entry.dir || !/\.(xlsx|xls)$/i.test(entry.name)) continue;
+      const data = await entry.async("arraybuffer");
+      const workbook = XLSX.read(data, { type: "array", cellDates: true });
+      records.push(...parseProductionReal(workbook));
+    }
+    return records;
+  }
+
+  const workbook = await readWorkbook(file);
+  return parseProductionReal(workbook);
 }
 
 function groupByProduct(records) {
@@ -287,11 +494,11 @@ function groupByProduct(records) {
   return map;
 }
 
-function calculateForecast({ stockRows, ventas, bajas, existencias, realProduction, days, weekendBoost, bufferPct }) {
+function calculateForecast({ stockRows, ventas, bajas, existencias, realProduction, days, weekendBoost }) {
   const ventasByProduct = groupByProduct(ventas);
   const bajasByProduct = groupByProduct(bajas);
   const existMap = new Map(existencias.map((e) => [e.producto, e]));
-  const realMap = new Map(realProduction.map((e) => [e.producto, e.cantidad]));
+  const realMap = new Map(aggregateProductionRows(realProduction).map((e) => [e.producto, e.cantidad]));
   const horizonFactor = horizonWeekendFactor(days, weekendBoost);
 
   return stockRows.map((s) => {
@@ -303,23 +510,26 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
     const promedioReciente = recentValues.length ? recentValues.reduce((a, n) => a + n, 0) / recentValues.length : 0;
     const promedioHistorico = values.length ? values.reduce((a, n) => a + n, 0) / values.length : 0;
     const promedioDiario = promedioReciente * 0.65 + promedioHistorico * 0.35;
-    const demandaPronosticada = promedioDiario * days * horizonFactor;
+    const pronosticoVenta = promedioDiario * days * horizonFactor;
 
     const bajasTotal = b.reduce((a, n) => a + n.cantidad, 0);
     const ventasTotal = v.reduce((a, n) => a + n.cantidad, 0);
     const tasaBajas = ventasTotal > 0 ? bajasTotal / ventasTotal : 0;
-    const bajasEsperadas = demandaPronosticada * tasaBajas;
-    const colchonOperativo = Math.ceil((demandaPronosticada + bajasEsperadas) * bufferPct);
-    const produccionPronosticada = Math.ceil(demandaPronosticada + bajasEsperadas + colchonOperativo);
+    const bajasEsperadas = pronosticoVenta * tasaBajas;
+    const colchonOperativo = pronosticoVenta > 0 ? (pronosticoVenta >= 300 ? 15 : 10) : 0;
+    const produccionPronosticada = Math.ceil(pronosticoVenta + colchonOperativo);
 
     const ex = existMap.get(s.producto) || { totalSuc: 0, cf: 0, sumaSucCf: 0 };
     const sumaSucCf = ex.sumaSucCf || ex.totalSuc + ex.cf;
     const inventarioObjetivo = s.stock;
     const produccionRecomendada = Math.max(0, Math.ceil(inventarioObjetivo + produccionPronosticada - sumaSucCf));
-    const produccionReal = realMap.get(s.producto) || 0;
-    const diferenciaReal = produccionReal - produccionRecomendada;
-    const cumplimiento =
-      produccionRecomendada > 0 ? (produccionReal / produccionRecomendada) * 100 : produccionReal > 0 ? 100 : null;
+    const hasRealData = realMap.has(s.producto);
+    const produccionReal = hasRealData ? realMap.get(s.producto) : 0;
+    const diferenciaReal = produccionReal - produccionPronosticada;
+    const precision =
+      hasRealData && produccionReal > 0
+        ? (1 - Math.abs(produccionPronosticada - produccionReal) / produccionReal) * 100
+        : null;
 
     const confianza =
       promedioHistorico > 0
@@ -329,11 +539,11 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
           : 0;
 
     let estatus = "Sin dato real";
-    if (produccionRecomendada === 0) estatus = "No producir";
-    else if (produccionReal === 0) estatus = "Sin dato real";
-    else if (cumplimiento < 90) estatus = "Riesgo faltante";
-    else if (cumplimiento > 115) estatus = "Sobreproduccion";
-    else if (confianza < 65) estatus = "Revisar";
+    if (!hasRealData) estatus = "Sin dato real";
+    else if (produccionPronosticada === 0 && produccionReal === 0) estatus = "No producir";
+    else if (produccionReal < produccionPronosticada) estatus = "Riesgo faltante";
+    else if (produccionReal > produccionPronosticada) estatus = "Sobreproduccion";
+    else if (precision !== null && precision < 80) estatus = "Revisar";
     else estatus = "Dentro de rango";
 
     return {
@@ -342,7 +552,8 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
       promedioReciente,
       promedioHistorico,
       promedioDiario,
-      demandaPronosticada,
+      demandaPronosticada: pronosticoVenta,
+      pronosticoVenta,
       tasaBajas,
       bajasEsperadas,
       colchonOperativo,
@@ -353,12 +564,101 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
       sumaSucCf,
       produccionRecomendada,
       produccionReal,
+      hasRealData,
       diferenciaReal,
-      cumplimiento,
+      precision,
       confianza,
       estatus,
     };
   });
+}
+
+function calculateWeekdayAverages(ventas) {
+  const buckets = new Map();
+  for (const record of ventas) {
+    if (!isValidProduct(record.producto)) continue;
+    const weekday = recordWeekday(record);
+    if (weekday === null) continue;
+    const productBuckets = buckets.get(record.producto) || new Map();
+    const bucket = productBuckets.get(weekday) || { total: 0, count: 0 };
+    bucket.total += toNumber(record.cantidad);
+    bucket.count += 1;
+    productBuckets.set(weekday, bucket);
+    buckets.set(record.producto, productBuckets);
+  }
+
+  const averages = new Map();
+  for (const [producto, productBuckets] of buckets.entries()) {
+    const productAverages = new Map();
+    for (const [weekday, bucket] of productBuckets.entries()) {
+      productAverages.set(weekday, bucket.count ? bucket.total / bucket.count : 0);
+    }
+    averages.set(producto, productAverages);
+  }
+  return averages;
+}
+
+function calculateDailyForecast({ stockRows, ventas, realProduction, selectedMonth, dailyBufferPct }) {
+  const averages = calculateWeekdayAverages(ventas);
+  const realDailyMap = aggregateDailyProductionRows(realProduction);
+  const monthDates = datesForMonth(selectedMonth);
+
+  return stockRows.flatMap((productRow) => {
+    const product = productRow.producto;
+    const productAverages = averages.get(product) || new Map();
+    return monthDates.map((date) => {
+      const key = dateKey(date);
+      const weekday = date.getDay();
+      const pronosticoVentaDia = productAverages.get(weekday) || 0;
+      const produccionPronosticadaDia = Math.ceil(pronosticoVentaDia * (1 + dailyBufferPct / 100));
+      const colchonDiario = Math.max(0, produccionPronosticadaDia - pronosticoVentaDia);
+      const realKey = `${product}|${key}`;
+      const hasRealData = realDailyMap.has(realKey);
+      const produccionRealDia = hasRealData ? realDailyMap.get(realKey) : null;
+      const diferenciaPiezas = hasRealData ? produccionRealDia - produccionPronosticadaDia : null;
+
+      let estatus = "Sin dato real";
+      if (hasRealData && diferenciaPiezas < 0) estatus = "Riesgo faltante";
+      else if (hasRealData && diferenciaPiezas > 0) estatus = "Sobreproduccion";
+      else if (hasRealData) estatus = "Dentro de rango";
+
+      return {
+        fecha: key,
+        fechaDisplay: displayDate(date),
+        weekday,
+        dia: weekdayLabel(weekday),
+        producto: product,
+        pronosticoVentaDia,
+        colchonDiario,
+        produccionPronosticadaDia,
+        produccionRealDia,
+        hasRealData,
+        diferenciaPiezas,
+        estatus,
+      };
+    });
+  });
+}
+
+function summarizeDailyMonth(rows) {
+  const comparable = rows.filter((row) => row.hasRealData);
+  const source = comparable.length ? comparable : rows;
+  const pronosticoVentaMensual = source.reduce((sum, row) => sum + row.pronosticoVentaDia, 0);
+  const produccionPronosticadaMensual = source.reduce((sum, row) => sum + row.produccionPronosticadaDia, 0);
+  const produccionRealMensual = source.reduce((sum, row) => sum + (row.produccionRealDia || 0), 0);
+  const diferenciaMensual = produccionRealMensual - produccionPronosticadaMensual;
+  const precision =
+    produccionRealMensual > 0
+      ? (1 - Math.abs(produccionPronosticadaMensual - produccionRealMensual) / produccionRealMensual) * 100
+      : 0;
+
+  return {
+    pronosticoVentaMensual,
+    produccionPronosticadaMensual,
+    produccionRealMensual,
+    diferenciaMensual,
+    precision,
+  };
 }
 
 function exportToExcel(rows, summary) {
@@ -366,16 +666,15 @@ function exportToExcel(rows, summary) {
     Producto: r.producto,
     "Promedio reciente": Number(r.promedioReciente.toFixed(2)),
     "Promedio historico": Number(r.promedioHistorico.toFixed(2)),
-    "Demanda pronosticada": Number(r.demandaPronosticada.toFixed(2)),
-    "Bajas esperadas": Number(r.bajasEsperadas.toFixed(2)),
+    "Pronostico venta": Number(r.pronosticoVenta.toFixed(2)),
     "Colchon operativo": r.colchonOperativo,
     "Produccion pronosticada": r.produccionPronosticada,
     "Inventario objetivo": r.inventarioObjetivo,
     "Existencia sucursales + CF": r.sumaSucCf,
     "Produccion recomendada": r.produccionRecomendada,
     "Produccion real": r.produccionReal,
-    "Diferencia real vs recomendada": r.diferenciaReal,
-    "Cumplimiento %": r.cumplimiento === null ? "" : Number(r.cumplimiento.toFixed(1)),
+    "Diferencia real vs pronosticada": r.diferenciaReal,
+    "Precision %": r.precision === null ? "" : Number(r.precision.toFixed(1)),
     Confianza: Number(r.confianza.toFixed(1)),
     Estatus: STATUS_META[r.estatus]?.label || r.estatus,
   }));
@@ -384,8 +683,8 @@ function exportToExcel(rows, summary) {
     { Indicador: "Produccion pronosticada con colchon", Valor: summary.totalPronosticada },
     { Indicador: "Produccion recomendada", Valor: summary.totalRecomendada },
     { Indicador: "Produccion real", Valor: summary.totalReal },
-    { Indicador: "Brecha real vs recomendada", Valor: summary.brechaTotal },
-    { Indicador: "Cumplimiento ejecutivo", Valor: `${summary.cumplimientoEjecutivo.toFixed(1)}%` },
+    { Indicador: "Brecha real vs pronosticada", Valor: summary.brechaTotal },
+    { Indicador: "Precision ejecutiva", Valor: `${summary.precisionEjecutiva.toFixed(1)}%` },
     { Indicador: "Productos en riesgo", Valor: summary.riesgoFaltante },
     { Indicador: "Productos con sobreproduccion", Valor: summary.sobreproduccion },
   ];
@@ -396,7 +695,34 @@ function exportToExcel(rows, summary) {
   XLSX.writeFile(wb, "dashboard_produccion_archivo_maestro.xlsx");
 }
 
-function UploadBox({ title, description, onFile, fileName, required }) {
+function exportDailyToExcel(rows, summary) {
+  const resumen = [
+    { Indicador: "Pronostico venta mensual", Valor: Number(summary.pronosticoVentaMensual.toFixed(2)) },
+    { Indicador: "Produccion pronosticada mensual", Valor: summary.produccionPronosticadaMensual },
+    { Indicador: "Produccion real mensual", Valor: summary.produccionRealMensual },
+    { Indicador: "Diferencia mensual", Valor: summary.diferenciaMensual },
+    { Indicador: "Precision %", Valor: Number(summary.precision.toFixed(1)) },
+  ];
+
+  const detalle = rows.map((row) => ({
+    Fecha: row.fechaDisplay,
+    Dia: row.dia,
+    Producto: row.producto,
+    "Pronostico venta dia": Number(row.pronosticoVentaDia.toFixed(2)),
+    "Colchon diario": Number(row.colchonDiario.toFixed(2)),
+    "Produccion pronosticada dia": row.produccionPronosticadaDia,
+    "Produccion real dia": row.produccionRealDia ?? "",
+    "Diferencia piezas": row.diferenciaPiezas ?? "",
+    Estatus: STATUS_META[row.estatus]?.label || row.estatus,
+  }));
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen), "Resumen mensual");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detalle), "Pronostico diario");
+  XLSX.writeFile(wb, "produccion_diaria_pronosticada.xlsx");
+}
+
+function UploadBox({ title, description, onFile, fileName, required, accept = ".xlsx,.xls" }) {
   return (
     <div className="upload-card">
       <div className="upload-heading">
@@ -410,7 +736,7 @@ function UploadBox({ title, description, onFile, fileName, required }) {
       <label className="upload-button">
         <FileSpreadsheet size={17} />
         Seleccionar Excel
-        <input type="file" accept=".xlsx,.xls" onChange={(e) => onFile(e.target.files?.[0])} />
+        <input type="file" accept={accept} onChange={(e) => onFile(e.target.files?.[0])} />
       </label>
       {fileName && <span className="file-name">{fileName}</span>}
     </div>
@@ -439,14 +765,28 @@ function App() {
   const [files, setFiles] = useState({});
   const [query, setQuery] = useState("");
   const [weekendBoost, setWeekendBoost] = useState(1.15);
-  const [days, setDays] = useState(7);
-  const [bufferPct, setBufferPct] = useState(0.12);
+  const [days, setDays] = useState(30);
+  const [showMissingReal, setShowMissingReal] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(defaultMonthValue());
+  const [dailyBufferPct, setDailyBufferPct] = useState(12);
+  const [dailyDateFilter, setDailyDateFilter] = useState("");
+  const [dailyProductQuery, setDailyProductQuery] = useState("");
+  const [dailyWeekdayFilter, setDailyWeekdayFilter] = useState("");
+  const [onlyDailyShortage, setOnlyDailyShortage] = useState(false);
+  const [onlyDailyOverproduction, setOnlyDailyOverproduction] = useState(false);
 
   async function handleFile(file, parser, key, setter) {
     if (!file) return;
     const wb = await readWorkbook(file);
     setter(parser(wb));
     setFiles((f) => ({ ...f, [key]: file.name }));
+  }
+
+  async function handleProductionReal(file) {
+    if (!file) return;
+    const parsed = await parseProductionRealFile(file);
+    setRealProduction(parsed);
+    setFiles((f) => ({ ...f, real: file.name }));
   }
 
   const forecast = useMemo(
@@ -459,23 +799,47 @@ function App() {
         realProduction,
         days,
         weekendBoost,
-        bufferPct,
       }),
-    [stockRows, ventas, bajas, existencias, realProduction, days, weekendBoost, bufferPct]
+    [stockRows, ventas, bajas, existencias, realProduction, days, weekendBoost]
   );
 
-  const filtered = forecast.filter((r) => r.producto.includes(norm(query)));
+  const comparableForecast = showMissingReal ? forecast : forecast.filter((r) => r.hasRealData);
+  const filtered = comparableForecast.filter((r) => r.producto.includes(norm(query)));
+
+  const dailyRows = useMemo(
+    () =>
+      calculateDailyForecast({
+        stockRows,
+        ventas,
+        realProduction,
+        selectedMonth,
+        dailyBufferPct,
+      }),
+    [stockRows, ventas, realProduction, selectedMonth, dailyBufferPct]
+  );
+
+  const comparableDailyRows = showMissingReal ? dailyRows : dailyRows.filter((row) => row.hasRealData);
+  const filteredDailyRows = comparableDailyRows.filter((row) => {
+    if (dailyDateFilter && row.fecha !== dailyDateFilter) return false;
+    if (dailyProductQuery && !row.producto.includes(norm(dailyProductQuery))) return false;
+    if (dailyWeekdayFilter !== "" && row.weekday !== Number(dailyWeekdayFilter)) return false;
+    if (onlyDailyShortage && row.estatus !== "Riesgo faltante") return false;
+    if (onlyDailyOverproduction && row.estatus !== "Sobreproduccion") return false;
+    return true;
+  });
+
+  const dailySummary = useMemo(() => summarizeDailyMonth(comparableDailyRows), [comparableDailyRows]);
 
   const summary = useMemo(() => {
-    const totalPronosticada = forecast.reduce((a, r) => a + r.produccionPronosticada, 0);
-    const totalRecomendada = forecast.reduce((a, r) => a + r.produccionRecomendada, 0);
-    const totalReal = forecast.reduce((a, r) => a + r.produccionReal, 0);
-    const totalColchon = forecast.reduce((a, r) => a + r.colchonOperativo, 0);
-    const brechaTotal = totalReal - totalRecomendada;
-    const cumplimientoEjecutivo = totalRecomendada > 0 ? (totalReal / totalRecomendada) * 100 : 0;
-    const confianza = forecast.length ? forecast.reduce((a, r) => a + r.confianza, 0) / forecast.length : 0;
-    const riesgoFaltante = forecast.filter((r) => r.estatus === "Riesgo faltante").length;
-    const sobreproduccion = forecast.filter((r) => r.estatus === "Sobreproduccion").length;
+    const totalPronosticada = comparableForecast.reduce((a, r) => a + r.produccionPronosticada, 0);
+    const totalRecomendada = comparableForecast.reduce((a, r) => a + r.produccionRecomendada, 0);
+    const totalReal = comparableForecast.reduce((a, r) => a + r.produccionReal, 0);
+    const totalColchon = comparableForecast.reduce((a, r) => a + r.colchonOperativo, 0);
+    const brechaTotal = totalReal - totalPronosticada;
+    const precisionEjecutiva = totalReal > 0 ? (1 - Math.abs(totalPronosticada - totalReal) / totalReal) * 100 : 0;
+    const confianza = comparableForecast.length ? comparableForecast.reduce((a, r) => a + r.confianza, 0) / comparableForecast.length : 0;
+    const riesgoFaltante = comparableForecast.filter((r) => r.estatus === "Riesgo faltante").length;
+    const sobreproduccion = comparableForecast.filter((r) => r.estatus === "Sobreproduccion").length;
     const sinDatoReal = forecast.filter((r) => r.estatus === "Sin dato real").length;
     return {
       totalPronosticada,
@@ -483,20 +847,20 @@ function App() {
       totalReal,
       totalColchon,
       brechaTotal,
-      cumplimientoEjecutivo,
+      precisionEjecutiva,
       confianza,
       riesgoFaltante,
       sobreproduccion,
       sinDatoReal,
     };
-  }, [forecast]);
+  }, [comparableForecast, forecast]);
 
-  const topFaltantes = [...forecast]
+  const topFaltantes = [...comparableForecast]
     .filter((r) => r.diferenciaReal < 0)
     .sort((a, b) => a.diferenciaReal - b.diferenciaReal)
     .slice(0, 5);
 
-  const topExcedentes = [...forecast]
+  const topExcedentes = [...comparableForecast]
     .filter((r) => r.diferenciaReal > 0)
     .sort((a, b) => b.diferenciaReal - a.diferenciaReal)
     .slice(0, 5);
@@ -523,7 +887,8 @@ function App() {
 
         <div className="formula">
           <strong>Modelo operativo</strong>
-          <span>Demanda por horizonte + bajas esperadas + colchón operativo.</span>
+          <span>Producción pronosticada = pronóstico de venta + colchón operativo.</span>
+          <span>Colchón: 15 piezas si el pronóstico es 300 o más; 10 piezas si es menor.</span>
           <span>Recomendación = inventario objetivo + pronóstico con colchón - existencias.</span>
         </div>
 
@@ -568,10 +933,10 @@ function App() {
           />
           <KpiCard
             icon={CheckCircle2}
-            label="Cumplimiento"
-            value={formatPercent(summary.cumplimientoEjecutivo, 1)}
+            label="Precisión"
+            value={formatPercent(summary.precisionEjecutiva, 1)}
             caption={`${formatNumber(summary.confianza)}% confianza promedio`}
-            tone={summary.cumplimientoEjecutivo < 90 ? "danger" : summary.cumplimientoEjecutivo > 115 ? "warn" : "ok"}
+            tone={summary.precisionEjecutiva < 80 ? "danger" : summary.precisionEjecutiva < 90 ? "warn" : "ok"}
           />
         </section>
 
@@ -651,8 +1016,9 @@ function App() {
           />
           <UploadBox
             title="Producción real"
-            description="Archivo real producido por producto para comparar."
-            onFile={(file) => handleFile(file, parseProductionReal, "real", setRealProduction)}
+            description="Excel consolidado o ZIP con producción real."
+            accept=".xlsx,.xls,.zip"
+            onFile={handleProductionReal}
             fileName={files.real}
           />
         </section>
@@ -663,18 +1029,8 @@ function App() {
             <input placeholder="Buscar producto..." value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
           <label>
-            Horizonte
+            Horizonte mensual
             <input min="1" type="number" value={days} onChange={(e) => setDays(Math.max(1, Number(e.target.value)))} />
-          </label>
-          <label>
-            Colchón %
-            <input
-              min="0"
-              max="100"
-              type="number"
-              value={Math.round(bufferPct * 100)}
-              onChange={(e) => setBufferPct(Math.max(0, Number(e.target.value)) / 100)}
-            />
           </label>
           <label>
             Factor fin semana
@@ -685,6 +1041,14 @@ function App() {
               value={weekendBoost}
               onChange={(e) => setWeekendBoost(Math.max(1, Number(e.target.value)))}
             />
+          </label>
+          <label className="check-control">
+            <input
+              type="checkbox"
+              checked={showMissingReal}
+              onChange={(e) => setShowMissingReal(e.target.checked)}
+            />
+            Mostrar productos sin dato real
           </label>
         </section>
 
@@ -717,22 +1081,168 @@ function App() {
           </div>
         </section>
 
+        <section className="daily-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Planeación por día</span>
+              <h3>Producción diaria pronosticada</h3>
+              <p>Promedia la venta por día de semana y asigna el pronóstico a cada fecha del mes seleccionado.</p>
+            </div>
+            <button className="primary" onClick={() => exportDailyToExcel(filteredDailyRows, dailySummary)} disabled={!filteredDailyRows.length}>
+              <Download size={18} /> Exportar diario
+            </button>
+          </div>
+
+          <section className="daily-summary">
+            <KpiCard
+              icon={BarChart3}
+              label="Pronóstico venta mensual"
+              value={formatNumber(dailySummary.pronosticoVentaMensual, 0)}
+              caption={selectedMonth}
+            />
+            <KpiCard
+              icon={ShieldCheck}
+              label="Producción pronosticada mensual"
+              value={formatNumber(dailySummary.produccionPronosticadaMensual, 0)}
+              caption={`Colchón diario: ${dailyBufferPct}%`}
+            />
+            <KpiCard
+              icon={Database}
+              label="Producción real mensual"
+              value={formatNumber(dailySummary.produccionRealMensual, 0)}
+              caption={`Diferencia: ${formatNumber(dailySummary.diferenciaMensual, 0)}`}
+              tone={dailySummary.diferenciaMensual < 0 ? "danger" : dailySummary.diferenciaMensual > 0 ? "warn" : "ok"}
+            />
+            <KpiCard
+              icon={CheckCircle2}
+              label="Precisión %"
+              value={formatPercent(dailySummary.precision, 1)}
+              caption="Real vs pronóstico diario agregado"
+              tone={dailySummary.precision < 80 ? "danger" : dailySummary.precision < 90 ? "warn" : "ok"}
+            />
+          </section>
+
+          <section className="controls daily-controls">
+            <label>
+              Mes
+              <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} />
+            </label>
+            <label>
+              Fecha
+              <input type="date" value={dailyDateFilter} onChange={(e) => setDailyDateFilter(e.target.value)} />
+            </label>
+            <div className="search">
+              <Search size={18} />
+              <input
+                placeholder="Producto diario..."
+                value={dailyProductQuery}
+                onChange={(e) => setDailyProductQuery(e.target.value)}
+              />
+            </div>
+            <label>
+              Día de semana
+              <select value={dailyWeekdayFilter} onChange={(e) => setDailyWeekdayFilter(e.target.value)}>
+                <option value="">Todos</option>
+                {WEEKDAYS.map((day) => (
+                  <option value={day.index} key={day.index}>
+                    {day.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Colchón %
+              <input
+                min="0"
+                type="number"
+                value={dailyBufferPct}
+                onChange={(e) => setDailyBufferPct(Math.max(0, Number(e.target.value)))}
+              />
+            </label>
+            <label className="check-control">
+              <input
+                type="checkbox"
+                checked={onlyDailyShortage}
+                onChange={(e) => setOnlyDailyShortage(e.target.checked)}
+              />
+              Ver solo productos con faltante
+            </label>
+            <label className="check-control">
+              <input
+                type="checkbox"
+                checked={onlyDailyOverproduction}
+                onChange={(e) => setOnlyDailyOverproduction(e.target.checked)}
+              />
+              Ver solo productos con sobreproducción
+            </label>
+          </section>
+
+          <section className="table-card daily-table-card">
+            <table className="daily-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Día</th>
+                  <th>Producto</th>
+                  <th>Pronóstico venta día</th>
+                  <th>Colchón diario</th>
+                  <th>Producción pronosticada día</th>
+                  <th>Producción real día</th>
+                  <th>Diferencia piezas</th>
+                  <th>Estatus</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDailyRows.map((row) => {
+                  const meta = STATUS_META[row.estatus] || STATUS_META.Revisar;
+                  return (
+                    <tr key={`${row.fecha}-${row.producto}`}>
+                      <td>{row.fechaDisplay}</td>
+                      <td>{row.dia}</td>
+                      <td>{row.producto}</td>
+                      <td>{row.pronosticoVentaDia.toFixed(2)}</td>
+                      <td>{row.colchonDiario.toFixed(2)}</td>
+                      <td className="strong">{row.produccionPronosticadaDia}</td>
+                      <td>{row.produccionRealDia ?? "-"}</td>
+                      <td className={row.diferenciaPiezas < 0 ? "negative" : row.diferenciaPiezas > 0 ? "positive" : ""}>
+                        {row.diferenciaPiezas === null ? "-" : `${row.diferenciaPiezas > 0 ? "+" : ""}${formatNumber(row.diferenciaPiezas)}`}
+                      </td>
+                      <td>
+                        <span className={`pill ${meta.className}`}>{meta.label}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {!dailyRows.length && (
+              <div className="empty">
+                Carga <strong>stock fijo</strong> y <strong>ventas</strong> para calcular producción diaria.
+              </div>
+            )}
+            {dailyRows.length > 0 && !filteredDailyRows.length && (
+              <div className="empty">
+                No hay filas diarias con los filtros actuales.
+              </div>
+            )}
+          </section>
+        </section>
+
         <section className="table-card">
           <table>
             <thead>
               <tr>
                 <th>Producto</th>
                 <th>Prom. reciente</th>
-                <th>Demanda pron.</th>
-                <th>Bajas esp.</th>
+                <th>Pronóstico venta</th>
                 <th>Colchón</th>
-                <th>Pron. con colchón</th>
+                <th>Producción pron.</th>
                 <th>Stock objetivo</th>
                 <th>Existencias</th>
                 <th>Prod. recomendada</th>
                 <th>Prod. real</th>
                 <th>Brecha</th>
-                <th>Cumpl.</th>
+                <th>Precisión</th>
                 <th>Estatus</th>
               </tr>
             </thead>
@@ -743,8 +1253,7 @@ function App() {
                   <tr key={r.producto}>
                     <td>{r.producto}</td>
                     <td>{r.promedioReciente.toFixed(2)}</td>
-                    <td>{r.demandaPronosticada.toFixed(1)}</td>
-                    <td>{r.bajasEsperadas.toFixed(1)}</td>
+                    <td>{r.pronosticoVenta.toFixed(1)}</td>
                     <td>{r.colchonOperativo}</td>
                     <td>{r.produccionPronosticada}</td>
                     <td>{r.inventarioObjetivo}</td>
@@ -755,7 +1264,7 @@ function App() {
                       {r.diferenciaReal > 0 ? "+" : ""}
                       {formatNumber(r.diferenciaReal)}
                     </td>
-                    <td>{r.cumplimiento === null ? "-" : formatPercent(r.cumplimiento, 0)}</td>
+                    <td>{r.precision === null ? "-" : formatPercent(r.precision, 0)}</td>
                     <td>
                       <span className={`pill ${meta.className}`}>{meta.label}</span>
                     </td>
@@ -767,6 +1276,11 @@ function App() {
           {!forecast.length && (
             <div className="empty">
               Carga <strong>stock fijo</strong> y <strong>ventas</strong> para generar el dashboard de producción.
+            </div>
+          )}
+          {forecast.length > 0 && !filtered.length && (
+            <div className="empty">
+              No hay productos comparables con producción real. Activa <strong>mostrar productos sin dato real</strong> para revisar todo el catálogo.
             </div>
           )}
         </section>

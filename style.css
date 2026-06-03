@@ -10,7 +10,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -56,6 +57,8 @@ button:disabled {
 .brand p,
 .top h2,
 .top p,
+.section-heading h3,
+.section-heading p,
 .panel h3,
 .panel p,
 .upload-card h3,
@@ -418,7 +421,8 @@ label input,
 }
 
 .search input,
-label input {
+label input,
+label select {
   border: 0;
   color: #162033;
   outline: none;
@@ -438,6 +442,70 @@ label input {
   min-height: 42px;
   min-width: 118px;
   padding: 0 11px;
+}
+
+label select {
+  background: #ffffff;
+  border: 1px solid #d8e0e8;
+  min-height: 42px;
+  min-width: 150px;
+  padding: 0 11px;
+}
+
+.check-control {
+  align-items: center;
+  border: 1px solid #d8e0e8;
+  color: #162033;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.check-control input {
+  accent-color: #2f7d7e;
+  min-height: 16px;
+  min-width: 16px;
+  width: 16px;
+}
+
+.daily-section {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.section-heading {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #dde4eb;
+  border-radius: 8px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 16px;
+}
+
+.section-heading h3 {
+  font-size: 20px;
+}
+
+.section-heading p {
+  color: #657386;
+  font-size: 13px;
+  margin-top: 5px;
+}
+
+.daily-summary {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.daily-controls {
+  align-items: end;
+  flex-wrap: wrap;
 }
 
 .priority-grid {
@@ -466,14 +534,25 @@ label input {
 }
 
 .table-card {
-  overflow: auto;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 table {
   border-collapse: collapse;
   font-size: 13px;
-  min-width: 1240px;
+  min-width: 1360px;
   width: 100%;
+}
+
+.daily-table-card {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.daily-table {
+  min-width: 1260px;
 }
 
 th {
@@ -551,6 +630,10 @@ tr:nth-child(even) td {
   .uploads {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+
+  .daily-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 880px) {
@@ -570,8 +653,14 @@ tr:nth-child(even) td {
 
   .executive-grid,
   .priority-grid,
-  .uploads {
+  .uploads,
+  .daily-summary {
     grid-template-columns: 1fr;
+  }
+
+  .section-heading {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .bar-row {
