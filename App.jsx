@@ -110,6 +110,16 @@ const WEEKDAY_AVERAGE_FIELDS = {
   0: "promedioDomingo",
 };
 
+const WEEKDAY_ALIASES = [
+  { names: ["LUNES", "LUN"], index: 1 },
+  { names: ["MARTES", "MAR"], index: 2 },
+  { names: ["MIERCOLES", "MIE"], index: 3 },
+  { names: ["JUEVES", "JUE"], index: 4 },
+  { names: ["VIERNES", "VIE"], index: 5 },
+  { names: ["SABADO", "SAB"], index: 6 },
+  { names: ["DOMINGO", "DOM"], index: 0 },
+];
+
 function norm(value) {
   return String(value ?? "")
     .trim()
@@ -124,6 +134,70 @@ const WEEKDAY_BY_NORM = new Map(
     [norm(day.label).slice(0, 3), day.index],
   ])
 );
+
+function weekdayIndexFromText(value) {
+  const normalized = norm(value);
+  if (!normalized) return null;
+  if (WEEKDAY_BY_NORM.has(normalized)) return WEEKDAY_BY_NORM.get(normalized);
+  for (const alias of WEEKDAY_ALIASES) {
+    if (
+      alias.names.some(
+        (name) =>
+          normalized === name ||
+          normalized.startsWith(`${name} `) ||
+          normalized.startsWith(`${name}-`) ||
+          normalized.startsWith(`${name}/`) ||
+          (name.length > 3 && normalized.startsWith(name)) ||
+          normalized.includes(` ${name} `)
+      )
+    ) {
+      return alias.index;
+    }
+  }
+  return null;
+}
+
+function getWeekdayAverage(row, weekday) {
+  switch (norm(weekday)) {
+    case "LUNES":
+      return Number(row.promedioLunes || 0);
+    case "MARTES":
+      return Number(row.promedioMartes || 0);
+    case "MIERCOLES":
+      return Number(row.promedioMiercoles || 0);
+    case "JUEVES":
+      return Number(row.promedioJueves || 0);
+    case "VIERNES":
+      return Number(row.promedioViernes || 0);
+    case "SABADO":
+      return Number(row.promedioSabado || 0);
+    case "DOMINGO":
+      return Number(row.promedioDomingo || 0);
+    default:
+      return 0;
+  }
+}
+
+function getWeekdayAverageField(weekday) {
+  switch (norm(weekday)) {
+    case "LUNES":
+      return "promedioLunes";
+    case "MARTES":
+      return "promedioMartes";
+    case "MIERCOLES":
+      return "promedioMiercoles";
+    case "JUEVES":
+      return "promedioJueves";
+    case "VIERNES":
+      return "promedioViernes";
+    case "SABADO":
+      return "promedioSabado";
+    case "DOMINGO":
+      return "promedioDomingo";
+    default:
+      return "";
+  }
+}
 
 function isDateLikeValue(value) {
   if (value instanceof Date) return true;
@@ -266,8 +340,10 @@ function detectDominantMonth(records) {
 }
 
 function recordWeekday(record) {
-  const normalized = norm(record.weekday);
-  if (WEEKDAY_BY_NORM.has(normalized)) return WEEKDAY_BY_NORM.get(normalized);
+  const weekdayFromHeader = weekdayIndexFromText(record.weekday);
+  if (weekdayFromHeader !== null) return weekdayFromHeader;
+  const parsedHeaderDate = parseDateCell(record.weekday);
+  if (parsedHeaderDate) return parsedHeaderDate.getDay();
   const parsedDate = parseDateCell(record.fecha);
   if (parsedDate) return parsedDate.getDay();
   return null;
@@ -402,21 +478,48 @@ function parseMonthlyDailySheets(workbook, type = "ventas") {
 function parseWideSales(workbook, type = "ventas") {
   const rows = rowsFromFirstSheet(workbook);
   if (rows.length < 4) return [];
-  const weekdays = rows[0].map(norm);
+
+  let weekdayHeaderIndex = 0;
+  let bestWeekdayScore = -1;
+  let dateHeaderIndex = -1;
+  let bestDateScore = 0;
+  const topRows = Math.min(rows.length, 4);
+  for (let i = 0; i < topRows; i++) {
+    let weekdayScore = 0;
+    let dateScore = 0;
+    for (let c = 1; c < rows[i].length; c++) {
+      if (weekdayIndexFromText(rows[i][c]) !== null) weekdayScore += 1;
+      if (parseDateCell(rows[i][c])) dateScore += 1;
+    }
+    if (weekdayScore > bestWeekdayScore) {
+      bestWeekdayScore = weekdayScore;
+      weekdayHeaderIndex = i;
+    }
+    if (dateScore > bestDateScore) {
+      bestDateScore = dateScore;
+      dateHeaderIndex = i;
+    }
+  }
+
+  const weekdayHeaders = rows[weekdayHeaderIndex] || [];
+  const dateHeaders = dateHeaderIndex >= 0 ? rows[dateHeaderIndex] || [] : [];
   const parsed = [];
-  for (let r = 3; r < rows.length; r++) {
+  const startRow = Math.max(3, weekdayHeaderIndex + 1, dateHeaderIndex + 1);
+  for (let r = startRow; r < rows.length; r++) {
     if (!isValidProduct(rows[r][0], rows[r])) continue;
     const product = norm(rows[r][0]);
     for (let c = 1; c < rows[r].length; c++) {
-      if (!weekdays[c]) continue;
+      const weekdayHeader = weekdayHeaders[c];
+      const parsedHeaderDate = parseDateCell(dateHeaders[c]) || parseDateCell(weekdayHeader);
+      if (weekdayIndexFromText(weekdayHeader) === null && !parsedHeaderDate) continue;
       const cantidad = toNumber(rows[r][c]);
       if (cantidad === 0) continue;
       parsed.push({
-        fecha: new Date(2026, 0, c),
+        fecha: parsedHeaderDate || new Date(2026, 0, c),
         producto: product,
         cantidad,
         importe: 0,
-        weekday: weekdays[c],
+        weekday: weekdayHeader,
         tipo: type,
       });
     }
@@ -584,13 +687,13 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
       promedioReciente,
       promedioHistorico,
       promedioDiario,
-      promedioLunes: productWeekdayAverages.get(1) || 0,
-      promedioMartes: productWeekdayAverages.get(2) || 0,
-      promedioMiercoles: productWeekdayAverages.get(3) || 0,
-      promedioJueves: productWeekdayAverages.get(4) || 0,
-      promedioViernes: productWeekdayAverages.get(5) || 0,
-      promedioSabado: productWeekdayAverages.get(6) || 0,
-      promedioDomingo: productWeekdayAverages.get(0) || 0,
+      promedioLunes: Number(productWeekdayAverages.get(1) || 0),
+      promedioMartes: Number(productWeekdayAverages.get(2) || 0),
+      promedioMiercoles: Number(productWeekdayAverages.get(3) || 0),
+      promedioJueves: Number(productWeekdayAverages.get(4) || 0),
+      promedioViernes: Number(productWeekdayAverages.get(5) || 0),
+      promedioSabado: Number(productWeekdayAverages.get(6) || 0),
+      promedioDomingo: Number(productWeekdayAverages.get(0) || 0),
       demandaPronosticada: pronosticoVenta,
       pronosticoVenta,
       tasaBajas,
@@ -647,8 +750,9 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
     return monthDates.map((date) => {
       const key = dateKey(date);
       const weekday = date.getDay();
-      const averageField = WEEKDAY_AVERAGE_FIELDS[weekday];
-      const pronosticoVentaDia = toNumber(productRow[averageField]);
+      const dayName = weekdayLabel(weekday);
+      const averageField = getWeekdayAverageField(dayName);
+      const pronosticoVentaDia = getWeekdayAverage(productRow, dayName);
       const colchonDiario = pronosticoVentaDia * (dailyBufferPct / 100);
       const produccionPronosticadaDia = Math.ceil(pronosticoVentaDia + colchonDiario);
       const realKey = `${product}|${key}`;
@@ -884,6 +988,11 @@ function App() {
   });
 
   const dailySummary = useMemo(() => summarizeDailyMonth(dailyRows), [dailyRows]);
+
+  useEffect(() => {
+    console.log("forecast sample", forecast[0]);
+    console.log("daily sample", dailyRows[0]);
+  }, [forecast, dailyRows]);
 
   const summary = useMemo(() => {
     const totalPronosticada = comparableForecast.reduce((a, r) => a + r.produccionPronosticada, 0);
