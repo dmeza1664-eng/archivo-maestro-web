@@ -271,8 +271,43 @@ function parseDateCell(value) {
   }
   const raw = String(value ?? "").trim();
   if (!raw) return null;
+  if (/^\d{1,2}$/.test(raw)) return null;
   const parsed = new Date(raw);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parseDayNumber(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.getDate();
+  const raw = String(value ?? "").trim();
+  if (!/^\d{1,2}$/.test(raw)) return null;
+  const day = Number(raw);
+  return day >= 1 && day <= 31 ? day : null;
+}
+
+function inferMonthYearFromWideHeaders(weekdayHeaders = [], dateHeaders = []) {
+  const anchors = [];
+  for (let c = 1; c < Math.max(weekdayHeaders.length, dateHeaders.length); c++) {
+    const weekday = weekdayIndexFromText(weekdayHeaders[c]);
+    const day = parseDayNumber(dateHeaders[c]);
+    if (weekday !== null && day !== null) anchors.push({ weekday, day });
+  }
+  if (!anchors.length) return null;
+
+  const currentYear = new Date().getFullYear();
+  const candidateYears = [...new Set([currentYear - 1, currentYear, currentYear + 1, 2025, 2026, 2027])];
+  let best = null;
+  for (const year of candidateYears) {
+    for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
+      const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+      let score = 0;
+      for (const anchor of anchors) {
+        if (anchor.day > daysInMonth) continue;
+        if (new Date(year, monthIndex, anchor.day).getDay() === anchor.weekday) score += 1;
+      }
+      if (!best || score > best.score) best = { year, monthIndex, score };
+    }
+  }
+  return best && best.score > 0 ? best : null;
 }
 
 function dateKey(date) {
@@ -489,7 +524,7 @@ function parseWideSales(workbook, type = "ventas") {
     let dateScore = 0;
     for (let c = 1; c < rows[i].length; c++) {
       if (weekdayIndexFromText(rows[i][c]) !== null) weekdayScore += 1;
-      if (parseDateCell(rows[i][c])) dateScore += 1;
+      if (parseDateCell(rows[i][c]) || parseDayNumber(rows[i][c]) !== null) dateScore += 1;
     }
     if (weekdayScore > bestWeekdayScore) {
       bestWeekdayScore = weekdayScore;
@@ -503,19 +538,25 @@ function parseWideSales(workbook, type = "ventas") {
 
   const weekdayHeaders = rows[weekdayHeaderIndex] || [];
   const dateHeaders = dateHeaderIndex >= 0 ? rows[dateHeaderIndex] || [] : [];
+  const inferredMonth = inferMonthYearFromWideHeaders(weekdayHeaders, dateHeaders);
   const parsed = [];
-  const startRow = Math.max(3, weekdayHeaderIndex + 1, dateHeaderIndex + 1);
+  const startRow = Math.max(weekdayHeaderIndex, dateHeaderIndex) + 1;
   for (let r = startRow; r < rows.length; r++) {
     if (!isValidProduct(rows[r][0], rows[r])) continue;
     const product = norm(rows[r][0]);
     for (let c = 1; c < rows[r].length; c++) {
       const weekdayHeader = weekdayHeaders[c];
-      const parsedHeaderDate = parseDateCell(dateHeaders[c]) || parseDateCell(weekdayHeader);
-      if (weekdayIndexFromText(weekdayHeader) === null && !parsedHeaderDate) continue;
+      const weekday = weekdayIndexFromText(weekdayHeader);
+      if (weekday === null) continue;
+      const parsedHeaderDate = parseDateCell(dateHeaders[c]);
+      const dayNumber = parseDayNumber(dateHeaders[c]);
+      const fecha =
+        parsedHeaderDate ||
+        (inferredMonth && dayNumber ? new Date(inferredMonth.year, inferredMonth.monthIndex, dayNumber) : new Date(2026, 0, c));
       const cantidad = toNumber(rows[r][c]);
       if (cantidad === 0) continue;
       parsed.push({
-        fecha: parsedHeaderDate || new Date(2026, 0, c),
+        fecha,
         producto: product,
         cantidad,
         importe: 0,
@@ -528,9 +569,11 @@ function parseWideSales(workbook, type = "ventas") {
 }
 
 function parseSalesOrReturns(workbook, type) {
+  const wide = parseWideSales(workbook, type);
+  if (wide.length > 0) return wide;
   const bySheets = parseMonthlyDailySheets(workbook, type);
   if (bySheets.length > 0) return bySheets;
-  return parseWideSales(workbook, type);
+  return [];
 }
 
 function parseProductionReal(workbook) {
@@ -632,7 +675,6 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
   const bajasByProduct = groupByProduct(bajas);
   const existMap = new Map(existencias.map((e) => [e.producto, e]));
   const realMap = new Map(aggregateProductionRows(realProduction).map((e) => [e.producto, e.cantidad]));
-  const weekdayAverages = calculateWeekdayAverages(ventas);
   const horizonFactor = horizonWeekendFactor(days, weekendBoost);
 
   return stockRows.map((s) => {
@@ -640,7 +682,7 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
     const b = bajasByProduct.get(s.producto) || [];
 
     const values = v.map((x) => x.cantidad);
-    const productWeekdayAverages = weekdayAverages.get(s.producto) || new Map();
+    const productWeekdayAverages = calculateProductWeekdayAverages(v);
     const recentValues = values.slice(-28);
     const promedioReciente = recentValues.length ? recentValues.reduce((a, n) => a + n, 0) / recentValues.length : 0;
     const promedioHistorico = values.length ? values.reduce((a, n) => a + n, 0) / values.length : 0;
@@ -715,27 +757,20 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
   });
 }
 
-function calculateWeekdayAverages(ventas) {
+function calculateProductWeekdayAverages(records) {
   const buckets = new Map();
-  for (const record of ventas) {
-    if (!isValidProduct(record.producto)) continue;
+  for (const record of records) {
     const weekday = recordWeekday(record);
     if (weekday === null) continue;
-    const productBuckets = buckets.get(record.producto) || new Map();
-    const bucket = productBuckets.get(weekday) || { total: 0, count: 0 };
+    const bucket = buckets.get(weekday) || { total: 0, count: 0 };
     bucket.total += toNumber(record.cantidad);
     bucket.count += 1;
-    productBuckets.set(weekday, bucket);
-    buckets.set(record.producto, productBuckets);
+    buckets.set(weekday, bucket);
   }
 
   const averages = new Map();
-  for (const [producto, productBuckets] of buckets.entries()) {
-    const productAverages = new Map();
-    for (const [weekday, bucket] of productBuckets.entries()) {
-      productAverages.set(weekday, bucket.count ? bucket.total / bucket.count : 0);
-    }
-    averages.set(producto, productAverages);
+  for (const [weekday, bucket] of buckets.entries()) {
+    averages.set(weekday, bucket.count ? bucket.total / bucket.count : 0);
   }
   return averages;
 }
@@ -990,9 +1025,10 @@ function App() {
   const dailySummary = useMemo(() => summarizeDailyMonth(dailyRows), [dailyRows]);
 
   useEffect(() => {
+    console.log("ventas sample", ventas.slice(0, 10));
     console.log("forecast sample", forecast[0]);
     console.log("daily sample", dailyRows[0]);
-  }, [forecast, dailyRows]);
+  }, [ventas, forecast, dailyRows]);
 
   const summary = useMemo(() => {
     const totalPronosticada = comparableForecast.reduce((a, r) => a + r.produccionPronosticada, 0);
