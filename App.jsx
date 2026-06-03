@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
@@ -234,6 +234,25 @@ function datesForMonth(monthValue) {
     cursor.setDate(cursor.getDate() + 1);
   }
   return dates;
+}
+
+function detectDominantMonth(records) {
+  const counts = new Map();
+  for (const record of records) {
+    const key = dateKey(record.fecha);
+    if (!key) continue;
+    const monthKey = key.slice(0, 7);
+    counts.set(monthKey, (counts.get(monthKey) || 0) + 1);
+  }
+  let bestMonth = "";
+  let bestCount = 0;
+  for (const [monthKey, count] of counts.entries()) {
+    if (count > bestCount) {
+      bestMonth = monthKey;
+      bestCount = count;
+    }
+  }
+  return bestMonth;
 }
 
 function recordWeekday(record) {
@@ -598,12 +617,13 @@ function calculateWeekdayAverages(ventas) {
   return averages;
 }
 
-function calculateDailyForecast({ stockRows, ventas, realProduction, selectedMonth, dailyBufferPct }) {
+function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedMonth, dailyBufferPct }) {
   const averages = calculateWeekdayAverages(ventas);
   const realDailyMap = aggregateDailyProductionRows(realProduction);
   const monthDates = datesForMonth(selectedMonth);
+  const productRows = monthlyRows.filter((row) => isValidProduct(row.producto));
 
-  return stockRows.flatMap((productRow) => {
+  return productRows.flatMap((productRow) => {
     const product = productRow.producto;
     const productAverages = averages.get(product) || new Map();
     return monthDates.map((date) => {
@@ -641,11 +661,9 @@ function calculateDailyForecast({ stockRows, ventas, realProduction, selectedMon
 }
 
 function summarizeDailyMonth(rows) {
-  const comparable = rows.filter((row) => row.hasRealData);
-  const source = comparable.length ? comparable : rows;
-  const pronosticoVentaMensual = source.reduce((sum, row) => sum + row.pronosticoVentaDia, 0);
-  const produccionPronosticadaMensual = source.reduce((sum, row) => sum + row.produccionPronosticadaDia, 0);
-  const produccionRealMensual = source.reduce((sum, row) => sum + (row.produccionRealDia || 0), 0);
+  const pronosticoVentaMensual = rows.reduce((sum, row) => sum + row.pronosticoVentaDia, 0);
+  const produccionPronosticadaMensual = rows.reduce((sum, row) => sum + row.produccionPronosticadaDia, 0);
+  const produccionRealMensual = rows.reduce((sum, row) => sum + (row.produccionRealDia || 0), 0);
   const diferenciaMensual = produccionRealMensual - produccionPronosticadaMensual;
   const precision =
     produccionRealMensual > 0
@@ -768,6 +786,7 @@ function App() {
   const [days, setDays] = useState(30);
   const [showMissingReal, setShowMissingReal] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(defaultMonthValue());
+  const [selectedMonthTouched, setSelectedMonthTouched] = useState(false);
   const [dailyBufferPct, setDailyBufferPct] = useState(12);
   const [dailyDateFilter, setDailyDateFilter] = useState("");
   const [dailyProductQuery, setDailyProductQuery] = useState("");
@@ -789,6 +808,12 @@ function App() {
     setFiles((f) => ({ ...f, real: file.name }));
   }
 
+  useEffect(() => {
+    if (selectedMonthTouched || !ventas.length) return;
+    const detectedMonth = detectDominantMonth(ventas);
+    if (detectedMonth) setSelectedMonth(detectedMonth);
+  }, [ventas, selectedMonthTouched]);
+
   const forecast = useMemo(
     () =>
       calculateForecast({
@@ -809,17 +834,16 @@ function App() {
   const dailyRows = useMemo(
     () =>
       calculateDailyForecast({
-        stockRows,
+        monthlyRows: forecast,
         ventas,
         realProduction,
         selectedMonth,
         dailyBufferPct,
       }),
-    [stockRows, ventas, realProduction, selectedMonth, dailyBufferPct]
+    [forecast, ventas, realProduction, selectedMonth, dailyBufferPct]
   );
 
-  const comparableDailyRows = showMissingReal ? dailyRows : dailyRows.filter((row) => row.hasRealData);
-  const filteredDailyRows = comparableDailyRows.filter((row) => {
+  const filteredDailyRows = dailyRows.filter((row) => {
     if (dailyDateFilter && row.fecha !== dailyDateFilter) return false;
     if (dailyProductQuery && !row.producto.includes(norm(dailyProductQuery))) return false;
     if (dailyWeekdayFilter !== "" && row.weekday !== Number(dailyWeekdayFilter)) return false;
@@ -828,7 +852,7 @@ function App() {
     return true;
   });
 
-  const dailySummary = useMemo(() => summarizeDailyMonth(comparableDailyRows), [comparableDailyRows]);
+  const dailySummary = useMemo(() => summarizeDailyMonth(dailyRows), [dailyRows]);
 
   const summary = useMemo(() => {
     const totalPronosticada = comparableForecast.reduce((a, r) => a + r.produccionPronosticada, 0);
@@ -1087,6 +1111,7 @@ function App() {
               <span className="eyebrow">Planeación por día</span>
               <h3>Producción diaria pronosticada</h3>
               <p>Promedia la venta por día de semana y asigna el pronóstico a cada fecha del mes seleccionado.</p>
+              <strong className="row-counter">{formatNumber(dailyRows.length)} filas diarias generadas</strong>
             </div>
             <button className="primary" onClick={() => exportDailyToExcel(filteredDailyRows, dailySummary)} disabled={!filteredDailyRows.length}>
               <Download size={18} /> Exportar diario
@@ -1125,7 +1150,14 @@ function App() {
           <section className="controls daily-controls">
             <label>
               Mes
-              <input type="month" value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} />
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => {
+                  setSelectedMonthTouched(true);
+                  setSelectedMonth(e.target.value);
+                }}
+              />
             </label>
             <label>
               Fecha

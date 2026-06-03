@@ -497,6 +497,13 @@ label select {
   margin-top: 5px;
 }
 
+.row-counter {
+  color: #183447;
+  display: block;
+  font-size: 13px;
+  margin-top: 8px;
+}
+
 .daily-summary {
   display: grid;
   gap: 12px;
