@@ -100,6 +100,16 @@ const WEEKDAYS = [
   { index: 0, label: "Domingo" },
 ];
 
+const WEEKDAY_AVERAGE_FIELDS = {
+  1: "promedioLunes",
+  2: "promedioMartes",
+  3: "promedioMiercoles",
+  4: "promedioJueves",
+  5: "promedioViernes",
+  6: "promedioSabado",
+  0: "promedioDomingo",
+};
+
 function norm(value) {
   return String(value ?? "")
     .trim()
@@ -256,10 +266,11 @@ function detectDominantMonth(records) {
 }
 
 function recordWeekday(record) {
+  const normalized = norm(record.weekday);
+  if (WEEKDAY_BY_NORM.has(normalized)) return WEEKDAY_BY_NORM.get(normalized);
   const parsedDate = parseDateCell(record.fecha);
   if (parsedDate) return parsedDate.getDay();
-  const normalized = norm(record.weekday);
-  return WEEKDAY_BY_NORM.has(normalized) ? WEEKDAY_BY_NORM.get(normalized) : null;
+  return null;
 }
 
 function horizonWeekendFactor(days, weekendBoost) {
@@ -518,6 +529,7 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
   const bajasByProduct = groupByProduct(bajas);
   const existMap = new Map(existencias.map((e) => [e.producto, e]));
   const realMap = new Map(aggregateProductionRows(realProduction).map((e) => [e.producto, e.cantidad]));
+  const weekdayAverages = calculateWeekdayAverages(ventas);
   const horizonFactor = horizonWeekendFactor(days, weekendBoost);
 
   return stockRows.map((s) => {
@@ -525,6 +537,7 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
     const b = bajasByProduct.get(s.producto) || [];
 
     const values = v.map((x) => x.cantidad);
+    const productWeekdayAverages = weekdayAverages.get(s.producto) || new Map();
     const recentValues = values.slice(-28);
     const promedioReciente = recentValues.length ? recentValues.reduce((a, n) => a + n, 0) / recentValues.length : 0;
     const promedioHistorico = values.length ? values.reduce((a, n) => a + n, 0) / values.length : 0;
@@ -571,6 +584,13 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
       promedioReciente,
       promedioHistorico,
       promedioDiario,
+      promedioLunes: productWeekdayAverages.get(1) || 0,
+      promedioMartes: productWeekdayAverages.get(2) || 0,
+      promedioMiercoles: productWeekdayAverages.get(3) || 0,
+      promedioJueves: productWeekdayAverages.get(4) || 0,
+      promedioViernes: productWeekdayAverages.get(5) || 0,
+      promedioSabado: productWeekdayAverages.get(6) || 0,
+      promedioDomingo: productWeekdayAverages.get(0) || 0,
       demandaPronosticada: pronosticoVenta,
       pronosticoVenta,
       tasaBajas,
@@ -618,24 +638,30 @@ function calculateWeekdayAverages(ventas) {
 }
 
 function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedMonth, dailyBufferPct }) {
-  const averages = calculateWeekdayAverages(ventas);
   const realDailyMap = aggregateDailyProductionRows(realProduction);
   const monthDates = datesForMonth(selectedMonth);
   const productRows = monthlyRows.filter((row) => isValidProduct(row.producto));
 
   return productRows.flatMap((productRow) => {
     const product = productRow.producto;
-    const productAverages = averages.get(product) || new Map();
     return monthDates.map((date) => {
       const key = dateKey(date);
       const weekday = date.getDay();
-      const pronosticoVentaDia = productAverages.get(weekday) || 0;
-      const produccionPronosticadaDia = Math.ceil(pronosticoVentaDia * (1 + dailyBufferPct / 100));
-      const colchonDiario = Math.max(0, produccionPronosticadaDia - pronosticoVentaDia);
+      const averageField = WEEKDAY_AVERAGE_FIELDS[weekday];
+      const pronosticoVentaDia = toNumber(productRow[averageField]);
+      const colchonDiario = pronosticoVentaDia * (dailyBufferPct / 100);
+      const produccionPronosticadaDia = Math.ceil(pronosticoVentaDia + colchonDiario);
       const realKey = `${product}|${key}`;
       const hasRealData = realDailyMap.has(realKey);
       const produccionRealDia = hasRealData ? realDailyMap.get(realKey) : null;
       const diferenciaPiezas = hasRealData ? produccionRealDia - produccionPronosticadaDia : null;
+      const hasAnyWeekdayAverage = Object.values(WEEKDAY_AVERAGE_FIELDS).some((field) => toNumber(productRow[field]) > 0);
+      const debugPromedio =
+        pronosticoVentaDia > 0
+          ? `Usa ${averageField}`
+          : hasAnyWeekdayAverage
+            ? `Sin promedio para ${weekdayLabel(weekday)}`
+            : "Producto sin promedios por día";
 
       let estatus = "Sin dato real";
       if (hasRealData && diferenciaPiezas < 0) estatus = "Riesgo faltante";
@@ -648,6 +674,9 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
         weekday,
         dia: weekdayLabel(weekday),
         producto: product,
+        promedioUsado: pronosticoVentaDia,
+        campoPromedio: averageField,
+        debugPromedio,
         pronosticoVentaDia,
         colchonDiario,
         produccionPronosticadaDia,
@@ -726,6 +755,8 @@ function exportDailyToExcel(rows, summary) {
     Fecha: row.fechaDisplay,
     Dia: row.dia,
     Producto: row.producto,
+    "Promedio usado": Number(row.promedioUsado.toFixed(2)),
+    "Debug promedio": row.debugPromedio,
     "Pronostico venta dia": Number(row.pronosticoVentaDia.toFixed(2)),
     "Colchon diario": Number(row.colchonDiario.toFixed(2)),
     "Produccion pronosticada dia": row.produccionPronosticadaDia,
@@ -1216,6 +1247,8 @@ function App() {
                   <th>Fecha</th>
                   <th>Día</th>
                   <th>Producto</th>
+                  <th>Promedio usado</th>
+                  <th>Debug promedio</th>
                   <th>Pronóstico venta día</th>
                   <th>Colchón diario</th>
                   <th>Producción pronosticada día</th>
@@ -1232,6 +1265,8 @@ function App() {
                       <td>{row.fechaDisplay}</td>
                       <td>{row.dia}</td>
                       <td>{row.producto}</td>
+                      <td>{row.promedioUsado.toFixed(2)}</td>
+                      <td>{row.debugPromedio}</td>
                       <td>{row.pronosticoVentaDia.toFixed(2)}</td>
                       <td>{row.colchonDiario.toFixed(2)}</td>
                       <td className="strong">{row.produccionPronosticadaDia}</td>
