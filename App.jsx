@@ -100,16 +100,6 @@ const WEEKDAYS = [
   { index: 0, label: "Domingo" },
 ];
 
-const WEEKDAY_AVERAGE_FIELDS = {
-  1: "promedioLunes",
-  2: "promedioMartes",
-  3: "promedioMiercoles",
-  4: "promedioJueves",
-  5: "promedioViernes",
-  6: "promedioSabado",
-  0: "promedioDomingo",
-};
-
 const WEEKDAY_ALIASES = [
   { names: ["LUNES", "LUN"], index: 1 },
   { names: ["MARTES", "MAR"], index: 2 },
@@ -175,27 +165,6 @@ function getWeekdayAverage(row, weekday) {
       return Number(row.promedioDomingo || 0);
     default:
       return 0;
-  }
-}
-
-function getWeekdayAverageField(weekday) {
-  switch (norm(weekday)) {
-    case "LUNES":
-      return "promedioLunes";
-    case "MARTES":
-      return "promedioMartes";
-    case "MIERCOLES":
-      return "promedioMiercoles";
-    case "JUEVES":
-      return "promedioJueves";
-    case "VIERNES":
-      return "promedioViernes";
-    case "SABADO":
-      return "promedioSabado";
-    case "DOMINGO":
-      return "promedioDomingo";
-    default:
-      return "";
   }
 }
 
@@ -786,7 +755,6 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
       const key = dateKey(date);
       const weekday = date.getDay();
       const dayName = weekdayLabel(weekday);
-      const averageField = getWeekdayAverageField(dayName);
       const pronosticoVentaDia = getWeekdayAverage(productRow, dayName);
       const colchonDiario = pronosticoVentaDia * (dailyBufferPct / 100);
       const produccionPronosticadaDia = Math.ceil(pronosticoVentaDia + colchonDiario);
@@ -794,13 +762,6 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
       const hasRealData = realDailyMap.has(realKey);
       const produccionRealDia = hasRealData ? realDailyMap.get(realKey) : null;
       const diferenciaPiezas = hasRealData ? produccionRealDia - produccionPronosticadaDia : null;
-      const hasAnyWeekdayAverage = Object.values(WEEKDAY_AVERAGE_FIELDS).some((field) => toNumber(productRow[field]) > 0);
-      const debugPromedio =
-        pronosticoVentaDia > 0
-          ? `Usa ${averageField}`
-          : hasAnyWeekdayAverage
-            ? `Sin promedio para ${weekdayLabel(weekday)}`
-            : "Producto sin promedios por día";
 
       let estatus = "Sin dato real";
       if (hasRealData && diferenciaPiezas < 0) estatus = "Riesgo faltante";
@@ -814,8 +775,6 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
         dia: weekdayLabel(weekday),
         producto: product,
         promedioUsado: pronosticoVentaDia,
-        campoPromedio: averageField,
-        debugPromedio,
         pronosticoVentaDia,
         colchonDiario,
         produccionPronosticadaDia,
@@ -894,8 +853,7 @@ function exportDailyToExcel(rows, summary) {
     Fecha: row.fechaDisplay,
     Dia: row.dia,
     Producto: row.producto,
-    "Promedio usado": Number(row.promedioUsado.toFixed(2)),
-    "Debug promedio": row.debugPromedio,
+    "Promedio aplicado": Number(row.promedioUsado.toFixed(2)),
     "Pronostico venta dia": Number(row.pronosticoVentaDia.toFixed(2)),
     "Colchon diario": Number(row.colchonDiario.toFixed(2)),
     "Produccion pronosticada dia": row.produccionPronosticadaDia,
@@ -963,6 +921,7 @@ function App() {
   const [dailyWeekdayFilter, setDailyWeekdayFilter] = useState("");
   const [onlyDailyShortage, setOnlyDailyShortage] = useState(false);
   const [onlyDailyOverproduction, setOnlyDailyOverproduction] = useState(false);
+  const [validationProduct, setValidationProduct] = useState("");
 
   async function handleFile(file, parser, key, setter) {
     if (!file) return;
@@ -1024,11 +983,42 @@ function App() {
 
   const dailySummary = useMemo(() => summarizeDailyMonth(dailyRows), [dailyRows]);
 
+  const validationProducts = useMemo(
+    () => [...forecast].sort((a, b) => a.producto.localeCompare(b.producto, "es")),
+    [forecast]
+  );
+
   useEffect(() => {
-    console.log("ventas sample", ventas.slice(0, 10));
-    console.log("forecast sample", forecast[0]);
-    console.log("daily sample", dailyRows[0]);
-  }, [ventas, forecast, dailyRows]);
+    if (!validationProducts.length) {
+      setValidationProduct("");
+      return;
+    }
+    if (validationProducts.some((row) => row.producto === validationProduct)) return;
+    const example =
+      validationProducts.find((row) => norm(row.producto) === "PINA GDE") ||
+      validationProducts.find((row) => norm(row.producto).includes("PINA GDE")) ||
+      validationProducts[0];
+    setValidationProduct(example.producto);
+  }, [validationProducts, validationProduct]);
+
+  const validationForecast = forecast.find((row) => row.producto === validationProduct) || null;
+  const validationSales = ventas
+    .filter((row) => row.producto === validationProduct)
+    .map((row) => {
+      const weekday = recordWeekday(row);
+      return {
+        ...row,
+        fechaDisplay: displayDate(row.fecha),
+        dia: weekday === null ? norm(row.weekday) || "Sin día" : weekdayLabel(weekday),
+      };
+    });
+  const validationDailyRows = dailyRows.filter((row) => row.producto === validationProduct);
+  const validationSummary = summarizeDailyMonth(validationDailyRows);
+  const validationWeekdayAverages = WEEKDAYS.map((day) => ({
+    ...day,
+    value: validationForecast ? getWeekdayAverage(validationForecast, day.label) : 0,
+    registros: validationSales.filter((sale) => recordWeekday(sale) === day.index).length,
+  }));
 
   const summary = useMemo(() => {
     const totalPronosticada = comparableForecast.reduce((a, r) => a + r.produccionPronosticada, 0);
@@ -1392,13 +1382,12 @@ function App() {
                   <th>Fecha</th>
                   <th>Día</th>
                   <th>Producto</th>
-                  <th>Promedio usado</th>
-                  <th>Debug promedio</th>
-                  <th>Pronóstico venta día</th>
+                  <th>Promedio aplicado</th>
+                  <th>Pronóstico de venta</th>
                   <th>Colchón diario</th>
-                  <th>Producción pronosticada día</th>
-                  <th>Producción real día</th>
-                  <th>Diferencia piezas</th>
+                  <th>Producción pronosticada</th>
+                  <th>Producción real</th>
+                  <th>Diferencia</th>
                   <th>Estatus</th>
                 </tr>
               </thead>
@@ -1411,7 +1400,6 @@ function App() {
                       <td>{row.dia}</td>
                       <td>{row.producto}</td>
                       <td>{row.promedioUsado.toFixed(2)}</td>
-                      <td>{row.debugPromedio}</td>
                       <td>{row.pronosticoVentaDia.toFixed(2)}</td>
                       <td>{row.colchonDiario.toFixed(2)}</td>
                       <td className="strong">{row.produccionPronosticadaDia}</td>
@@ -1440,19 +1428,222 @@ function App() {
           </section>
         </section>
 
+        <section className="validation-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Auditoría paso a paso</span>
+              <h3>Validación de cálculos</h3>
+              <p>Revisa las ventas leídas, los promedios aplicados y el cálculo diario completo de un producto.</p>
+            </div>
+            <label className="validation-product-select">
+              Producto
+              <select value={validationProduct} onChange={(e) => setValidationProduct(e.target.value)}>
+                {!validationProducts.length && <option value="">Carga productos</option>}
+                {validationProducts.map((row) => (
+                  <option value={row.producto} key={row.producto}>
+                    {row.producto}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {validationForecast ? (
+            <>
+              <section className="validation-summary">
+                <KpiCard
+                  icon={FileSpreadsheet}
+                  label="Ventas diarias leídas"
+                  value={formatNumber(validationSales.length)}
+                  caption={`Producto: ${validationProduct}`}
+                />
+                <KpiCard
+                  icon={BarChart3}
+                  label="Pronóstico venta mensual"
+                  value={formatNumber(validationSummary.pronosticoVentaMensual, 2)}
+                  caption={`Suma diaria de ${selectedMonth}`}
+                />
+                <KpiCard
+                  icon={ShieldCheck}
+                  label="Producción pronosticada mensual"
+                  value={formatNumber(validationSummary.produccionPronosticadaMensual)}
+                  caption={`CEIL diario con ${dailyBufferPct}% de colchón`}
+                />
+                <KpiCard
+                  icon={Database}
+                  label="Producción real"
+                  value={formatNumber(validationForecast.produccionReal)}
+                  caption={`Diferencia: ${formatNumber(
+                    validationForecast.produccionReal - validationSummary.produccionPronosticadaMensual
+                  )}`}
+                  tone={
+                    validationForecast.produccionReal < validationSummary.produccionPronosticadaMensual
+                      ? "danger"
+                      : validationForecast.produccionReal > validationSummary.produccionPronosticadaMensual
+                        ? "warn"
+                        : "ok"
+                  }
+                />
+              </section>
+
+              <section className="validation-grid">
+                <div className="panel">
+                  <div className="panel-title">
+                    <div>
+                      <h3>Promedio por día de semana</h3>
+                      <p>Promedio = suma de cantidades del día / registros encontrados.</p>
+                    </div>
+                    <CheckCircle2 size={22} />
+                  </div>
+                  <div className="weekday-average-list">
+                    {validationWeekdayAverages.map((day) => (
+                      <div className="weekday-average-row" key={day.index}>
+                        <span>{day.label}</span>
+                        <small>{day.registros} registros</small>
+                        <strong>{formatNumber(day.value, 2)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="panel">
+                  <div className="panel-title">
+                    <div>
+                      <h3>Comprobación mensual</h3>
+                      <p>La suma utiliza cada fecha del mes seleccionado.</p>
+                    </div>
+                    <Target size={22} />
+                  </div>
+                  <div className="calculation-checks">
+                    <div>
+                      <span>Pronóstico venta</span>
+                      <strong>{formatNumber(validationSummary.pronosticoVentaMensual, 2)}</strong>
+                    </div>
+                    <div>
+                      <span>Producción con colchón</span>
+                      <strong>{formatNumber(validationSummary.produccionPronosticadaMensual)}</strong>
+                    </div>
+                    <div>
+                      <span>Producción real</span>
+                      <strong>{formatNumber(validationForecast.produccionReal)}</strong>
+                    </div>
+                    <div>
+                      <span>Precisión contra real</span>
+                      <strong>
+                        {validationForecast.produccionReal > 0
+                          ? formatPercent(
+                              (1 -
+                                Math.abs(
+                                  validationSummary.produccionPronosticadaMensual - validationForecast.produccionReal
+                                ) /
+                                  validationForecast.produccionReal) *
+                                100,
+                              1
+                            )
+                          : "Sin dato real"}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <div className="validation-block">
+                <div className="validation-block-heading">
+                  <div>
+                    <h4>1. Ventas diarias leídas del Excel</h4>
+                    <p>Estos son los registros usados para calcular los promedios de {validationProduct}.</p>
+                  </div>
+                  <strong>{validationSales.length} registros</strong>
+                </div>
+                <section className="table-card validation-sales-table-card">
+                  <table className="validation-sales-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha leída</th>
+                        <th>Día leído</th>
+                        <th>Producto</th>
+                        <th>Cantidad</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {validationSales.map((row, index) => (
+                        <tr key={`${row.producto}-${row.fechaDisplay}-${index}`}>
+                          <td>{row.fechaDisplay || "-"}</td>
+                          <td>{row.dia}</td>
+                          <td>{row.producto}</td>
+                          <td className="strong">{formatNumber(row.cantidad, 2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!validationSales.length && <div className="empty">No se encontraron ventas leídas para este producto.</div>}
+                </section>
+              </div>
+
+              <div className="validation-block">
+                <div className="validation-block-heading">
+                  <div>
+                    <h4>2. Pronóstico diario y producción con colchón</h4>
+                    <p>Cada fila muestra el promedio aplicado y el resultado de la fórmula diaria.</p>
+                  </div>
+                  <strong>{validationDailyRows.length} días</strong>
+                </div>
+                <section className="table-card validation-daily-table-card">
+                  <table className="validation-daily-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Día</th>
+                        <th>Promedio aplicado</th>
+                        <th>Pronóstico diario</th>
+                        <th>Colchón {dailyBufferPct}%</th>
+                        <th>Fórmula</th>
+                        <th>Producción pronosticada</th>
+                        <th>Producción real diaria</th>
+                        <th>Diferencia</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {validationDailyRows.map((row) => (
+                        <tr key={`validation-${row.fecha}-${row.producto}`}>
+                          <td>{row.fechaDisplay}</td>
+                          <td>{row.dia}</td>
+                          <td>{formatNumber(row.promedioUsado, 2)}</td>
+                          <td>{formatNumber(row.pronosticoVentaDia, 2)}</td>
+                          <td>{formatNumber(row.colchonDiario, 2)}</td>
+                          <td className="formula-cell">
+                            CEIL({formatNumber(row.pronosticoVentaDia, 2)} + {formatNumber(row.colchonDiario, 2)})
+                          </td>
+                          <td className="strong">{formatNumber(row.produccionPronosticadaDia)}</td>
+                          <td>{row.produccionRealDia === null ? "-" : formatNumber(row.produccionRealDia)}</td>
+                          <td>{row.diferenciaPiezas === null ? "-" : formatNumber(row.diferenciaPiezas)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </section>
+              </div>
+            </>
+          ) : (
+            <div className="empty validation-empty">
+              Carga stock fijo y ventas para validar paso a paso un producto como <strong>PIÑA GDE</strong>.
+            </div>
+          )}
+        </section>
+
         <section className="table-card">
           <table>
             <thead>
               <tr>
                 <th>Producto</th>
                 <th>Prom. reciente</th>
-                <th>Pronóstico venta</th>
+                <th>Pronóstico de venta</th>
                 <th>Colchón</th>
-                <th>Producción pron.</th>
+                <th>Producción pronosticada</th>
                 <th>Stock objetivo</th>
                 <th>Existencias</th>
-                <th>Prod. recomendada</th>
-                <th>Prod. real</th>
+                <th>Producción recomendada</th>
+                <th>Producción real</th>
                 <th>Brecha</th>
                 <th>Precisión</th>
                 <th>Estatus</th>
