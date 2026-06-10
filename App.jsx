@@ -484,9 +484,11 @@ function parseMonthlyDailySheets(workbook, type = "ventas") {
       if (!isValidProduct(rows[i][productCol], rows[i])) continue;
       const productoOriginal = String(rows[i][productCol] ?? "").trim();
       const product = normalizeProduct(productoOriginal);
-      const cantidad = toNumber(rows[i][qtyCol]);
+      const rawCantidad = rows[i][qtyCol];
+      if (type === "ventas" && String(rawCantidad ?? "").trim() === "") continue;
+      const cantidad = toNumber(rawCantidad);
       const importe = amountCol >= 0 ? toNumber(rows[i][amountCol]) : 0;
-      if (cantidad === 0 && importe === 0) continue;
+      if (type !== "ventas" && cantidad === 0 && importe === 0) continue;
       out.push({ fecha, producto: product, productoOriginal, cantidad, importe, tipo: type });
     }
   }
@@ -528,6 +530,10 @@ function parseWideSales(workbook, type = "ventas") {
     if (!isValidProduct(rows[r][0], rows[r])) continue;
     const productoOriginal = String(rows[r][0] ?? "").trim();
     const product = normalizeProduct(productoOriginal);
+    const hasDailyValue = rows[r].some(
+      (cell, c) => c > 0 && weekdayIndexFromText(weekdayHeaders[c]) !== null && String(cell ?? "").trim() !== ""
+    );
+    if (!hasDailyValue) continue;
     for (let c = 1; c < rows[r].length; c++) {
       const weekdayHeader = weekdayHeaders[c];
       const weekday = weekdayIndexFromText(weekdayHeader);
@@ -538,7 +544,7 @@ function parseWideSales(workbook, type = "ventas") {
         parsedHeaderDate ||
         (inferredMonth && dayNumber ? new Date(inferredMonth.year, inferredMonth.monthIndex, dayNumber) : new Date(2026, 0, c));
       const cantidad = toNumber(rows[r][c]);
-      if (cantidad === 0) continue;
+      if (type !== "ventas" && cantidad === 0) continue;
       parsed.push({
         fecha,
         producto: product,
@@ -935,7 +941,7 @@ function App() {
   const [showMissingReal, setShowMissingReal] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(defaultMonthValue());
   const [selectedMonthTouched, setSelectedMonthTouched] = useState(false);
-  const [dailyBufferPct, setDailyBufferPct] = useState(12);
+  const [dailyBufferPct, setDailyBufferPct] = useState(0);
   const [dailyDateFilter, setDailyDateFilter] = useState("");
   const [dailyProductQuery, setDailyProductQuery] = useState("");
   const [dailyWeekdayFilter, setDailyWeekdayFilter] = useState("");
@@ -1302,7 +1308,7 @@ function App() {
             <div>
               <span className="eyebrow">Planeación por día</span>
               <h3>Producción diaria pronosticada</h3>
-              <p>Promedia la venta por día de semana y asigna el pronóstico a cada fecha del mes seleccionado.</p>
+              <p>Promedia la venta por día de semana, incluyendo días sin venta, y asigna el pronóstico a cada fecha del mes seleccionado.</p>
               <strong className="row-counter">{formatNumber(dailyRows.length)} filas diarias generadas</strong>
             </div>
             <button className="primary" onClick={() => exportDailyToExcel(filteredDailyRows, dailySummary)} disabled={!filteredDailyRows.length}>
