@@ -118,6 +118,16 @@ function norm(value) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
+function normalizeProduct(value) {
+  const normalized = norm(value)
+    .replace(/[.,/\\_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const compact = normalized.replace(/[^A-Z0-9]/g, "");
+  if (compact === "PINAGDE" || compact === "PINAGRANDE") return "PINA GDE";
+  return normalized;
+}
+
 const WEEKDAY_BY_NORM = new Map(
   WEEKDAYS.flatMap((day) => [
     [norm(day.label), day.index],
@@ -378,9 +388,10 @@ function parseStock(workbook) {
   const parsed = [];
   for (let i = 0; i < rows.length; i++) {
     if (!isValidProduct(rows[i][0], rows[i])) continue;
-    const product = norm(rows[i][0]);
+    const productoOriginal = String(rows[i][0] ?? "").trim();
+    const product = normalizeProduct(productoOriginal);
     const stock = toNumber(rows[i][1]);
-    parsed.push({ producto: product, stock, orden: parsed.length + 1 });
+    parsed.push({ producto: product, productoOriginal, stock, orden: parsed.length + 1 });
   }
   return parsed;
 }
@@ -415,9 +426,11 @@ function parseExistencias(workbook) {
   const parsed = [];
   for (let i = headerIndex + 1; i < rows.length; i++) {
     if (!isValidProduct(rows[i][productCol], rows[i])) continue;
-    const product = norm(rows[i][productCol]);
+    const productoOriginal = String(rows[i][productCol] ?? "").trim();
+    const product = normalizeProduct(productoOriginal);
     parsed.push({
       producto: product,
+      productoOriginal,
       totalSuc: toNumber(rows[i][totalSucCol]),
       cf: toNumber(rows[i][cfCol]),
       sumaSucCf: toNumber(rows[i][sumaCol]),
@@ -469,11 +482,12 @@ function parseMonthlyDailySheets(workbook, type = "ventas") {
 
     for (let i = headerIndex + 1; i < rows.length; i++) {
       if (!isValidProduct(rows[i][productCol], rows[i])) continue;
-      const product = norm(rows[i][productCol]);
+      const productoOriginal = String(rows[i][productCol] ?? "").trim();
+      const product = normalizeProduct(productoOriginal);
       const cantidad = toNumber(rows[i][qtyCol]);
       const importe = amountCol >= 0 ? toNumber(rows[i][amountCol]) : 0;
       if (cantidad === 0 && importe === 0) continue;
-      out.push({ fecha, producto: product, cantidad, importe, tipo: type });
+      out.push({ fecha, producto: product, productoOriginal, cantidad, importe, tipo: type });
     }
   }
   return out;
@@ -512,7 +526,8 @@ function parseWideSales(workbook, type = "ventas") {
   const startRow = Math.max(weekdayHeaderIndex, dateHeaderIndex) + 1;
   for (let r = startRow; r < rows.length; r++) {
     if (!isValidProduct(rows[r][0], rows[r])) continue;
-    const product = norm(rows[r][0]);
+    const productoOriginal = String(rows[r][0] ?? "").trim();
+    const product = normalizeProduct(productoOriginal);
     for (let c = 1; c < rows[r].length; c++) {
       const weekdayHeader = weekdayHeaders[c];
       const weekday = weekdayIndexFromText(weekdayHeader);
@@ -527,6 +542,7 @@ function parseWideSales(workbook, type = "ventas") {
       parsed.push({
         fecha,
         producto: product,
+        productoOriginal,
         cantidad,
         importe: 0,
         weekday: weekdayHeader,
@@ -577,12 +593,14 @@ function parseProductionReal(workbook) {
   const records = [];
   for (let i = start; i < rows.length; i++) {
     if (!isValidProduct(rows[i][productCol], rows[i])) continue;
-    const product = norm(rows[i][productCol]);
+    const productoOriginal = String(rows[i][productCol] ?? "").trim();
+    const product = normalizeProduct(productoOriginal);
     const cantidad = toNumber(rows[i][qtyCol]);
     if (cantidad === 0) continue;
     const fecha = dateCol >= 0 ? parseDateCell(rows[i][dateCol]) : null;
     records.push({
       producto: product,
+      productoOriginal,
       cantidad,
       fecha,
       fechaKey: fecha ? dateKey(fecha) : "",
@@ -595,7 +613,8 @@ function aggregateProductionRows(records) {
   const map = new Map();
   for (const item of records) {
     if (!isValidProduct(item.producto)) continue;
-    map.set(item.producto, (map.get(item.producto) || 0) + toNumber(item.cantidad));
+    const product = normalizeProduct(item.producto);
+    map.set(product, (map.get(product) || 0) + toNumber(item.cantidad));
   }
   return [...map.entries()].map(([producto, cantidad]) => ({ producto, cantidad }));
 }
@@ -604,7 +623,7 @@ function aggregateDailyProductionRows(records) {
   const map = new Map();
   for (const item of records) {
     if (!item.fechaKey || !isValidProduct(item.producto)) continue;
-    const key = `${item.producto}|${item.fechaKey}`;
+    const key = `${normalizeProduct(item.producto)}|${item.fechaKey}`;
     map.set(key, (map.get(key) || 0) + toNumber(item.cantidad));
   }
   return map;
@@ -632,9 +651,10 @@ async function parseProductionRealFile(file) {
 function groupByProduct(records) {
   const map = new Map();
   for (const r of records) {
-    const current = map.get(r.producto) || [];
+    const product = normalizeProduct(r.producto);
+    const current = map.get(product) || [];
     current.push(r);
-    map.set(r.producto, current);
+    map.set(product, current);
   }
   return map;
 }
@@ -995,15 +1015,14 @@ function App() {
     }
     if (validationProducts.some((row) => row.producto === validationProduct)) return;
     const example =
-      validationProducts.find((row) => norm(row.producto) === "PINA GDE") ||
-      validationProducts.find((row) => norm(row.producto).includes("PINA GDE")) ||
+      validationProducts.find((row) => normalizeProduct(row.producto) === "PINA GDE") ||
       validationProducts[0];
     setValidationProduct(example.producto);
   }, [validationProducts, validationProduct]);
 
   const validationForecast = forecast.find((row) => row.producto === validationProduct) || null;
   const validationSales = ventas
-    .filter((row) => row.producto === validationProduct)
+    .filter((row) => normalizeProduct(row.producto) === normalizeProduct(validationProduct))
     .map((row) => {
       const weekday = recordWeekday(row);
       return {
@@ -1012,7 +1031,14 @@ function App() {
         dia: weekday === null ? norm(row.weekday) || "Sin día" : weekdayLabel(weekday),
       };
     });
-  const validationDailyRows = dailyRows.filter((row) => row.producto === validationProduct);
+  const validationThursdaySales = validationSales.filter((sale) => recordWeekday(sale) === 4);
+  const validationThursdayAverage = validationThursdaySales.length
+    ? validationThursdaySales.reduce((sum, sale) => sum + toNumber(sale.cantidad), 0) / validationThursdaySales.length
+    : 0;
+  const validationSourceNames = [...new Set(validationSales.map((sale) => sale.productoOriginal || sale.producto))];
+  const validationDailyRows = dailyRows.filter(
+    (row) => normalizeProduct(row.producto) === normalizeProduct(validationProduct)
+  );
   const validationSummary = summarizeDailyMonth(validationDailyRows);
   const validationWeekdayAverages = WEEKDAYS.map((day) => ({
     ...day,
@@ -1455,7 +1481,11 @@ function App() {
                   icon={FileSpreadsheet}
                   label="Ventas diarias leídas"
                   value={formatNumber(validationSales.length)}
-                  caption={`Producto: ${validationProduct}`}
+                  caption={
+                    validationSourceNames.length
+                      ? `Excel: ${validationSourceNames.join(", ")}`
+                      : `Producto homologado: ${validationProduct}`
+                  }
                 />
                 <KpiCard
                   icon={BarChart3}
@@ -1561,7 +1591,8 @@ function App() {
                       <tr>
                         <th>Fecha leída</th>
                         <th>Día leído</th>
-                        <th>Producto</th>
+                        <th>Nombre en Excel</th>
+                        <th>Producto homologado</th>
                         <th>Cantidad</th>
                       </tr>
                     </thead>
@@ -1570,6 +1601,7 @@ function App() {
                         <tr key={`${row.producto}-${row.fechaDisplay}-${index}`}>
                           <td>{row.fechaDisplay || "-"}</td>
                           <td>{row.dia}</td>
+                          <td>{row.productoOriginal || row.producto}</td>
                           <td>{row.producto}</td>
                           <td className="strong">{formatNumber(row.cantidad, 2)}</td>
                         </tr>
@@ -1583,7 +1615,46 @@ function App() {
               <div className="validation-block">
                 <div className="validation-block-heading">
                   <div>
-                    <h4>2. Pronóstico diario y producción con colchón</h4>
+                    <h4>2. Registros usados para el promedio de jueves</h4>
+                    <p>Promedio jueves = suma de cantidades de jueves / registros de jueves.</p>
+                  </div>
+                  <strong>
+                    {validationThursdaySales.length} registros · Promedio {formatNumber(validationThursdayAverage, 2)}
+                  </strong>
+                </div>
+                <section className="table-card validation-sales-table-card">
+                  <table className="validation-sales-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha leída</th>
+                        <th>Día leído</th>
+                        <th>Nombre en Excel</th>
+                        <th>Producto homologado</th>
+                        <th>Cantidad usada</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {validationThursdaySales.map((row, index) => (
+                        <tr key={`thursday-${row.producto}-${row.fechaDisplay}-${index}`}>
+                          <td>{row.fechaDisplay || "-"}</td>
+                          <td>{row.dia}</td>
+                          <td>{row.productoOriginal || row.producto}</td>
+                          <td>{row.producto}</td>
+                          <td className="strong">{formatNumber(row.cantidad, 2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!validationThursdaySales.length && (
+                    <div className="empty">No se encontraron registros de jueves para este producto.</div>
+                  )}
+                </section>
+              </div>
+
+              <div className="validation-block">
+                <div className="validation-block-heading">
+                  <div>
+                    <h4>3. Pronóstico diario y producción con colchón</h4>
                     <p>Cada fila muestra el promedio aplicado y el resultado de la fórmula diaria.</p>
                   </div>
                   <strong>{validationDailyRows.length} días</strong>
