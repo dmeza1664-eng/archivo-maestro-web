@@ -242,6 +242,20 @@ function formatPercent(value, digits = 0) {
   return `${formatNumber(value, digits)}%`;
 }
 
+function reviewStatusMeta(precision) {
+  if (!Number.isFinite(precision)) return { className: "muted", label: "Sin dato" };
+  if (precision >= 95) return { className: "ok", label: "Excelente" };
+  if (precision >= 90) return { className: "ok", label: "Bueno" };
+  if (precision >= 80) return { className: "warn", label: "Revisar" };
+  return { className: "danger", label: "Bajo" };
+}
+
+function displayInputDate(value) {
+  const [year, month, day] = String(value || "").split("-");
+  if (!year || !month || !day) return "";
+  return `${day}/${month}/${year}`;
+}
+
 function parseDateCell(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
   if (typeof value === "number" && value > 20000 && value < 80000) {
@@ -1105,7 +1119,21 @@ function App() {
   );
   const productsToReview = [...(highDifferenceProducts.length ? highDifferenceProducts : executiveRows)]
     .sort((a, b) => Math.abs(b.diferenciaReal) - Math.abs(a.diferenciaReal))
-    .slice(0, 6);
+    .slice(0, 10);
+
+  const loadedFileItems = [
+    { label: "Ventas", loaded: Boolean(files.ventas || ventas.length) },
+    { label: "Stock fijo", loaded: Boolean(files.stock || stockRows.length) },
+    { label: "Producción real", loaded: Boolean(files.real || realProduction.length) },
+    { label: "Bajas/devoluciones", loaded: Boolean(files.bajas || bajas.length) },
+    { label: "Existencias", loaded: Boolean(files.existencias || existencias.length) },
+  ];
+
+  const dashboardMessages = [
+    !ventas.length && "Carga el archivo de ventas para generar el pronóstico.",
+    !hasLoadedRealProduction && "Carga producción real para ver el comparativo.",
+    !stockRows.length && "Carga stock fijo para ordenar productos correctamente.",
+  ].filter(Boolean);
 
   const chartRows = [
     { label: "Pronosticada", value: summary.totalPronosticada },
@@ -1181,6 +1209,39 @@ function App() {
             tone={summary.precisionEjecutiva < 80 ? "danger" : summary.precisionEjecutiva < 90 ? "warn" : "ok"}
           />
         </section>
+
+        <section className="loaded-files-section">
+          <div className="section-heading compact-heading">
+            <div>
+              <span className="eyebrow">Estado de insumos</span>
+              <h3>Archivos cargados</h3>
+            </div>
+            <div className="analysis-context">
+              <span>Mes analizado: <strong>{selectedMonth || "Sin seleccionar"}</strong></span>
+              <span>Fecha diaria: <strong>{dailyDateFilter ? displayInputDate(dailyDateFilter) : "Sin filtro"}</strong></span>
+              <span>Colchón operativo: <strong>{dailyBufferPct}% diario</strong></span>
+            </div>
+          </div>
+          <div className="file-status-grid">
+            {loadedFileItems.map((item) => (
+              <div className="file-status-item" key={item.label}>
+                <span>{item.label}</span>
+                <strong className={item.loaded ? "loaded" : "pending"}>{item.loaded ? "Cargado" : "Pendiente"}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {dashboardMessages.length > 0 && (
+          <section className="dashboard-messages">
+            {dashboardMessages.map((message) => (
+              <div className="message-card" key={message}>
+                <AlertTriangle size={17} />
+                <span>{message}</span>
+              </div>
+            ))}
+          </section>
+        )}
 
         <section className="executive-grid">
           <div className="panel">
@@ -1305,7 +1366,7 @@ function App() {
                   </thead>
                   <tbody>
                     {productsToReview.map((row) => {
-                      const meta = STATUS_META[row.estatus] || STATUS_META.Revisar;
+                      const meta = reviewStatusMeta(row.precision);
                       return (
                         <tr key={`executive-${row.producto}`}>
                           <td>{row.producto}</td>
@@ -1326,15 +1387,26 @@ function App() {
                 </table>
                 {!productsToReview.length && (
                   <div className="empty">
-                    No hay productos comparables para revisar con los datos cargados.
-                  </div>
-                )}
-              </section>
+                  No hay productos comparables para revisar con los datos cargados.
+                </div>
+              )}
+            </section>
             </>
           ) : (
-            <div className="empty executive-summary-empty">
-              Carga producción real para ver el comparativo.
-            </div>
+            <>
+              <div className="empty executive-summary-empty">
+                Carga producción real para ver el comparativo.
+              </div>
+              <section className="table-card executive-review-card">
+                <div className="table-title">
+                  <h3>Productos a revisar</h3>
+                  <p>Productos con mayor diferencia absoluta contra producción real.</p>
+                </div>
+                <div className="empty">
+                  Carga producción real para ver los productos a revisar.
+                </div>
+              </section>
+            </>
           )}
         </section>
 
@@ -1583,10 +1655,26 @@ function App() {
             )}
             {dailyRows.length > 0 && !filteredDailyRows.length && (
               <div className="empty">
-                No hay filas diarias con los filtros actuales.
+                No hay datos diarios para los filtros seleccionados. Revisa el mes, la fecha o el producto.
               </div>
             )}
           </section>
+        </section>
+
+        <section className="interpretation-notes">
+          <div className="section-heading compact-heading">
+            <div>
+              <span className="eyebrow">Guía rápida</span>
+              <h3>Notas de interpretación</h3>
+            </div>
+          </div>
+          <div className="notes-grid">
+            <div>El pronóstico diario se calcula con el promedio histórico del mismo día de semana.</div>
+            <div>La producción pronosticada aplica un colchón operativo configurable.</div>
+            <div>La precisión compara la producción pronosticada contra la producción real cargada.</div>
+            <div>La vista “Validación de cálculos” permite auditar cada producto y ver de dónde sale el promedio usado.</div>
+            <div>La exportación para MySQL genera datos limpios para una futura conexión a base de datos.</div>
+          </div>
         </section>
 
         <section className="validation-section">
