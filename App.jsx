@@ -1087,6 +1087,26 @@ function App() {
     .sort((a, b) => b.diferenciaReal - a.diferenciaReal)
     .slice(0, 5);
 
+  const hasLoadedRealProduction = realProduction.length > 0;
+  const executiveRows = forecast.filter((row) => row.hasRealData);
+  const executiveTotals = {
+    totalProductos: forecast.length,
+    totalPronosticada: executiveRows.reduce((sum, row) => sum + row.produccionPronosticada, 0),
+    totalReal: executiveRows.reduce((sum, row) => sum + row.produccionReal, 0),
+    diferenciaTotal: executiveRows.reduce((sum, row) => sum + row.diferenciaReal, 0),
+  };
+  executiveTotals.precisionGeneral =
+    executiveTotals.totalReal > 0
+      ? (1 - Math.abs(executiveTotals.totalPronosticada - executiveTotals.totalReal) / executiveTotals.totalReal) * 100
+      : 0;
+
+  const highDifferenceProducts = executiveRows.filter(
+    (row) => Math.abs(row.diferenciaReal) >= 50 || (row.precision !== null && row.precision < 80)
+  );
+  const productsToReview = [...(highDifferenceProducts.length ? highDifferenceProducts : executiveRows)]
+    .sort((a, b) => Math.abs(b.diferenciaReal) - Math.abs(a.diferenciaReal))
+    .slice(0, 6);
+
   const chartRows = [
     { label: "Pronosticada", value: summary.totalPronosticada },
     { label: "Recomendada", value: summary.totalRecomendada },
@@ -1207,6 +1227,115 @@ function App() {
               </div>
             </div>
           </div>
+        </section>
+
+        <section className="executive-summary-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Comparativo principal</span>
+              <h3>Resumen Ejecutivo</h3>
+              <p>
+                {hasLoadedRealProduction
+                  ? "Vista consolidada para revisar producción pronosticada contra producción real."
+                  : "Carga producción real para ver el comparativo."}
+              </p>
+            </div>
+            <BarChart3 size={24} />
+          </div>
+
+          {hasLoadedRealProduction ? (
+            <>
+              <section className="executive-summary-kpis">
+                <KpiCard
+                  icon={PackageCheck}
+                  label="Productos analizados"
+                  value={formatNumber(executiveTotals.totalProductos)}
+                  caption={`${formatNumber(executiveRows.length)} con producción real`}
+                />
+                <KpiCard
+                  icon={ShieldCheck}
+                  label="Producción pronosticada total"
+                  value={formatNumber(executiveTotals.totalPronosticada)}
+                  caption="Productos comparables"
+                />
+                <KpiCard
+                  icon={Database}
+                  label="Producción real total"
+                  value={formatNumber(executiveTotals.totalReal)}
+                  caption="Fuente cargada por el usuario"
+                />
+                <KpiCard
+                  icon={RefreshCw}
+                  label="Diferencia total"
+                  value={formatNumber(executiveTotals.diferenciaTotal)}
+                  caption="Real - pronóstico"
+                  tone={executiveTotals.diferenciaTotal < 0 ? "danger" : executiveTotals.diferenciaTotal > 0 ? "warn" : "ok"}
+                />
+                <KpiCard
+                  icon={CheckCircle2}
+                  label="Precisión general"
+                  value={formatPercent(executiveTotals.precisionGeneral, 1)}
+                  caption="Agregado comparable"
+                  tone={executiveTotals.precisionGeneral < 80 ? "danger" : executiveTotals.precisionGeneral < 90 ? "warn" : "ok"}
+                />
+                <KpiCard
+                  icon={AlertTriangle}
+                  label="Diferencia alta"
+                  value={formatNumber(highDifferenceProducts.length)}
+                  caption=">= 50 piezas o precisión < 80%"
+                  tone={highDifferenceProducts.length ? "danger" : "ok"}
+                />
+              </section>
+
+              <section className="table-card executive-review-card">
+                <div className="table-title">
+                  <h3>Productos a revisar</h3>
+                  <p>Productos con mayor diferencia absoluta contra producción real.</p>
+                </div>
+                <table className="executive-review-table">
+                  <thead>
+                    <tr>
+                      <th>Producto</th>
+                      <th>Producción pronosticada</th>
+                      <th>Producción real</th>
+                      <th>Diferencia</th>
+                      <th>Precisión %</th>
+                      <th>Estatus</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {productsToReview.map((row) => {
+                      const meta = STATUS_META[row.estatus] || STATUS_META.Revisar;
+                      return (
+                        <tr key={`executive-${row.producto}`}>
+                          <td>{row.producto}</td>
+                          <td>{formatNumber(row.produccionPronosticada)}</td>
+                          <td>{formatNumber(row.produccionReal)}</td>
+                          <td className={row.diferenciaReal < 0 ? "negative" : row.diferenciaReal > 0 ? "positive" : ""}>
+                            {row.diferenciaReal > 0 ? "+" : ""}
+                            {formatNumber(row.diferenciaReal)}
+                          </td>
+                          <td>{row.precision === null ? "-" : formatPercent(row.precision, 1)}</td>
+                          <td>
+                            <span className={`pill ${meta.className}`}>{meta.label}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {!productsToReview.length && (
+                  <div className="empty">
+                    No hay productos comparables para revisar con los datos cargados.
+                  </div>
+                )}
+              </section>
+            </>
+          ) : (
+            <div className="empty executive-summary-empty">
+              Carga producción real para ver el comparativo.
+            </div>
+          )}
         </section>
 
         <section className="uploads">
