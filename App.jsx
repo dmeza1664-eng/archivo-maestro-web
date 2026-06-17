@@ -128,6 +128,11 @@ function normalizeProduct(value) {
   return normalized;
 }
 
+function isSliceProduct(value) {
+  const normalized = normalizeProduct(value);
+  return /\b(REBANADA|REBANADAS|REB|RBN)\b/.test(normalized);
+}
+
 const WEEKDAY_BY_NORM = new Map(
   WEEKDAYS.flatMap((day) => [
     [norm(day.label), day.index],
