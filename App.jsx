@@ -752,7 +752,8 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
     const ex = existMap.get(s.producto) || { totalSuc: 0, cf: 0, sumaSucCf: 0 };
     const sumaSucCf = ex.sumaSucCf || ex.totalSuc + ex.cf;
     const inventarioObjetivo = s.stock;
-    const produccionRecomendada = Math.max(0, Math.ceil(inventarioObjetivo + produccionSugerida - sumaSucCf));
+    const baseProduccionRecomendada = Math.max(0, inventarioObjetivo + produccionSugerida - sumaSucCf);
+    const produccionRecomendada = getProduccionSugerida(s.producto, baseProduccionRecomendada);
     const hasRealData = realMap.has(s.producto);
     const produccionReal = hasRealData ? realMap.get(s.producto) : 0;
     const diferenciaReal = produccionReal - produccionSugerida;
@@ -798,6 +799,7 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
       reglaOperativa: getReglaOperativaLabel(s.producto, baseConColchon),
       produccionSugerida,
       inventarioObjetivo,
+      baseProduccionRecomendada,
       totalSuc: ex.totalSuc || 0,
       cf: ex.cf || 0,
       sumaSucCf,
@@ -911,6 +913,7 @@ function exportToExcel(rows, summary) {
     "Produccion sugerida": r.produccionSugerida,
     "Inventario objetivo": r.inventarioObjetivo,
     "Existencia sucursales + CF": r.sumaSucCf,
+    "Base produccion recomendada": Number((r.baseProduccionRecomendada || 0).toFixed(2)),
     "Produccion recomendada": r.produccionRecomendada,
     "Produccion real": r.produccionReal,
     "Diferencia real vs sugerida": r.diferenciaReal,
