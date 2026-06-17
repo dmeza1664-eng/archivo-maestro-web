@@ -476,6 +476,7 @@ label select {
   margin-bottom: 14px;
 }
 
+<<<<<<< HEAD
 .loaded-files-section,
 .interpretation-notes {
   display: grid;
@@ -644,6 +645,8 @@ label select {
   border-radius: 8px;
 }
 
+=======
+>>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
 .validation-section {
   display: grid;
   gap: 14px;
@@ -785,7 +788,11 @@ label select {
 }
 
 .validation-daily-table {
+<<<<<<< HEAD
   min-width: 1540px;
+=======
+  min-width: 1320px;
+>>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
 }
 
 .formula-cell {
@@ -849,7 +856,11 @@ table {
 }
 
 .daily-table {
+<<<<<<< HEAD
   min-width: 1660px;
+=======
+  min-width: 1540px;
+>>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
 }
 
 th {
@@ -932,6 +943,7 @@ tr:nth-child(even) td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+<<<<<<< HEAD
   .file-status-grid,
   .notes-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -946,6 +958,8 @@ tr:nth-child(even) td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+=======
+>>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
   .validation-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -970,7 +984,10 @@ tr:nth-child(even) td {
   .priority-grid,
   .uploads,
   .daily-summary,
+<<<<<<< HEAD
   .executive-summary-kpis,
+=======
+>>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
   .validation-summary,
   .validation-grid {
     grid-template-columns: 1fr;
@@ -981,6 +998,7 @@ tr:nth-child(even) td {
     flex-direction: column;
   }
 
+<<<<<<< HEAD
   .analysis-context {
     justify-content: flex-start;
   }
@@ -994,6 +1012,8 @@ tr:nth-child(even) td {
     grid-template-columns: 1fr;
   }
 
+=======
+>>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
   .validation-product-select select {
     min-width: 0;
     width: 100%;
