@@ -134,9 +134,17 @@ function isSliceProduct(value) {
 }
 
 function isOperativeCakeProduct(value) {
-  const tokens = normalizeProduct(value).split(/\s+/).filter(Boolean);
-  return tokens.some((token) =>
-    ["GDE", "GRANDE", "MED", "MEDIANO", "MEDIANA", "CH", "CHICO", "CHICA"].includes(token)
+  const normalized = norm(value)
+    .replace(/[.,/\\_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  const operativeTokens = ["GDE", "GRANDE", "MED", "MEDIANO", "MEDIANA", "CH", "CHICO", "CHICA"];
+  if (tokens.some((token) => operativeTokens.includes(token))) return true;
+
+  const compact = normalized.replace(/[^A-Z0-9]/g, "");
+  return ["GDE", "GRANDE", "MED", "MEDIANO", "MEDIANA", "CH", "CHICO", "CHICA"].some((suffix) =>
+    compact.endsWith(suffix)
   );
 }
 
