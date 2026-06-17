@@ -90,6 +90,14 @@ const STATUS_META = {
   Revisar: { className: "warn", label: "Revisar" },
 };
 
+function reviewStatusMeta(precision) {
+  if (precision === null || precision === undefined) return { className: "muted", label: "Sin dato real" };
+  if (precision >= 95) return { className: "ok", label: "Excelente" };
+  if (precision >= 90) return { className: "ok", label: "Bueno" };
+  if (precision >= 80) return { className: "warn", label: "Revisar" };
+  return { className: "danger", label: "Bajo" };
+}
+
 const WEEKDAYS = [
   { index: 1, label: "Lunes" },
   { index: 2, label: "Martes" },
@@ -131,6 +139,31 @@ function normalizeProduct(value) {
 function isSliceProduct(value) {
   const normalized = normalizeProduct(value);
   return /\b(REBANADA|REBANADAS|REB|RBN)\b/.test(normalized);
+}
+
+function isOperationalCakeProduct(value) {
+  const normalized = normalizeProduct(value);
+  return /\b(GDE|GRANDE|MED|MEDIANO|CH|CHICO)\b/.test(normalized);
+}
+
+function getProduccionSugeridaPastel(value) {
+  const numericValue = Number(value) || 0;
+  if (numericValue < 8) return 0;
+  return Math.max(10, Math.round(numericValue / 5) * 5);
+}
+
+function getProduccionSugerida(producto, value) {
+  if (isOperationalCakeProduct(producto)) {
+    return getProduccionSugeridaPastel(value);
+  }
+  return Math.max(0, Math.ceil(Number(value) || 0));
+}
+
+function getReglaOperativaLabel(producto, value) {
+  if (!isOperationalCakeProduct(producto)) return "Redondeo normal";
+  const produccionSugerida = getProduccionSugeridaPastel(value);
+  if (produccionSugerida === 0) return "Menor a 8: no producir";
+  return `Mínimo 10 y múltiplos de 5: ${produccionSugerida}`;
 }
 
 const WEEKDAY_BY_NORM = new Map(
