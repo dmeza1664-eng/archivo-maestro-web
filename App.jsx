@@ -129,6 +129,9 @@ function normalizeProduct(value) {
 }
 
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
 function isSliceProduct(value) {
   const tokens = normalizeProduct(value).split(/\s+/).filter(Boolean);
   return tokens.some((token) => ["REBANADA", "REBANADAS", "REB", "RBN"].includes(token));
@@ -168,8 +171,11 @@ function getReglaOperativaLabel(producto, valor) {
   return "Pastel: mínimo 10 y múltiplos de 5";
 }
 
+<<<<<<< HEAD
+=======
 =======
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
 const WEEKDAY_BY_NORM = new Map(
   WEEKDAYS.flatMap((day) => [
     [norm(day.label), day.index],
@@ -285,6 +291,9 @@ function formatPercent(value, digits = 0) {
 }
 
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
 function reviewStatusMeta(precision) {
   if (!Number.isFinite(precision)) return { className: "muted", label: "Sin dato" };
   if (precision >= 95) return { className: "ok", label: "Excelente" };
@@ -299,8 +308,11 @@ function displayInputDate(value) {
   return `${day}/${month}/${year}`;
 }
 
+<<<<<<< HEAD
+=======
 =======
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
 function parseDateCell(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
   if (typeof value === "number" && value > 20000 && value < 80000) {
@@ -682,7 +694,11 @@ function aggregateProductionRows(records) {
 <<<<<<< HEAD
     if (isSliceProduct(product)) continue;
 =======
+<<<<<<< HEAD
+    if (isSliceProduct(product)) continue;
+=======
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     map.set(product, (map.get(product) || 0) + toNumber(item.cantidad));
   }
   return [...map.entries()].map(([producto, cantidad]) => ({ producto, cantidad }));
@@ -697,8 +713,14 @@ function aggregateDailyProductionRows(records) {
     if (isSliceProduct(product)) continue;
     const key = `${product}|${item.fechaKey}`;
 =======
+<<<<<<< HEAD
+    const product = normalizeProduct(item.producto);
+    if (isSliceProduct(product)) continue;
+    const key = `${product}|${item.fechaKey}`;
+=======
     const key = `${normalizeProduct(item.producto)}|${item.fechaKey}`;
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     map.set(key, (map.get(key) || 0) + toNumber(item.cantidad));
   }
   return map;
@@ -730,7 +752,11 @@ function groupByProduct(records) {
 <<<<<<< HEAD
     if (isSliceProduct(product)) continue;
 =======
+<<<<<<< HEAD
+    if (isSliceProduct(product)) continue;
+=======
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     const current = map.get(product) || [];
     current.push(r);
     map.set(product, current);
@@ -766,12 +792,21 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
     const baseConColchon = pronosticoVenta + colchonOperativo;
     const produccionSugerida = getProduccionSugerida(s.producto, baseConColchon);
 =======
+<<<<<<< HEAD
+    const baseConColchon = pronosticoVenta + colchonOperativo;
+    const produccionSugerida = getProduccionSugerida(s.producto, baseConColchon);
+=======
     const produccionPronosticada = Math.ceil(pronosticoVenta + colchonOperativo);
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
 
     const ex = existMap.get(s.producto) || { totalSuc: 0, cf: 0, sumaSucCf: 0 };
     const sumaSucCf = ex.sumaSucCf || ex.totalSuc + ex.cf;
     const inventarioObjetivo = s.stock;
+<<<<<<< HEAD
+    const baseProduccionRecomendada = Math.max(0, inventarioObjetivo + produccionSugerida - sumaSucCf);
+    const produccionRecomendada = getProduccionSugerida(s.producto, baseProduccionRecomendada);
+=======
 <<<<<<< HEAD
     const baseProduccionRecomendada = Math.max(0, inventarioObjetivo + produccionSugerida - sumaSucCf);
     const produccionRecomendada = getProduccionSugerida(s.producto, baseProduccionRecomendada);
@@ -783,13 +818,18 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
         ? (1 - Math.abs(produccionSugerida - produccionReal) / produccionReal) * 100
 =======
     const produccionRecomendada = Math.max(0, Math.ceil(inventarioObjetivo + produccionPronosticada - sumaSucCf));
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     const hasRealData = realMap.has(s.producto);
     const produccionReal = hasRealData ? realMap.get(s.producto) : 0;
-    const diferenciaReal = produccionReal - produccionPronosticada;
+    const diferenciaReal = produccionReal - produccionSugerida;
     const precision =
       hasRealData && produccionReal > 0
+<<<<<<< HEAD
+        ? (1 - Math.abs(produccionSugerida - produccionReal) / produccionReal) * 100
+=======
         ? (1 - Math.abs(produccionPronosticada - produccionReal) / produccionReal) * 100
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
         : null;
 
     const confianza =
@@ -806,10 +846,16 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
     else if (produccionReal < produccionSugerida) estatus = "Riesgo faltante";
     else if (produccionReal > produccionSugerida) estatus = "Sobreproduccion";
 =======
+<<<<<<< HEAD
+    else if (produccionSugerida === 0 && produccionReal === 0) estatus = "No producir";
+    else if (produccionReal < produccionSugerida) estatus = "Riesgo faltante";
+    else if (produccionReal > produccionSugerida) estatus = "Sobreproduccion";
+=======
     else if (produccionPronosticada === 0 && produccionReal === 0) estatus = "No producir";
     else if (produccionReal < produccionPronosticada) estatus = "Riesgo faltante";
     else if (produccionReal > produccionPronosticada) estatus = "Sobreproduccion";
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     else if (precision !== null && precision < 80) estatus = "Revisar";
     else estatus = "Dentro de rango";
 
@@ -838,9 +884,17 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
       inventarioObjetivo,
       baseProduccionRecomendada,
 =======
+<<<<<<< HEAD
+      baseConColchon,
+      reglaOperativa: getReglaOperativaLabel(s.producto, baseConColchon),
+      produccionSugerida,
+      inventarioObjetivo,
+      baseProduccionRecomendada,
+=======
       produccionPronosticada,
       inventarioObjetivo,
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
       totalSuc: ex.totalSuc || 0,
       cf: ex.cf || 0,
       sumaSucCf,
@@ -879,8 +933,12 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
 <<<<<<< HEAD
   const productRows = monthlyRows.filter((row) => isValidProduct(row.producto) && !isSliceProduct(row.producto));
 =======
+<<<<<<< HEAD
+  const productRows = monthlyRows.filter((row) => isValidProduct(row.producto) && !isSliceProduct(row.producto));
+=======
   const productRows = monthlyRows.filter((row) => isValidProduct(row.producto));
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
 
   return productRows.flatMap((productRow) => {
     const product = productRow.producto;
@@ -898,12 +956,21 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
       const produccionRealDia = hasRealData ? realDailyMap.get(realKey) : null;
       const diferenciaPiezas = hasRealData ? produccionRealDia - produccionSugeridaDia : null;
 =======
+<<<<<<< HEAD
+      const baseConColchonDia = pronosticoVentaDia + colchonDiario;
+      const produccionSugeridaDia = getProduccionSugerida(product, baseConColchonDia);
+      const realKey = `${product}|${key}`;
+      const hasRealData = realDailyMap.has(realKey);
+      const produccionRealDia = hasRealData ? realDailyMap.get(realKey) : null;
+      const diferenciaPiezas = hasRealData ? produccionRealDia - produccionSugeridaDia : null;
+=======
       const produccionPronosticadaDia = Math.ceil(pronosticoVentaDia + colchonDiario);
       const realKey = `${product}|${key}`;
       const hasRealData = realDailyMap.has(realKey);
       const produccionRealDia = hasRealData ? realDailyMap.get(realKey) : null;
       const diferenciaPiezas = hasRealData ? produccionRealDia - produccionPronosticadaDia : null;
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
 
       let estatus = "Sin dato real";
       if (hasRealData && diferenciaPiezas < 0) estatus = "Riesgo faltante";
@@ -924,8 +991,14 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
         reglaOperativa: getReglaOperativaLabel(product, baseConColchonDia),
         produccionSugeridaDia,
 =======
+<<<<<<< HEAD
+        baseConColchonDia,
+        reglaOperativa: getReglaOperativaLabel(product, baseConColchonDia),
+        produccionSugeridaDia,
+=======
         produccionPronosticadaDia,
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
         produccionRealDia,
         hasRealData,
         diferenciaPiezas,
@@ -941,6 +1014,11 @@ function summarizeDailyMonth(rows) {
   const colchonDiarioMensual = rows.reduce((sum, row) => sum + row.colchonDiario, 0);
   const baseConColchonMensual = rows.reduce((sum, row) => sum + row.baseConColchonDia, 0);
   const produccionSugeridaMensual = rows.reduce((sum, row) => sum + row.produccionSugeridaDia, 0);
+=======
+<<<<<<< HEAD
+  const colchonDiarioMensual = rows.reduce((sum, row) => sum + row.colchonDiario, 0);
+  const baseConColchonMensual = rows.reduce((sum, row) => sum + row.baseConColchonDia, 0);
+  const produccionSugeridaMensual = rows.reduce((sum, row) => sum + row.produccionSugeridaDia, 0);
   const produccionRealMensual = rows.reduce((sum, row) => sum + (row.produccionRealDia || 0), 0);
   const diferenciaMensual = produccionRealMensual - produccionSugeridaMensual;
   const precision =
@@ -948,12 +1026,17 @@ function summarizeDailyMonth(rows) {
       ? (1 - Math.abs(produccionSugeridaMensual - produccionRealMensual) / produccionRealMensual) * 100
 =======
   const produccionPronosticadaMensual = rows.reduce((sum, row) => sum + row.produccionPronosticadaDia, 0);
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
   const produccionRealMensual = rows.reduce((sum, row) => sum + (row.produccionRealDia || 0), 0);
-  const diferenciaMensual = produccionRealMensual - produccionPronosticadaMensual;
+  const diferenciaMensual = produccionRealMensual - produccionSugeridaMensual;
   const precision =
     produccionRealMensual > 0
+<<<<<<< HEAD
+      ? (1 - Math.abs(produccionSugeridaMensual - produccionRealMensual) / produccionRealMensual) * 100
+=======
       ? (1 - Math.abs(produccionPronosticadaMensual - produccionRealMensual) / produccionRealMensual) * 100
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
       : 0;
 
   return {
@@ -963,8 +1046,14 @@ function summarizeDailyMonth(rows) {
     baseConColchonMensual,
     produccionSugeridaMensual,
 =======
+<<<<<<< HEAD
+    colchonDiarioMensual,
+    baseConColchonMensual,
+    produccionSugeridaMensual,
+=======
     produccionPronosticadaMensual,
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     produccionRealMensual,
     diferenciaMensual,
     precision,
@@ -982,6 +1071,11 @@ function exportToExcel(rows, summary) {
     "Base con colchon": Number((r.baseConColchon || 0).toFixed(2)),
     "Regla operativa": r.reglaOperativa,
     "Produccion sugerida": r.produccionSugerida,
+=======
+<<<<<<< HEAD
+    "Base con colchon": Number((r.baseConColchon || 0).toFixed(2)),
+    "Regla operativa": r.reglaOperativa,
+    "Produccion sugerida": r.produccionSugerida,
     "Inventario objetivo": r.inventarioObjetivo,
     "Existencia sucursales + CF": r.sumaSucCf,
     "Base produccion recomendada": Number((r.baseProduccionRecomendada || 0).toFixed(2)),
@@ -990,12 +1084,18 @@ function exportToExcel(rows, summary) {
     "Diferencia real vs sugerida": r.diferenciaReal,
 =======
     "Produccion pronosticada": r.produccionPronosticada,
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     "Inventario objetivo": r.inventarioObjetivo,
     "Existencia sucursales + CF": r.sumaSucCf,
+    "Base produccion recomendada": Number((r.baseProduccionRecomendada || 0).toFixed(2)),
     "Produccion recomendada": r.produccionRecomendada,
     "Produccion real": r.produccionReal,
+<<<<<<< HEAD
+    "Diferencia real vs sugerida": r.diferenciaReal,
+=======
     "Diferencia real vs pronosticada": r.diferenciaReal,
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     "Precision %": r.precision === null ? "" : Number(r.precision.toFixed(1)),
     Confianza: Number(r.confianza.toFixed(1)),
     Estatus: STATUS_META[r.estatus]?.label || r.estatus,
@@ -1008,11 +1108,18 @@ function exportToExcel(rows, summary) {
     { Indicador: "Produccion real", Valor: summary.totalReal },
     { Indicador: "Brecha real vs sugerida", Valor: summary.brechaTotal },
 =======
+<<<<<<< HEAD
+    { Indicador: "Produccion sugerida con regla operativa", Valor: summary.totalPronosticada },
+    { Indicador: "Produccion recomendada", Valor: summary.totalRecomendada },
+    { Indicador: "Produccion real", Valor: summary.totalReal },
+    { Indicador: "Brecha real vs sugerida", Valor: summary.brechaTotal },
+=======
     { Indicador: "Produccion pronosticada con colchon", Valor: summary.totalPronosticada },
     { Indicador: "Produccion recomendada", Valor: summary.totalRecomendada },
     { Indicador: "Produccion real", Valor: summary.totalReal },
     { Indicador: "Brecha real vs pronosticada", Valor: summary.brechaTotal },
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     { Indicador: "Precision ejecutiva", Valor: `${summary.precisionEjecutiva.toFixed(1)}%` },
     { Indicador: "Productos en riesgo", Valor: summary.riesgoFaltante },
     { Indicador: "Productos con sobreproduccion", Valor: summary.sobreproduccion },
@@ -1032,8 +1139,14 @@ function exportDailyToExcel(rows, summary) {
     { Indicador: "Base con colchon mensual", Valor: Number(summary.baseConColchonMensual.toFixed(2)) },
     { Indicador: "Produccion sugerida mensual", Valor: summary.produccionSugeridaMensual },
 =======
+<<<<<<< HEAD
+    { Indicador: "Colchon aplicado mensual", Valor: Number(summary.colchonDiarioMensual.toFixed(2)) },
+    { Indicador: "Base con colchon mensual", Valor: Number(summary.baseConColchonMensual.toFixed(2)) },
+    { Indicador: "Produccion sugerida mensual", Valor: summary.produccionSugeridaMensual },
+=======
     { Indicador: "Produccion pronosticada mensual", Valor: summary.produccionPronosticadaMensual },
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     { Indicador: "Produccion real mensual", Valor: summary.produccionRealMensual },
     { Indicador: "Diferencia mensual", Valor: summary.diferenciaMensual },
     { Indicador: "Precision %", Valor: Number(summary.precision.toFixed(1)) },
@@ -1051,8 +1164,14 @@ function exportDailyToExcel(rows, summary) {
     "Regla operativa": row.reglaOperativa,
     "Produccion sugerida dia": row.produccionSugeridaDia,
 =======
+<<<<<<< HEAD
+    "Base con colchon": Number((row.baseConColchonDia || 0).toFixed(2)),
+    "Regla operativa": row.reglaOperativa,
+    "Produccion sugerida dia": row.produccionSugeridaDia,
+=======
     "Produccion pronosticada dia": row.produccionPronosticadaDia,
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     "Produccion real dia": row.produccionRealDia ?? "",
     "Diferencia piezas": row.diferenciaPiezas ?? "",
     Estatus: STATUS_META[row.estatus]?.label || row.estatus,
@@ -1064,8 +1183,12 @@ function exportDailyToExcel(rows, summary) {
 <<<<<<< HEAD
   XLSX.writeFile(wb, "produccion_diaria_sugerida.xlsx");
 =======
+<<<<<<< HEAD
+  XLSX.writeFile(wb, "produccion_diaria_sugerida.xlsx");
+=======
   XLSX.writeFile(wb, "produccion_diaria_pronosticada.xlsx");
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
 }
 
 function UploadBox({ title, description, onFile, fileName, required, accept = ".xlsx,.xls" }) {
@@ -1230,8 +1353,12 @@ function App() {
 <<<<<<< HEAD
     const totalPronosticada = comparableForecast.reduce((a, r) => a + r.produccionSugerida, 0);
 =======
+<<<<<<< HEAD
+    const totalPronosticada = comparableForecast.reduce((a, r) => a + r.produccionSugerida, 0);
+=======
     const totalPronosticada = comparableForecast.reduce((a, r) => a + r.produccionPronosticada, 0);
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     const totalRecomendada = comparableForecast.reduce((a, r) => a + r.produccionRecomendada, 0);
     const totalReal = comparableForecast.reduce((a, r) => a + r.produccionReal, 0);
     const totalColchon = comparableForecast.reduce((a, r) => a + r.colchonOperativo, 0);
@@ -1266,6 +1393,9 @@ function App() {
     .slice(0, 5);
 
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
   const hasLoadedRealProduction = realProduction.length > 0;
   const executiveRows = forecast.filter((row) => row.hasRealData);
   const executiveTotals = {
@@ -1300,12 +1430,17 @@ function App() {
     !stockRows.length && "Carga stock fijo para ordenar productos correctamente.",
   ].filter(Boolean);
 
+<<<<<<< HEAD
+  const chartRows = [
+    { label: "Sugerida", value: summary.totalPronosticada },
+=======
   const chartRows = [
     { label: "Sugerida", value: summary.totalPronosticada },
 =======
   const chartRows = [
     { label: "Pronosticada", value: summary.totalPronosticada },
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
     { label: "Recomendada", value: summary.totalRecomendada },
     { label: "Real", value: summary.totalReal },
   ];
@@ -1331,9 +1466,15 @@ function App() {
           <span>Colchón: 15 piezas si el pronóstico es 300 o más; 10 piezas si es menor.</span>
           <span>Pasteles: producción sugerida mínima de 10 piezas y múltiplos de 5; si es menor a 8, no producir.</span>
 =======
+<<<<<<< HEAD
+          <span>Base con colchón = pronóstico de venta + colchón operativo.</span>
+          <span>Colchón: 15 piezas si el pronóstico es 300 o más; 10 piezas si es menor.</span>
+          <span>Pasteles: producción sugerida mínima de 10 piezas y múltiplos de 5; si es menor a 8, no producir.</span>
+=======
           <span>Producción pronosticada = pronóstico de venta + colchón operativo.</span>
           <span>Colchón: 15 piezas si el pronóstico es 300 o más; 10 piezas si es menor.</span>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
           <span>Recomendación = inventario objetivo + pronóstico con colchón - existencias.</span>
         </div>
 
@@ -1351,8 +1492,12 @@ function App() {
 <<<<<<< HEAD
             <h2>Producción sugerida vs real</h2>
 =======
+<<<<<<< HEAD
+            <h2>Producción sugerida vs real</h2>
+=======
             <h2>Producción pronosticada vs real</h2>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
             <p>Calcula colchón operativo, detecta brechas y prioriza productos con riesgo de faltante.</p>
           </div>
           <button className="primary" onClick={() => exportToExcel(filtered, summary)} disabled={!forecast.length}>
@@ -1366,8 +1511,12 @@ function App() {
 <<<<<<< HEAD
             label="Producción sugerida"
 =======
+<<<<<<< HEAD
+            label="Producción sugerida"
+=======
             label="Pronóstico con colchón"
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
             value={formatNumber(summary.totalPronosticada)}
             caption={`Colchón: ${formatNumber(summary.totalColchon)}`}
           />
@@ -1394,6 +1543,9 @@ function App() {
         </section>
 
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
         <section className="loaded-files-section">
           <div className="section-heading compact-heading">
             <div>
@@ -1427,8 +1579,11 @@ function App() {
           </section>
         )}
 
+<<<<<<< HEAD
+=======
 =======
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
         <section className="executive-grid">
           <div className="panel">
             <div className="panel-title">
@@ -1599,6 +1754,126 @@ function App() {
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
         </section>
 
+        <section className="executive-summary-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Comparativo principal</span>
+              <h3>Resumen Ejecutivo</h3>
+              <p>
+                {hasLoadedRealProduction
+                  ? "Vista consolidada para revisar producción sugerida contra producción real."
+                  : "Carga producción real para ver el comparativo."}
+              </p>
+            </div>
+            <BarChart3 size={24} />
+          </div>
+
+          {hasLoadedRealProduction ? (
+            <>
+              <section className="executive-summary-kpis">
+                <KpiCard
+                  icon={PackageCheck}
+                  label="Productos analizados"
+                  value={formatNumber(executiveTotals.totalProductos)}
+                  caption={`${formatNumber(executiveRows.length)} con producción real`}
+                />
+                <KpiCard
+                  icon={ShieldCheck}
+                  label="Producción sugerida total"
+                  value={formatNumber(executiveTotals.totalPronosticada)}
+                  caption="Productos comparables"
+                />
+                <KpiCard
+                  icon={Database}
+                  label="Producción real total"
+                  value={formatNumber(executiveTotals.totalReal)}
+                  caption="Fuente cargada por el usuario"
+                />
+                <KpiCard
+                  icon={RefreshCw}
+                  label="Diferencia total"
+                  value={formatNumber(executiveTotals.diferenciaTotal)}
+                  caption="Real - pronóstico"
+                  tone={executiveTotals.diferenciaTotal < 0 ? "danger" : executiveTotals.diferenciaTotal > 0 ? "warn" : "ok"}
+                />
+                <KpiCard
+                  icon={CheckCircle2}
+                  label="Precisión general"
+                  value={formatPercent(executiveTotals.precisionGeneral, 1)}
+                  caption="Agregado comparable"
+                  tone={executiveTotals.precisionGeneral < 80 ? "danger" : executiveTotals.precisionGeneral < 90 ? "warn" : "ok"}
+                />
+                <KpiCard
+                  icon={AlertTriangle}
+                  label="Diferencia alta"
+                  value={formatNumber(highDifferenceProducts.length)}
+                  caption=">= 50 piezas o precisión < 80%"
+                  tone={highDifferenceProducts.length ? "danger" : "ok"}
+                />
+              </section>
+
+              <section className="table-card executive-review-card">
+                <div className="table-title">
+                  <h3>Productos a revisar</h3>
+                  <p>Productos con mayor diferencia absoluta contra producción real.</p>
+                </div>
+                <table className="executive-review-table">
+                  <thead>
+                    <tr>
+                      <th>Producto</th>
+                      <th>Producción sugerida</th>
+                      <th>Producción real</th>
+                      <th>Diferencia</th>
+                      <th>Precisión %</th>
+                      <th>Estatus</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {productsToReview.map((row) => {
+                      const meta = reviewStatusMeta(row.precision);
+                      return (
+                        <tr key={`executive-${row.producto}`}>
+                          <td>{row.producto}</td>
+                          <td>{formatNumber(row.produccionSugerida)}</td>
+                          <td>{formatNumber(row.produccionReal)}</td>
+                          <td className={row.diferenciaReal < 0 ? "negative" : row.diferenciaReal > 0 ? "positive" : ""}>
+                            {row.diferenciaReal > 0 ? "+" : ""}
+                            {formatNumber(row.diferenciaReal)}
+                          </td>
+                          <td>{row.precision === null ? "-" : formatPercent(row.precision, 1)}</td>
+                          <td>
+                            <span className={`pill ${meta.className}`}>{meta.label}</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {!productsToReview.length && (
+                  <div className="empty">
+                  No hay productos comparables para revisar con los datos cargados.
+                </div>
+              )}
+            </section>
+            </>
+          ) : (
+            <>
+              <div className="empty executive-summary-empty">
+                Carga producción real para ver el comparativo.
+              </div>
+              <section className="table-card executive-review-card">
+                <div className="table-title">
+                  <h3>Productos a revisar</h3>
+                  <p>Productos con mayor diferencia absoluta contra producción real.</p>
+                </div>
+                <div className="empty">
+                  Carga producción real para ver los productos a revisar.
+                </div>
+              </section>
+            </>
+          )}
+        </section>
+
         <section className="uploads">
           <UploadBox
             title="Stock fijo"
@@ -1700,8 +1975,12 @@ function App() {
 <<<<<<< HEAD
               <h3>Producción diaria sugerida</h3>
 =======
+<<<<<<< HEAD
+              <h3>Producción diaria sugerida</h3>
+=======
               <h3>Producción diaria pronosticada</h3>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
               <p>Promedia la venta por día de semana, incluyendo días sin venta, y asigna el pronóstico a cada fecha del mes seleccionado.</p>
               <strong className="row-counter">{formatNumber(dailyRows.length)} filas diarias generadas</strong>
             </div>
@@ -1723,9 +2002,14 @@ function App() {
               label="Producción sugerida mensual"
               value={formatNumber(dailySummary.produccionSugeridaMensual, 0)}
 =======
+<<<<<<< HEAD
+              label="Producción sugerida mensual"
+              value={formatNumber(dailySummary.produccionSugeridaMensual, 0)}
+=======
               label="Producción pronosticada mensual"
               value={formatNumber(dailySummary.produccionPronosticadaMensual, 0)}
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
               caption={`Colchón diario: ${dailyBufferPct}%`}
             />
             <KpiCard
@@ -1742,8 +2026,12 @@ function App() {
 <<<<<<< HEAD
               caption="Real vs producción sugerida diaria"
 =======
+<<<<<<< HEAD
+              caption="Real vs producción sugerida diaria"
+=======
               caption="Real vs pronóstico diario agregado"
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
               tone={dailySummary.precision < 80 ? "danger" : dailySummary.precision < 90 ? "warn" : "ok"}
             />
           </section>
@@ -1816,8 +2104,11 @@ function App() {
                 <tr>
 <<<<<<< HEAD
 =======
+<<<<<<< HEAD
+=======
                   <th>Fecha</th>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                   <th>Día</th>
                   <th>Producto</th>
                   <th>Promedio aplicado</th>
@@ -1827,8 +2118,13 @@ function App() {
                   <th>Base con colchón</th>
                   <th>Producción sugerida</th>
 =======
+<<<<<<< HEAD
+                  <th>Base con colchón</th>
+                  <th>Producción sugerida</th>
+=======
                   <th>Producción pronosticada</th>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                   <th>Producción real</th>
                   <th>Diferencia</th>
                   <th>Estatus</th>
@@ -1841,8 +2137,11 @@ function App() {
                     <tr key={`${row.fecha}-${row.producto}`}>
 <<<<<<< HEAD
 =======
+<<<<<<< HEAD
+=======
                       <td>{row.fechaDisplay}</td>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                       <td>{row.dia}</td>
                       <td>{row.producto}</td>
                       <td>{row.promedioUsado.toFixed(2)}</td>
@@ -1852,8 +2151,13 @@ function App() {
                       <td>{row.baseConColchonDia.toFixed(2)}</td>
                       <td className="strong">{row.produccionSugeridaDia}</td>
 =======
+<<<<<<< HEAD
+                      <td>{row.baseConColchonDia.toFixed(2)}</td>
+                      <td className="strong">{row.produccionSugeridaDia}</td>
+=======
                       <td className="strong">{row.produccionPronosticadaDia}</td>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                       <td>{row.produccionRealDia ?? "-"}</td>
                       <td className={row.diferenciaPiezas < 0 ? "negative" : row.diferenciaPiezas > 0 ? "positive" : ""}>
                         {row.diferenciaPiezas === null ? "-" : `${row.diferenciaPiezas > 0 ? "+" : ""}${formatNumber(row.diferenciaPiezas)}`}
@@ -1876,14 +2180,21 @@ function App() {
 <<<<<<< HEAD
                 No hay datos diarios para los filtros seleccionados. Revisa el mes, la fecha o el producto.
 =======
+<<<<<<< HEAD
+                No hay datos diarios para los filtros seleccionados. Revisa el mes, la fecha o el producto.
+=======
                 No hay filas diarias con los filtros actuales.
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
               </div>
             )}
           </section>
         </section>
 
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
         <section className="interpretation-notes">
           <div className="section-heading compact-heading">
             <div>
@@ -1901,8 +2212,11 @@ function App() {
           </div>
         </section>
 
+<<<<<<< HEAD
+=======
 =======
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
         <section className="validation-section">
           <div className="section-heading">
             <div>
@@ -1949,16 +2263,25 @@ function App() {
                   value={formatNumber(validationSummary.produccionSugeridaMensual)}
                   caption={`Regla operativa con ${dailyBufferPct}% de colchón`}
 =======
+<<<<<<< HEAD
+                  label="Producción sugerida mensual"
+                  value={formatNumber(validationSummary.produccionSugeridaMensual)}
+                  caption={`Regla operativa con ${dailyBufferPct}% de colchón`}
+=======
                   label="Producción pronosticada mensual"
                   value={formatNumber(validationSummary.produccionPronosticadaMensual)}
                   caption={`CEIL diario con ${dailyBufferPct}% de colchón`}
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                 />
                 <KpiCard
                   icon={Database}
                   label="Producción real"
                   value={formatNumber(validationForecast.produccionReal)}
                   caption={`Diferencia: ${formatNumber(
+<<<<<<< HEAD
+                    validationForecast.produccionReal - validationSummary.produccionSugeridaMensual
+=======
 <<<<<<< HEAD
                     validationForecast.produccionReal - validationSummary.produccionSugeridaMensual
                   )}`}
@@ -1968,12 +2291,17 @@ function App() {
                       : validationForecast.produccionReal > validationSummary.produccionSugeridaMensual
 =======
                     validationForecast.produccionReal - validationSummary.produccionPronosticadaMensual
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                   )}`}
                   tone={
-                    validationForecast.produccionReal < validationSummary.produccionPronosticadaMensual
+                    validationForecast.produccionReal < validationSummary.produccionSugeridaMensual
                       ? "danger"
+<<<<<<< HEAD
+                      : validationForecast.produccionReal > validationSummary.produccionSugeridaMensual
+=======
                       : validationForecast.produccionReal > validationSummary.produccionPronosticadaMensual
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                         ? "warn"
                         : "ok"
                   }
@@ -2015,6 +2343,9 @@ function App() {
                     </div>
                     <div>
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                       <span>Colchón aplicado</span>
                       <strong>{formatNumber(validationSummary.colchonDiarioMensual, 2)}</strong>
                     </div>
@@ -2025,10 +2356,13 @@ function App() {
                     <div>
                       <span>Producción sugerida final</span>
                       <strong>{formatNumber(validationSummary.produccionSugeridaMensual)}</strong>
+<<<<<<< HEAD
+=======
 =======
                       <span>Producción con colchón</span>
                       <strong>{formatNumber(validationSummary.produccionPronosticadaMensual)}</strong>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                     </div>
                     <div>
                       <span>Producción real</span>
@@ -2044,8 +2378,12 @@ function App() {
 <<<<<<< HEAD
                                   validationSummary.produccionSugeridaMensual - validationForecast.produccionReal
 =======
+<<<<<<< HEAD
+                                  validationSummary.produccionSugeridaMensual - validationForecast.produccionReal
+=======
                                   validationSummary.produccionPronosticadaMensual - validationForecast.produccionReal
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                                 ) /
                                   validationForecast.produccionReal) *
                                 100,
@@ -2139,9 +2477,14 @@ function App() {
                     <h4>3. Pronóstico diario y producción sugerida</h4>
                     <p>Cada fila muestra colchón, base con colchón y la regla operativa aplicada.</p>
 =======
+<<<<<<< HEAD
+                    <h4>3. Pronóstico diario y producción sugerida</h4>
+                    <p>Cada fila muestra colchón, base con colchón y la regla operativa aplicada.</p>
+=======
                     <h4>3. Pronóstico diario y producción con colchón</h4>
                     <p>Cada fila muestra el promedio aplicado y el resultado de la fórmula diaria.</p>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                   </div>
                   <strong>{validationDailyRows.length} días</strong>
                 </div>
@@ -2153,17 +2496,23 @@ function App() {
                         <th>Día</th>
                         <th>Promedio aplicado</th>
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                         <th>Pronóstico de venta</th>
                         <th>Colchón aplicado</th>
                         <th>Base con colchón</th>
                         <th>Regla operativa aplicada</th>
                         <th>Producción sugerida final</th>
+<<<<<<< HEAD
+=======
 =======
                         <th>Pronóstico diario</th>
                         <th>Colchón {dailyBufferPct}%</th>
                         <th>Fórmula</th>
                         <th>Producción pronosticada</th>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                         <th>Producción real diaria</th>
                         <th>Diferencia</th>
                       </tr>
@@ -2178,16 +2527,24 @@ function App() {
                           <td>{formatNumber(row.colchonDiario, 2)}</td>
 <<<<<<< HEAD
                           <td>{formatNumber(row.baseConColchonDia, 2)}</td>
+=======
+<<<<<<< HEAD
+                          <td>{formatNumber(row.baseConColchonDia, 2)}</td>
                           <td className="formula-cell">
                             {row.reglaOperativa}
                           </td>
                           <td className="strong">{formatNumber(row.produccionSugeridaDia)}</td>
 =======
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                           <td className="formula-cell">
-                            CEIL({formatNumber(row.pronosticoVentaDia, 2)} + {formatNumber(row.colchonDiario, 2)})
+                            {row.reglaOperativa}
                           </td>
+<<<<<<< HEAD
+                          <td className="strong">{formatNumber(row.produccionSugeridaDia)}</td>
+=======
                           <td className="strong">{formatNumber(row.produccionPronosticadaDia)}</td>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                           <td>{row.produccionRealDia === null ? "-" : formatNumber(row.produccionRealDia)}</td>
                           <td>{row.diferenciaPiezas === null ? "-" : formatNumber(row.diferenciaPiezas)}</td>
                         </tr>
@@ -2215,8 +2572,12 @@ function App() {
 <<<<<<< HEAD
                 <th>Producción sugerida</th>
 =======
+<<<<<<< HEAD
+                <th>Producción sugerida</th>
+=======
                 <th>Producción pronosticada</th>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                 <th>Stock objetivo</th>
                 <th>Existencias</th>
                 <th>Producción recomendada</th>
@@ -2238,8 +2599,12 @@ function App() {
 <<<<<<< HEAD
                     <td>{r.produccionSugerida}</td>
 =======
+<<<<<<< HEAD
+                    <td>{r.produccionSugerida}</td>
+=======
                     <td>{r.produccionPronosticada}</td>
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
                     <td>{r.inventarioObjetivo}</td>
                     <td>{r.sumaSucCf}</td>
                     <td className="strong">{r.produccionRecomendada}</td>

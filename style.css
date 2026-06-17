@@ -477,6 +477,9 @@ label select {
 }
 
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
 .loaded-files-section,
 .interpretation-notes {
   display: grid;
@@ -645,8 +648,11 @@ label select {
   border-radius: 8px;
 }
 
+<<<<<<< HEAD
+=======
 =======
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
 .validation-section {
   display: grid;
   gap: 14px;
@@ -791,8 +797,12 @@ label select {
 <<<<<<< HEAD
   min-width: 1540px;
 =======
+<<<<<<< HEAD
+  min-width: 1540px;
+=======
   min-width: 1320px;
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
 }
 
 .formula-cell {
@@ -859,8 +869,12 @@ table {
 <<<<<<< HEAD
   min-width: 1660px;
 =======
+<<<<<<< HEAD
+  min-width: 1660px;
+=======
   min-width: 1540px;
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
 }
 
 th {
@@ -944,6 +958,9 @@ tr:nth-child(even) td {
   }
 
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
   .file-status-grid,
   .notes-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -958,8 +975,11 @@ tr:nth-child(even) td {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+<<<<<<< HEAD
+=======
 =======
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
   .validation-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -987,7 +1007,11 @@ tr:nth-child(even) td {
 <<<<<<< HEAD
   .executive-summary-kpis,
 =======
+<<<<<<< HEAD
+  .executive-summary-kpis,
+=======
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
   .validation-summary,
   .validation-grid {
     grid-template-columns: 1fr;
@@ -999,6 +1023,9 @@ tr:nth-child(even) td {
   }
 
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
   .analysis-context {
     justify-content: flex-start;
   }
@@ -1012,8 +1039,11 @@ tr:nth-child(even) td {
     grid-template-columns: 1fr;
   }
 
+<<<<<<< HEAD
+=======
 =======
 >>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
+>>>>>>> efc5c54caee70e751434a167c4851e8f7c746aef
   .validation-product-select select {
     min-width: 0;
     width: 100%;
