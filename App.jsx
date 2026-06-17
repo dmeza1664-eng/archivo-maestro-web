@@ -3,14 +3,12 @@ import { createRoot } from "react-dom/client";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import {
-  AlertTriangle,
   BarChart3,
   CheckCircle2,
   Database,
   Download,
   FileSpreadsheet,
   PackageCheck,
-  RefreshCw,
   Search,
   ShieldCheck,
   Target,
@@ -90,14 +88,6 @@ const STATUS_META = {
   Revisar: { className: "warn", label: "Revisar" },
 };
 
-function reviewStatusMeta(precision) {
-  if (precision === null || precision === undefined) return { className: "muted", label: "Sin dato real" };
-  if (precision >= 95) return { className: "ok", label: "Excelente" };
-  if (precision >= 90) return { className: "ok", label: "Bueno" };
-  if (precision >= 80) return { className: "warn", label: "Revisar" };
-  return { className: "danger", label: "Bajo" };
-}
-
 const WEEKDAYS = [
   { index: 1, label: "Lunes" },
   { index: 2, label: "Martes" },
@@ -149,7 +139,7 @@ function isOperationalCakeProduct(value) {
 function getProduccionSugeridaPastel(value) {
   const numericValue = Number(value) || 0;
   if (numericValue < 8) return 0;
-  return Math.max(10, Math.round(numericValue / 5) * 5);
+  return 10 + Math.floor((numericValue - 8) / 5) * 5;
 }
 
 function getProduccionSugerida(producto, value) {
@@ -1132,42 +1122,13 @@ function App() {
     };
   }, [comparableForecast, forecast]);
 
-  const topFaltantes = [...comparableForecast]
-    .filter((r) => r.diferenciaReal < 0)
-    .sort((a, b) => a.diferenciaReal - b.diferenciaReal)
-    .slice(0, 5);
-
-  const topExcedentes = [...comparableForecast]
-    .filter((r) => r.diferenciaReal > 0)
-    .sort((a, b) => b.diferenciaReal - a.diferenciaReal)
-    .slice(0, 5);
-
-  const hasLoadedRealProduction = Array.isArray(realProduction) && realProduction.length > 0;
-  const executiveRows = forecast.filter((row) => row.hasRealData);
-  const executiveTotals = {
-    totalProductos: forecast.length,
-    totalPronosticada: executiveRows.reduce((sum, row) => sum + row.produccionSugerida, 0),
-    totalReal: executiveRows.reduce((sum, row) => sum + row.produccionReal, 0),
-    diferenciaTotal: executiveRows.reduce((sum, row) => sum + row.diferenciaReal, 0),
-  };
-  executiveTotals.precisionGeneral =
-    executiveTotals.totalReal > 0
-      ? (1 - Math.abs(executiveTotals.totalPronosticada - executiveTotals.totalReal) / executiveTotals.totalReal) * 100
-      : 0;
-
-  const highDifferenceProducts = executiveRows.filter(
-    (row) => Math.abs(row.diferenciaReal) >= 50 || (row.precision !== null && row.precision < 80)
-  );
-  const productsToReview = [...(highDifferenceProducts.length ? highDifferenceProducts : executiveRows)]
-    .sort((a, b) => Math.abs(b.diferenciaReal) - Math.abs(a.diferenciaReal))
-    .slice(0, 10);
-
-  const chartRows = [
-    { label: "Sugerida", value: summary.totalPronosticada },
-    { label: "Recomendada", value: summary.totalRecomendada },
-    { label: "Real", value: summary.totalReal },
+  const loadedFileItems = [
+    { label: "Ventas", loaded: Boolean(files.ventas || ventas.length) },
+    { label: "Stock fijo", loaded: Boolean(files.stock || stockRows.length) },
+    { label: "Producción real", loaded: Boolean(files.real || realProduction.length) },
+    { label: "Bajas/devoluciones", loaded: Boolean(files.bajas || bajas.length) },
+    { label: "Existencias", loaded: Boolean(files.existencias || existencias.length) },
   ];
-  const chartMax = Math.max(1, ...chartRows.map((r) => r.value));
 
   return (
     <div className="app">
@@ -1201,208 +1162,73 @@ function App() {
         <header className="top">
           <div>
             <span className="eyebrow">Dashboard ejecutivo</span>
-            <h2>Producción sugerida vs real</h2>
-            <p>Calcula colchón operativo, detecta brechas y prioriza productos con riesgo de faltante.</p>
+            <h2>Producción diaria sugerida</h2>
+            <p>Planea la producción por día usando el promedio histórico del mismo día de semana.</p>
           </div>
           <button className="primary" onClick={() => exportToExcel(filtered, summary)} disabled={!forecast.length}>
-            <Download size={18} /> Exportar dashboard
+            <Download size={18} /> Exportar datos para MySQL
           </button>
         </header>
-
-        <section className="kpis">
-          <KpiCard
-            icon={ShieldCheck}
-            label="Producción sugerida"
-            value={formatNumber(summary.totalPronosticada)}
-            caption={`Colchón: ${formatNumber(summary.totalColchon)}`}
-          />
-          <KpiCard
-            icon={Target}
-            label="Producción recomendada"
-            value={formatNumber(summary.totalRecomendada)}
-            caption={`${days} días de horizonte`}
-          />
-          <KpiCard
-            icon={Database}
-            label="Producción real"
-            value={formatNumber(summary.totalReal)}
-            caption={`Brecha: ${formatNumber(summary.brechaTotal)}`}
-            tone={summary.brechaTotal < 0 ? "danger" : summary.brechaTotal > 0 ? "warn" : "ok"}
-          />
-          <KpiCard
-            icon={CheckCircle2}
-            label="Precisión"
-            value={formatPercent(summary.precisionEjecutiva, 1)}
-            caption={`${formatNumber(summary.confianza)}% confianza promedio`}
-            tone={summary.precisionEjecutiva < 80 ? "danger" : summary.precisionEjecutiva < 90 ? "warn" : "ok"}
-          />
-        </section>
-
-        <section className="executive-grid">
-          <div className="panel">
-            <div className="panel-title">
-              <div>
-                <h3>Lectura ejecutiva</h3>
-                <p>{summary.sinDatoReal ? "Carga producción real para completar la comparación." : "Comparativo consolidado contra producción real."}</p>
-              </div>
-              <BarChart3 size={22} />
-            </div>
-            <div className="bars">
-              {chartRows.map((row) => (
-                <div className="bar-row" key={row.label}>
-                  <span>{row.label}</span>
-                  <div className="bar-track">
-                    <div className={`bar-fill ${row.label.toLowerCase()}`} style={{ width: `${(row.value / chartMax) * 100}%` }} />
-                  </div>
-                  <strong>{formatNumber(row.value)}</strong>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="panel status-panel">
-            <div className="metric-line danger">
-              <AlertTriangle size={20} />
-              <div>
-                <strong>{summary.riesgoFaltante}</strong>
-                <span>productos con riesgo de faltante</span>
-              </div>
-            </div>
-            <div className="metric-line warn">
-              <RefreshCw size={20} />
-              <div>
-                <strong>{summary.sobreproduccion}</strong>
-                <span>productos con sobreproducción</span>
-              </div>
-            </div>
-            <div className="metric-line muted">
-              <FileSpreadsheet size={20} />
-              <div>
-                <strong>{summary.sinDatoReal}</strong>
-                <span>productos sin dato real</span>
-              </div>
-            </div>
-          </div>
-        </section>
 
         <section className="executive-summary-section">
           <div className="section-heading">
             <div>
-              <span className="eyebrow">Comparativo principal</span>
+              <span className="eyebrow">Vista general</span>
               <h3>Resumen Ejecutivo</h3>
-              <p>
-                {hasLoadedRealProduction
-                  ? "Vista consolidada para revisar producción sugerida contra producción real."
-                  : "Carga producción real para ver el comparativo."}
-              </p>
+              <p>Resumen operativo del mes seleccionado, sin comparativos contra producción real incompleta.</p>
             </div>
             <BarChart3 size={24} />
           </div>
 
-          {hasLoadedRealProduction ? (
-            <>
-              <section className="executive-summary-kpis">
-                <KpiCard
-                  icon={PackageCheck}
-                  label="Productos analizados"
-                  value={formatNumber(executiveTotals.totalProductos)}
-                  caption={`${formatNumber(executiveRows.length)} con producción real`}
-                />
-                <KpiCard
-                  icon={ShieldCheck}
-                  label="Producción sugerida total"
-                  value={formatNumber(executiveTotals.totalPronosticada)}
-                  caption="Productos comparables"
-                />
-                <KpiCard
-                  icon={Database}
-                  label="Producción real total"
-                  value={formatNumber(executiveTotals.totalReal)}
-                  caption="Fuente cargada por el usuario"
-                />
-                <KpiCard
-                  icon={RefreshCw}
-                  label="Diferencia total"
-                  value={formatNumber(executiveTotals.diferenciaTotal)}
-                  caption="Real - pronóstico"
-                  tone={executiveTotals.diferenciaTotal < 0 ? "danger" : executiveTotals.diferenciaTotal > 0 ? "warn" : "ok"}
-                />
-                <KpiCard
-                  icon={CheckCircle2}
-                  label="Precisión general"
-                  value={formatPercent(executiveTotals.precisionGeneral, 1)}
-                  caption="Agregado comparable"
-                  tone={executiveTotals.precisionGeneral < 80 ? "danger" : executiveTotals.precisionGeneral < 90 ? "warn" : "ok"}
-                />
-                <KpiCard
-                  icon={AlertTriangle}
-                  label="Diferencia alta"
-                  value={formatNumber(highDifferenceProducts.length)}
-                  caption=">= 50 piezas o precisión < 80%"
-                  tone={highDifferenceProducts.length ? "danger" : "ok"}
-                />
-              </section>
+          <section className="executive-summary-kpis">
+            <KpiCard
+              icon={PackageCheck}
+              label="Productos analizados"
+              value={formatNumber(forecast.length)}
+              caption="Catálogo filtrado sin rebanadas"
+            />
+            <KpiCard
+              icon={BarChart3}
+              label="Pronóstico de venta mensual"
+              value={formatNumber(dailySummary.pronosticoVentaMensual, 0)}
+              caption="Suma de pronósticos diarios"
+            />
+            <KpiCard
+              icon={ShieldCheck}
+              label="Producción sugerida mensual"
+              value={formatNumber(dailySummary.produccionSugeridaMensual, 0)}
+              caption="Con regla operativa"
+            />
+            <KpiCard
+              icon={Target}
+              label="Mes analizado"
+              value={selectedMonth || "Sin mes"}
+              caption={`Colchón operativo: ${dailyBufferPct}%`}
+            />
+          </section>
+        </section>
 
-              <section className="table-card executive-review-card">
-                <div className="table-title">
-                  <h3>Productos a revisar</h3>
-                  <p>Productos con mayor diferencia absoluta contra producción real.</p>
-                </div>
-                <table className="executive-review-table">
-                  <thead>
-                    <tr>
-                      <th>Producto</th>
-                      <th>Producción sugerida</th>
-                      <th>Producción real</th>
-                      <th>Diferencia</th>
-                      <th>Precisión %</th>
-                      <th>Estatus</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {productsToReview.map((row) => {
-                      const meta = reviewStatusMeta(row.precision);
-                      return (
-                        <tr key={`executive-${row.producto}`}>
-                          <td>{row.producto}</td>
-                          <td>{formatNumber(row.produccionSugerida)}</td>
-                          <td>{formatNumber(row.produccionReal)}</td>
-                          <td className={row.diferenciaReal < 0 ? "negative" : row.diferenciaReal > 0 ? "positive" : ""}>
-                            {row.diferenciaReal > 0 ? "+" : ""}
-                            {formatNumber(row.diferenciaReal)}
-                          </td>
-                          <td>{row.precision === null ? "-" : formatPercent(row.precision, 1)}</td>
-                          <td>
-                            <span className={`pill ${meta.className}`}>{meta.label}</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                {!productsToReview.length && (
-                  <div className="empty">
-                  No hay productos comparables para revisar con los datos cargados.
-                </div>
-              )}
-            </section>
-            </>
-          ) : (
-            <>
-              <div className="empty executive-summary-empty">
-                Carga producción real para ver el comparativo.
+        <section className="loaded-files-section">
+          <div className="section-heading compact-heading">
+            <div>
+              <span className="eyebrow">Estado de carga</span>
+              <h3>Archivos cargados</h3>
+            </div>
+            <div className="loaded-context">
+              <span>Mes: {selectedMonth || "Sin mes"}</span>
+              {dailyDateFilter && <span>Fecha: {dailyDateFilter}</span>}
+              <span>Colchón: {dailyBufferPct}%</span>
+            </div>
+          </div>
+          <div className="file-status-grid">
+            {loadedFileItems.map((item) => (
+              <div className="file-status-item" key={item.label}>
+                <span className={`status-dot ${item.loaded ? "loaded" : ""}`} />
+                <strong>{item.label}</strong>
+                <small>{item.loaded ? "Cargado" : "Pendiente"}</small>
               </div>
-              <section className="table-card executive-review-card">
-                <div className="table-title">
-                  <h3>Productos a revisar</h3>
-                  <p>Productos con mayor diferencia absoluta contra producción real.</p>
-                </div>
-                <div className="empty">
-                  Carga producción real para ver los productos a revisar.
-                </div>
-              </section>
-            </>
-          )}
+            ))}
+          </div>
         </section>
 
         <section className="uploads">
@@ -1470,35 +1296,6 @@ function App() {
           </label>
         </section>
 
-        <section className="priority-grid">
-          <div className="panel">
-            <h3>Mayores faltantes</h3>
-            {topFaltantes.length ? (
-              topFaltantes.map((item) => (
-                <div className="priority-row" key={item.producto}>
-                  <span>{item.producto}</span>
-                  <strong>{formatNumber(item.diferenciaReal)}</strong>
-                </div>
-              ))
-            ) : (
-              <p className="soft">Sin faltantes detectados con los datos actuales.</p>
-            )}
-          </div>
-          <div className="panel">
-            <h3>Mayores excedentes</h3>
-            {topExcedentes.length ? (
-              topExcedentes.map((item) => (
-                <div className="priority-row" key={item.producto}>
-                  <span>{item.producto}</span>
-                  <strong>+{formatNumber(item.diferenciaReal)}</strong>
-                </div>
-              ))
-            ) : (
-              <p className="soft">Sin excedentes detectados con los datos actuales.</p>
-            )}
-          </div>
-        </section>
-
         <section className="daily-section">
           <div className="section-heading">
             <div>
@@ -1511,35 +1308,6 @@ function App() {
               <Download size={18} /> Exportar diario
             </button>
           </div>
-
-          <section className="daily-summary">
-            <KpiCard
-              icon={BarChart3}
-              label="Pronóstico venta mensual"
-              value={formatNumber(dailySummary.pronosticoVentaMensual, 0)}
-              caption={selectedMonth}
-            />
-            <KpiCard
-              icon={ShieldCheck}
-              label="Producción sugerida mensual"
-              value={formatNumber(dailySummary.produccionSugeridaMensual, 0)}
-              caption={`Colchón diario: ${dailyBufferPct}%`}
-            />
-            <KpiCard
-              icon={Database}
-              label="Producción real mensual"
-              value={formatNumber(dailySummary.produccionRealMensual, 0)}
-              caption={`Diferencia: ${formatNumber(dailySummary.diferenciaMensual, 0)}`}
-              tone={dailySummary.diferenciaMensual < 0 ? "danger" : dailySummary.diferenciaMensual > 0 ? "warn" : "ok"}
-            />
-            <KpiCard
-              icon={CheckCircle2}
-              label="Precisión %"
-              value={formatPercent(dailySummary.precision, 1)}
-              caption="Real vs producción sugerida diaria"
-              tone={dailySummary.precision < 80 ? "danger" : dailySummary.precision < 90 ? "warn" : "ok"}
-            />
-          </section>
 
           <section className="controls daily-controls">
             <label>
@@ -1614,33 +1382,20 @@ function App() {
                   <th>Colchón diario</th>
                   <th>Base con colchón</th>
                   <th>Producción sugerida</th>
-                  <th>Producción real</th>
-                  <th>Diferencia</th>
-                  <th>Estatus</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredDailyRows.map((row) => {
-                  const meta = STATUS_META[row.estatus] || STATUS_META.Revisar;
-                  return (
-                    <tr key={`${row.fecha}-${row.producto}`}>
-                      <td>{row.dia}</td>
-                      <td>{row.producto}</td>
-                      <td>{row.promedioUsado.toFixed(2)}</td>
-                      <td>{row.pronosticoVentaDia.toFixed(2)}</td>
-                      <td>{row.colchonDiario.toFixed(2)}</td>
-                      <td>{row.baseConColchonDia.toFixed(2)}</td>
-                      <td className="strong">{row.produccionSugeridaDia}</td>
-                      <td>{row.produccionRealDia ?? "-"}</td>
-                      <td className={row.diferenciaPiezas < 0 ? "negative" : row.diferenciaPiezas > 0 ? "positive" : ""}>
-                        {row.diferenciaPiezas === null ? "-" : `${row.diferenciaPiezas > 0 ? "+" : ""}${formatNumber(row.diferenciaPiezas)}`}
-                      </td>
-                      <td>
-                        <span className={`pill ${meta.className}`}>{meta.label}</span>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {filteredDailyRows.map((row) => (
+                  <tr key={`${row.fecha}-${row.producto}`}>
+                    <td>{row.dia}</td>
+                    <td>{row.producto}</td>
+                    <td>{row.promedioUsado.toFixed(2)}</td>
+                    <td>{row.pronosticoVentaDia.toFixed(2)}</td>
+                    <td>{row.colchonDiario.toFixed(2)}</td>
+                    <td>{row.baseConColchonDia.toFixed(2)}</td>
+                    <td className="strong">{row.produccionSugeridaDia}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
             {!dailyRows.length && (
@@ -1654,6 +1409,21 @@ function App() {
               </div>
             )}
           </section>
+        </section>
+
+        <section className="notes-section">
+          <div className="section-heading compact-heading">
+            <div>
+              <span className="eyebrow">Lectura rápida</span>
+              <h3>Notas de interpretación</h3>
+            </div>
+          </div>
+          <div className="notes-list">
+            <p>El pronóstico diario usa el promedio histórico del mismo día de semana para cada producto.</p>
+            <p>La producción sugerida aplica el colchón operativo y después la regla de mínimo 10 piezas y múltiplos de 5.</p>
+            <p>La validación de cálculos permite auditar de dónde sale cada promedio usado.</p>
+            <p>La exportación para MySQL entrega los datos limpios para la siguiente etapa del proyecto.</p>
+          </div>
         </section>
 
         <section className="validation-section">
@@ -1866,6 +1636,10 @@ function App() {
                         <th>Fecha</th>
                         <th>Día</th>
                         <th>Promedio aplicado</th>
+                        <th>Pronóstico de venta</th>
+                        <th>Colchón aplicado</th>
+                        <th>Base con colchón</th>
+                        <th>Producción sugerida final</th>
                         <th>Producción real diaria</th>
                         <th>Diferencia</th>
                       </tr>
@@ -1879,6 +1653,7 @@ function App() {
                           <td>{formatNumber(row.pronosticoVentaDia, 2)}</td>
                           <td>{formatNumber(row.colchonDiario, 2)}</td>
                           <td>{formatNumber(row.baseConColchonDia, 2)}</td>
+                          <td className="strong">{formatNumber(row.produccionSugeridaDia)}</td>
                           <td>{row.produccionRealDia === null ? "-" : formatNumber(row.produccionRealDia)}</td>
                           <td>{row.diferenciaPiezas === null ? "-" : formatNumber(row.diferenciaPiezas)}</td>
                         </tr>

@@ -174,6 +174,20 @@ label input,
   margin-bottom: 14px;
 }
 
+.executive-summary-section,
+.loaded-files-section,
+.notes-section {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.executive-summary-kpis {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .kpi-card,
 .upload-card,
 .panel,
@@ -493,6 +507,10 @@ label select {
   padding: 16px;
 }
 
+.compact-heading {
+  padding: 12px 14px;
+}
+
 .section-heading h3 {
   font-size: 20px;
 }
@@ -508,6 +526,80 @@ label select {
   display: block;
   font-size: 13px;
   margin-top: 8px;
+}
+
+.loaded-context {
+  color: #657386;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.loaded-context span {
+  background: #eef5f5;
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
+.file-status-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.file-status-item {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #dde4eb;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: auto 1fr;
+  padding: 12px;
+}
+
+.file-status-item strong,
+.file-status-item small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-status-item small {
+  color: #657386;
+  font-size: 12px;
+  font-weight: 800;
+  grid-column: 2;
+}
+
+.status-dot {
+  background: #c9d3dd;
+  border-radius: 50%;
+  height: 10px;
+  width: 10px;
+}
+
+.status-dot.loaded {
+  background: #247a45;
+}
+
+.notes-list {
+  background: #ffffff;
+  border: 1px solid #dde4eb;
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 14px;
+}
+
+.notes-list p {
+  color: #536276;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .daily-summary {
@@ -681,7 +773,7 @@ table {
 }
 
 .daily-table {
-  min-width: 1660px;
+  min-width: 1080px;
 }
 
 th {
@@ -760,6 +852,11 @@ tr:nth-child(even) td {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .file-status-grid,
+  .notes-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .daily-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -784,14 +881,20 @@ tr:nth-child(even) td {
     font-size: 26px;
   }
 
-  .executive-grid,
-  .priority-grid,
-  .uploads,
-  .daily-summary,
-  .executive-summary-kpis,
-  .validation-summary,
-  .validation-grid {
+    .executive-grid,
+    .priority-grid,
+    .uploads,
+    .file-status-grid,
+    .notes-list,
+    .daily-summary,
+    .executive-summary-kpis,
+    .validation-summary,
+    .validation-grid {
     grid-template-columns: 1fr;
+  }
+
+  .loaded-context {
+    justify-content: flex-start;
   }
 
   .section-heading {
