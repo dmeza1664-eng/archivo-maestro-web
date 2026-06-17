@@ -1104,6 +1104,26 @@ function App() {
     .sort((a, b) => b.diferenciaReal - a.diferenciaReal)
     .slice(0, 5);
 
+  const hasLoadedRealProduction = Array.isArray(realProduction) && realProduction.length > 0;
+  const executiveRows = forecast.filter((row) => row.hasRealData);
+  const executiveTotals = {
+    totalProductos: forecast.length,
+    totalPronosticada: executiveRows.reduce((sum, row) => sum + row.produccionSugerida, 0),
+    totalReal: executiveRows.reduce((sum, row) => sum + row.produccionReal, 0),
+    diferenciaTotal: executiveRows.reduce((sum, row) => sum + row.diferenciaReal, 0),
+  };
+  executiveTotals.precisionGeneral =
+    executiveTotals.totalReal > 0
+      ? (1 - Math.abs(executiveTotals.totalPronosticada - executiveTotals.totalReal) / executiveTotals.totalReal) * 100
+      : 0;
+
+  const highDifferenceProducts = executiveRows.filter(
+    (row) => Math.abs(row.diferenciaReal) >= 50 || (row.precision !== null && row.precision < 80)
+  );
+  const productsToReview = [...(highDifferenceProducts.length ? highDifferenceProducts : executiveRows)]
+    .sort((a, b) => Math.abs(b.diferenciaReal) - Math.abs(a.diferenciaReal))
+    .slice(0, 10);
+
   const chartRows = [
     { label: "Sugerida", value: summary.totalPronosticada },
     { label: "Recomendada", value: summary.totalRecomendada },
