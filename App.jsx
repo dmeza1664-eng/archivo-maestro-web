@@ -147,7 +147,9 @@ function getProduccionSugeridaPastel(valor) {
 }
 
 function getProduccionSugerida(producto, valor) {
-  if (isOperativeCakeProduct(producto)) return getProduccionSugeridaPastel(valor);
+  if (isOperativeCakeProduct(producto)) {
+    return getProduccionSugeridaPastel(valor);
+  }
   return Math.max(0, Math.ceil(Number(valor) || 0));
 }
 
@@ -738,18 +740,17 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
     const colchonOperativo = pronosticoVenta > 0 ? (pronosticoVenta >= 300 ? 15 : 10) : 0;
     const baseConColchon = pronosticoVenta + colchonOperativo;
     const produccionSugerida = getProduccionSugerida(s.producto, baseConColchon);
-    const produccionPronosticada = produccionSugerida;
 
     const ex = existMap.get(s.producto) || { totalSuc: 0, cf: 0, sumaSucCf: 0 };
     const sumaSucCf = ex.sumaSucCf || ex.totalSuc + ex.cf;
     const inventarioObjetivo = s.stock;
-    const produccionRecomendada = Math.max(0, Math.ceil(inventarioObjetivo + produccionPronosticada - sumaSucCf));
+    const produccionRecomendada = Math.max(0, Math.ceil(inventarioObjetivo + produccionSugerida - sumaSucCf));
     const hasRealData = realMap.has(s.producto);
     const produccionReal = hasRealData ? realMap.get(s.producto) : 0;
-    const diferenciaReal = produccionReal - produccionPronosticada;
+    const diferenciaReal = produccionReal - produccionSugerida;
     const precision =
       hasRealData && produccionReal > 0
-        ? (1 - Math.abs(produccionPronosticada - produccionReal) / produccionReal) * 100
+        ? (1 - Math.abs(produccionSugerida - produccionReal) / produccionReal) * 100
         : null;
 
     const confianza =
@@ -761,9 +762,9 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
 
     let estatus = "Sin dato real";
     if (!hasRealData) estatus = "Sin dato real";
-    else if (produccionPronosticada === 0 && produccionReal === 0) estatus = "No producir";
-    else if (produccionReal < produccionPronosticada) estatus = "Riesgo faltante";
-    else if (produccionReal > produccionPronosticada) estatus = "Sobreproduccion";
+    else if (produccionSugerida === 0 && produccionReal === 0) estatus = "No producir";
+    else if (produccionReal < produccionSugerida) estatus = "Riesgo faltante";
+    else if (produccionReal > produccionSugerida) estatus = "Sobreproduccion";
     else if (precision !== null && precision < 80) estatus = "Revisar";
     else estatus = "Dentro de rango";
 
@@ -788,7 +789,6 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
       baseConColchon,
       reglaOperativa: getReglaOperativaLabel(s.producto, baseConColchon),
       produccionSugerida,
-      produccionPronosticada,
       inventarioObjetivo,
       totalSuc: ex.totalSuc || 0,
       cf: ex.cf || 0,
@@ -837,11 +837,10 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
       const colchonDiario = pronosticoVentaDia * (dailyBufferPct / 100);
       const baseConColchonDia = pronosticoVentaDia + colchonDiario;
       const produccionSugeridaDia = getProduccionSugerida(product, baseConColchonDia);
-      const produccionPronosticadaDia = produccionSugeridaDia;
       const realKey = `${product}|${key}`;
       const hasRealData = realDailyMap.has(realKey);
       const produccionRealDia = hasRealData ? realDailyMap.get(realKey) : null;
-      const diferenciaPiezas = hasRealData ? produccionRealDia - produccionPronosticadaDia : null;
+      const diferenciaPiezas = hasRealData ? produccionRealDia - produccionSugeridaDia : null;
 
       let estatus = "Sin dato real";
       if (hasRealData && diferenciaPiezas < 0) estatus = "Riesgo faltante";
@@ -860,7 +859,6 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
         baseConColchonDia,
         reglaOperativa: getReglaOperativaLabel(product, baseConColchonDia),
         produccionSugeridaDia,
-        produccionPronosticadaDia,
         produccionRealDia,
         hasRealData,
         diferenciaPiezas,
@@ -874,19 +872,19 @@ function summarizeDailyMonth(rows) {
   const pronosticoVentaMensual = rows.reduce((sum, row) => sum + row.pronosticoVentaDia, 0);
   const colchonDiarioMensual = rows.reduce((sum, row) => sum + row.colchonDiario, 0);
   const baseConColchonMensual = rows.reduce((sum, row) => sum + row.baseConColchonDia, 0);
-  const produccionPronosticadaMensual = rows.reduce((sum, row) => sum + row.produccionSugeridaDia, 0);
+  const produccionSugeridaMensual = rows.reduce((sum, row) => sum + row.produccionSugeridaDia, 0);
   const produccionRealMensual = rows.reduce((sum, row) => sum + (row.produccionRealDia || 0), 0);
-  const diferenciaMensual = produccionRealMensual - produccionPronosticadaMensual;
+  const diferenciaMensual = produccionRealMensual - produccionSugeridaMensual;
   const precision =
     produccionRealMensual > 0
-      ? (1 - Math.abs(produccionPronosticadaMensual - produccionRealMensual) / produccionRealMensual) * 100
+      ? (1 - Math.abs(produccionSugeridaMensual - produccionRealMensual) / produccionRealMensual) * 100
       : 0;
 
   return {
     pronosticoVentaMensual,
     colchonDiarioMensual,
     baseConColchonMensual,
-    produccionPronosticadaMensual,
+    produccionSugeridaMensual,
     produccionRealMensual,
     diferenciaMensual,
     precision,
@@ -934,7 +932,7 @@ function exportDailyToExcel(rows, summary) {
     { Indicador: "Pronostico venta mensual", Valor: Number(summary.pronosticoVentaMensual.toFixed(2)) },
     { Indicador: "Colchon aplicado mensual", Valor: Number(summary.colchonDiarioMensual.toFixed(2)) },
     { Indicador: "Base con colchon mensual", Valor: Number(summary.baseConColchonMensual.toFixed(2)) },
-    { Indicador: "Produccion sugerida mensual", Valor: summary.produccionPronosticadaMensual },
+    { Indicador: "Produccion sugerida mensual", Valor: summary.produccionSugeridaMensual },
     { Indicador: "Produccion real mensual", Valor: summary.produccionRealMensual },
     { Indicador: "Diferencia mensual", Valor: summary.diferenciaMensual },
     { Indicador: "Precision %", Valor: Number(summary.precision.toFixed(1)) },
@@ -1581,7 +1579,7 @@ function App() {
             <KpiCard
               icon={ShieldCheck}
               label="Producción sugerida mensual"
-              value={formatNumber(dailySummary.produccionPronosticadaMensual, 0)}
+              value={formatNumber(dailySummary.produccionSugeridaMensual, 0)}
               caption={`Colchón diario: ${dailyBufferPct}%`}
             />
             <KpiCard
@@ -1666,7 +1664,6 @@ function App() {
             <table className="daily-table">
               <thead>
                 <tr>
-                  <th>Fecha</th>
                   <th>Día</th>
                   <th>Producto</th>
                   <th>Promedio aplicado</th>
@@ -1684,7 +1681,6 @@ function App() {
                   const meta = STATUS_META[row.estatus] || STATUS_META.Revisar;
                   return (
                     <tr key={`${row.fecha}-${row.producto}`}>
-                      <td>{row.fechaDisplay}</td>
                       <td>{row.dia}</td>
                       <td>{row.producto}</td>
                       <td>{row.promedioUsado.toFixed(2)}</td>
@@ -1776,7 +1772,7 @@ function App() {
                 <KpiCard
                   icon={ShieldCheck}
                   label="Producción sugerida mensual"
-                  value={formatNumber(validationSummary.produccionPronosticadaMensual)}
+                  value={formatNumber(validationSummary.produccionSugeridaMensual)}
                   caption={`Regla operativa con ${dailyBufferPct}% de colchón`}
                 />
                 <KpiCard
@@ -1784,12 +1780,12 @@ function App() {
                   label="Producción real"
                   value={formatNumber(validationForecast.produccionReal)}
                   caption={`Diferencia: ${formatNumber(
-                    validationForecast.produccionReal - validationSummary.produccionPronosticadaMensual
+                    validationForecast.produccionReal - validationSummary.produccionSugeridaMensual
                   )}`}
                   tone={
-                    validationForecast.produccionReal < validationSummary.produccionPronosticadaMensual
+                    validationForecast.produccionReal < validationSummary.produccionSugeridaMensual
                       ? "danger"
-                      : validationForecast.produccionReal > validationSummary.produccionPronosticadaMensual
+                      : validationForecast.produccionReal > validationSummary.produccionSugeridaMensual
                         ? "warn"
                         : "ok"
                   }
@@ -1839,7 +1835,7 @@ function App() {
                     </div>
                     <div>
                       <span>Producción sugerida final</span>
-                      <strong>{formatNumber(validationSummary.produccionPronosticadaMensual)}</strong>
+                      <strong>{formatNumber(validationSummary.produccionSugeridaMensual)}</strong>
                     </div>
                     <div>
                       <span>Producción real</span>
@@ -1852,7 +1848,7 @@ function App() {
                           ? formatPercent(
                               (1 -
                                 Math.abs(
-                                  validationSummary.produccionPronosticadaMensual - validationForecast.produccionReal
+                                  validationSummary.produccionSugeridaMensual - validationForecast.produccionReal
                                 ) /
                                   validationForecast.produccionReal) *
                                 100,
