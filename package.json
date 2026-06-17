@@ -14,16 +14,8 @@
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-<<<<<<< HEAD
-    "jszip": "^3.10.1",
-    "xlsx": "^0.18.5",
-    "lucide-react": "^0.468.0"
-  },
-  "devDependencies": {}
-=======
     "typescript": "^5.6.3",
     "vite": "^5.4.19",
     "xlsx": "^0.18.5"
   }
->>>>>>> 1b4a7f9b5dcb3358a162670a8925448e64f3c777
 }
