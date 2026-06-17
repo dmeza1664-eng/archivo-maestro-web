@@ -135,13 +135,15 @@ function isSliceProduct(value) {
 
 function isOperativeCakeProduct(value) {
   const tokens = normalizeProduct(value).split(/\s+/).filter(Boolean);
-  return tokens.some((token) => ["GDE", "GRANDE", "MED", "MEDIANO", "CH", "CHICO"].includes(token));
+  return tokens.some((token) =>
+    ["GDE", "GRANDE", "MED", "MEDIANO", "MEDIANA", "CH", "CHICO", "CHICA"].includes(token)
+  );
 }
 
 function getProduccionSugeridaPastel(valor) {
   const value = Number(valor);
   if (!Number.isFinite(value) || value < 8) return 0;
-  return Math.max(10, Math.round(value / 5) * 5);
+  return Math.max(10, Math.floor((value + 2) / 5) * 5);
 }
 
 function getProduccionSugerida(producto, valor) {
@@ -735,7 +737,8 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
     const bajasEsperadas = pronosticoVenta * tasaBajas;
     const colchonOperativo = pronosticoVenta > 0 ? (pronosticoVenta >= 300 ? 15 : 10) : 0;
     const baseConColchon = pronosticoVenta + colchonOperativo;
-    const produccionPronosticada = getProduccionSugerida(s.producto, baseConColchon);
+    const produccionSugerida = getProduccionSugerida(s.producto, baseConColchon);
+    const produccionPronosticada = produccionSugerida;
 
     const ex = existMap.get(s.producto) || { totalSuc: 0, cf: 0, sumaSucCf: 0 };
     const sumaSucCf = ex.sumaSucCf || ex.totalSuc + ex.cf;
@@ -784,6 +787,7 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
       colchonOperativo,
       baseConColchon,
       reglaOperativa: getReglaOperativaLabel(s.producto, baseConColchon),
+      produccionSugerida,
       produccionPronosticada,
       inventarioObjetivo,
       totalSuc: ex.totalSuc || 0,
@@ -832,7 +836,8 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
       const pronosticoVentaDia = getWeekdayAverage(productRow, dayName);
       const colchonDiario = pronosticoVentaDia * (dailyBufferPct / 100);
       const baseConColchonDia = pronosticoVentaDia + colchonDiario;
-      const produccionPronosticadaDia = getProduccionSugerida(product, baseConColchonDia);
+      const produccionSugeridaDia = getProduccionSugerida(product, baseConColchonDia);
+      const produccionPronosticadaDia = produccionSugeridaDia;
       const realKey = `${product}|${key}`;
       const hasRealData = realDailyMap.has(realKey);
       const produccionRealDia = hasRealData ? realDailyMap.get(realKey) : null;
@@ -854,8 +859,8 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
         colchonDiario,
         baseConColchonDia,
         reglaOperativa: getReglaOperativaLabel(product, baseConColchonDia),
+        produccionSugeridaDia,
         produccionPronosticadaDia,
-        produccionSugeridaDia: produccionPronosticadaDia,
         produccionRealDia,
         hasRealData,
         diferenciaPiezas,
@@ -869,7 +874,7 @@ function summarizeDailyMonth(rows) {
   const pronosticoVentaMensual = rows.reduce((sum, row) => sum + row.pronosticoVentaDia, 0);
   const colchonDiarioMensual = rows.reduce((sum, row) => sum + row.colchonDiario, 0);
   const baseConColchonMensual = rows.reduce((sum, row) => sum + row.baseConColchonDia, 0);
-  const produccionPronosticadaMensual = rows.reduce((sum, row) => sum + row.produccionPronosticadaDia, 0);
+  const produccionPronosticadaMensual = rows.reduce((sum, row) => sum + row.produccionSugeridaDia, 0);
   const produccionRealMensual = rows.reduce((sum, row) => sum + (row.produccionRealDia || 0), 0);
   const diferenciaMensual = produccionRealMensual - produccionPronosticadaMensual;
   const precision =
@@ -897,7 +902,7 @@ function exportToExcel(rows, summary) {
     "Colchon operativo": r.colchonOperativo,
     "Base con colchon": Number((r.baseConColchon || 0).toFixed(2)),
     "Regla operativa": r.reglaOperativa,
-    "Produccion sugerida": r.produccionPronosticada,
+    "Produccion sugerida": r.produccionSugerida,
     "Inventario objetivo": r.inventarioObjetivo,
     "Existencia sucursales + CF": r.sumaSucCf,
     "Produccion recomendada": r.produccionRecomendada,
@@ -1115,7 +1120,7 @@ function App() {
   }));
 
   const summary = useMemo(() => {
-    const totalPronosticada = comparableForecast.reduce((a, r) => a + r.produccionPronosticada, 0);
+    const totalPronosticada = comparableForecast.reduce((a, r) => a + r.produccionSugerida, 0);
     const totalRecomendada = comparableForecast.reduce((a, r) => a + r.produccionRecomendada, 0);
     const totalReal = comparableForecast.reduce((a, r) => a + r.produccionReal, 0);
     const totalColchon = comparableForecast.reduce((a, r) => a + r.colchonOperativo, 0);
@@ -1153,7 +1158,7 @@ function App() {
   const executiveRows = forecast.filter((row) => row.hasRealData);
   const executiveTotals = {
     totalProductos: forecast.length,
-    totalPronosticada: executiveRows.reduce((sum, row) => sum + row.produccionPronosticada, 0),
+    totalPronosticada: executiveRows.reduce((sum, row) => sum + row.produccionSugerida, 0),
     totalReal: executiveRows.reduce((sum, row) => sum + row.produccionReal, 0),
     diferenciaTotal: executiveRows.reduce((sum, row) => sum + row.diferenciaReal, 0),
   };
@@ -1419,7 +1424,7 @@ function App() {
                       return (
                         <tr key={`executive-${row.producto}`}>
                           <td>{row.producto}</td>
-                          <td>{formatNumber(row.produccionPronosticada)}</td>
+                          <td>{formatNumber(row.produccionSugerida)}</td>
                           <td>{formatNumber(row.produccionReal)}</td>
                           <td className={row.diferenciaReal < 0 ? "negative" : row.diferenciaReal > 0 ? "positive" : ""}>
                             {row.diferenciaReal > 0 ? "+" : ""}
@@ -1686,7 +1691,7 @@ function App() {
                       <td>{row.pronosticoVentaDia.toFixed(2)}</td>
                       <td>{row.colchonDiario.toFixed(2)}</td>
                       <td>{row.baseConColchonDia.toFixed(2)}</td>
-                      <td className="strong">{row.produccionPronosticadaDia}</td>
+                      <td className="strong">{row.produccionSugeridaDia}</td>
                       <td>{row.produccionRealDia ?? "-"}</td>
                       <td className={row.diferenciaPiezas < 0 ? "negative" : row.diferenciaPiezas > 0 ? "positive" : ""}>
                         {row.diferenciaPiezas === null ? "-" : `${row.diferenciaPiezas > 0 ? "+" : ""}${formatNumber(row.diferenciaPiezas)}`}
@@ -1970,7 +1975,7 @@ function App() {
                           <td className="formula-cell">
                             {row.reglaOperativa}
                           </td>
-                          <td className="strong">{formatNumber(row.produccionPronosticadaDia)}</td>
+                          <td className="strong">{formatNumber(row.produccionSugeridaDia)}</td>
                           <td>{row.produccionRealDia === null ? "-" : formatNumber(row.produccionRealDia)}</td>
                           <td>{row.diferenciaPiezas === null ? "-" : formatNumber(row.diferenciaPiezas)}</td>
                         </tr>
@@ -2014,7 +2019,7 @@ function App() {
                     <td>{r.promedioReciente.toFixed(2)}</td>
                     <td>{r.pronosticoVenta.toFixed(1)}</td>
                     <td>{r.colchonOperativo}</td>
-                    <td>{r.produccionPronosticada}</td>
+                    <td>{r.produccionSugerida}</td>
                     <td>{r.inventarioObjetivo}</td>
                     <td>{r.sumaSucCf}</td>
                     <td className="strong">{r.produccionRecomendada}</td>
