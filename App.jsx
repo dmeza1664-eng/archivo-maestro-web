@@ -1122,6 +1122,31 @@ function App() {
     };
   }, [comparableForecast, forecast]);
 
+  const realProductionValidation = useMemo(() => {
+    const realRecords = realProduction.filter((row) => !isSliceProduct(row.producto));
+    const realProducts = new Set(realRecords.map((row) => normalizeProduct(row.producto)));
+    const forecastProducts = new Set(forecast.map((row) => normalizeProduct(row.producto)));
+    const forecastWithoutReal = [...forecastProducts].filter((product) => !realProducts.has(product));
+    const realWithoutForecast = [...realProducts].filter((product) => !forecastProducts.has(product));
+    const dateKeys = realRecords.map((row) => dateKey(row.fecha)).filter(Boolean).sort();
+    const firstDate = dateKeys[0] || "";
+    const lastDate = dateKeys[dateKeys.length - 1] || "";
+    const formatDateKey = (key) => key.split("-").reverse().join("/");
+
+    return {
+      recordCount: realRecords.length,
+      productCount: realProducts.size,
+      forecastWithoutRealCount: forecastWithoutReal.length,
+      realWithoutForecastCount: realWithoutForecast.length,
+      dateRange: firstDate
+        ? `${formatDateKey(firstDate)}${lastDate !== firstDate ? ` al ${formatDateKey(lastDate)}` : ""}`
+        : "Sin fechas en archivo",
+      hasMismatch: forecastWithoutReal.length > 0 || realWithoutForecast.length > 0,
+    };
+  }, [forecast, realProduction]);
+
+  const hasLoadedRealProduction = Boolean(files.real || realProduction.length);
+
   const loadedFileItems = [
     { label: "Ventas", loaded: Boolean(files.ventas || ventas.length) },
     { label: "Stock fijo", loaded: Boolean(files.stock || stockRows.length) },
@@ -1234,6 +1259,35 @@ function App() {
             ))}
           </div>
         </section>
+
+        {hasLoadedRealProduction ? (
+          <section className="real-production-validation-section">
+            <div className="section-heading compact-heading">
+              <div>
+                <span className="eyebrow">Control de coincidencias</span>
+                <h3>Validación de producción real</h3>
+              </div>
+            </div>
+            <div className="real-validation-grid">
+              <div><span>Registros leídos</span><strong>{formatNumber(realProductionValidation.recordCount)}</strong></div>
+              <div><span>Productos con producción real</span><strong>{formatNumber(realProductionValidation.productCount)}</strong></div>
+              <div><span>Pronóstico sin producción real</span><strong>{formatNumber(realProductionValidation.forecastWithoutRealCount)}</strong></div>
+              <div><span>Producción real fuera del pronóstico</span><strong>{formatNumber(realProductionValidation.realWithoutForecastCount)}</strong></div>
+              <div><span>Rango de fechas</span><strong>{realProductionValidation.dateRange}</strong></div>
+            </div>
+            <p className={`real-validation-message ${realProductionValidation.hasMismatch ? "warning" : "success"}`}>
+              {realProductionValidation.recordCount === 0
+                ? "No se encontraron registros válidos en el archivo de producción real."
+                : realProductionValidation.hasMismatch
+                  ? "Hay productos reales que no coinciden con el catálogo del pronóstico. Revisa nombres u homologación."
+                  : "Producción real validada correctamente."}
+            </p>
+          </section>
+        ) : (
+          <p className="real-production-pending">
+            Producción real no cargada. El comparativo se activará cuando subas el archivo real.
+          </p>
+        )}
 
         <section className="uploads">
           <UploadBox

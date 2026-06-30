@@ -176,6 +176,7 @@ label input,
 
 .executive-summary-section,
 .loaded-files-section,
+.real-production-validation-section,
 .notes-section {
   display: grid;
   gap: 12px;
@@ -202,6 +203,63 @@ label input,
   font-size: 13px;
   line-height: 1.45;
   margin: 0;
+}
+
+.real-validation-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.real-validation-grid > div {
+  background: #ffffff;
+  border: 1px solid #dde4eb;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.real-validation-grid span {
+  color: #657386;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.real-validation-grid strong {
+  color: #183447;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.real-validation-message,
+.real-production-pending {
+  border-left: 3px solid #92a2b2;
+  color: #536276;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 14px;
+  padding: 9px 12px;
+}
+
+.real-validation-message {
+  margin-bottom: 0;
+}
+
+.real-validation-message.success {
+  background: #eef8f1;
+  border-left-color: #247a45;
+  color: #24643d;
+}
+
+.real-validation-message.warning {
+  background: #fff7e8;
+  border-left-color: #bd7518;
+  color: #80521a;
+}
+
+.real-production-pending {
+  background: #f5f7f9;
 }
 
 .kpi-card,
@@ -869,6 +927,7 @@ tr:nth-child(even) td {
   }
 
   .file-status-grid,
+  .real-validation-grid,
   .notes-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -901,6 +960,7 @@ tr:nth-child(even) td {
     .priority-grid,
     .uploads,
     .file-status-grid,
+    .real-validation-grid,
     .notes-list,
     .daily-summary,
     .executive-summary-kpis,
