@@ -188,6 +188,22 @@ label input,
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.forecast-concepts {
+  background: #f4f8f8;
+  border-left: 3px solid #2f7d7e;
+  color: #536276;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+  padding: 10px 12px;
+}
+
+.forecast-concepts p {
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0;
+}
+
 .kpi-card,
 .upload-card,
 .panel,
@@ -558,7 +574,7 @@ label select {
   display: grid;
   gap: 4px;
   grid-template-columns: auto 1fr;
-  padding: 12px;
+  padding: 9px 10px;
 }
 
 .file-status-item strong,
@@ -592,8 +608,8 @@ label select {
   border-radius: 8px;
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  padding: 14px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  padding: 12px;
 }
 
 .notes-list p {

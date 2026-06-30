@@ -1206,6 +1206,11 @@ function App() {
               caption={`Colchón operativo: ${dailyBufferPct}%`}
             />
           </section>
+
+          <div className="forecast-concepts" role="note">
+            <p><strong>Pronóstico de venta:</strong> cantidad estimada que se espera vender.</p>
+            <p><strong>Producción sugerida:</strong> cantidad recomendada a producir después de aplicar colchón operativo y regla de múltiplos de 5.</p>
+          </div>
         </section>
 
         <section className="loaded-files-section">
@@ -1216,7 +1221,6 @@ function App() {
             </div>
             <div className="loaded-context">
               <span>Mes: {selectedMonth || "Sin mes"}</span>
-              {dailyDateFilter && <span>Fecha: {dailyDateFilter}</span>}
               <span>Colchón: {dailyBufferPct}%</span>
             </div>
           </div>
@@ -1375,6 +1379,7 @@ function App() {
             <table className="daily-table">
               <thead>
                 <tr>
+                  <th>Fecha</th>
                   <th>Día</th>
                   <th>Producto</th>
                   <th>Promedio aplicado</th>
@@ -1387,6 +1392,7 @@ function App() {
               <tbody>
                 {filteredDailyRows.map((row) => (
                   <tr key={`${row.fecha}-${row.producto}`}>
+                    <td>{row.fecha}</td>
                     <td>{row.dia}</td>
                     <td>{row.producto}</td>
                     <td>{row.promedioUsado.toFixed(2)}</td>
@@ -1419,10 +1425,11 @@ function App() {
             </div>
           </div>
           <div className="notes-list">
-            <p>El pronóstico diario usa el promedio histórico del mismo día de semana para cada producto.</p>
-            <p>La producción sugerida aplica el colchón operativo y después la regla de mínimo 10 piezas y múltiplos de 5.</p>
-            <p>La validación de cálculos permite auditar de dónde sale cada promedio usado.</p>
-            <p>La exportación para MySQL entrega los datos limpios para la siguiente etapa del proyecto.</p>
+            <p>El pronóstico usa el promedio histórico por día de semana.</p>
+            <p>La producción sugerida aplica el colchón operativo.</p>
+            <p>Para pasteles GDE, MED y CH, la producción se ajusta a mínimo 10 y múltiplos de 5.</p>
+            <p>Si el cálculo es menor a 8, se sugiere no producir.</p>
+            <p>La vista Validación de cálculos permite auditar cada producto.</p>
           </div>
         </section>
 
