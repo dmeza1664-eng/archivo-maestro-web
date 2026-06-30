@@ -1677,62 +1677,6 @@ function App() {
           )}
         </section>
 
-        <section className="table-card">
-          <table>
-            <thead>
-              <tr>
-                <th>Producto</th>
-                <th>Prom. reciente</th>
-                <th>Pronóstico de venta</th>
-                <th>Colchón</th>
-                <th>Producción sugerida</th>
-                <th>Stock objetivo</th>
-                <th>Existencias</th>
-                <th>Producción recomendada</th>
-                <th>Producción real</th>
-                <th>Brecha</th>
-                <th>Precisión</th>
-                <th>Estatus</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => {
-                const meta = STATUS_META[r.estatus] || STATUS_META.Revisar;
-                return (
-                  <tr key={r.producto}>
-                    <td>{r.producto}</td>
-                    <td>{r.promedioReciente.toFixed(2)}</td>
-                    <td>{r.pronosticoVenta.toFixed(1)}</td>
-                    <td>{r.colchonOperativo}</td>
-                    <td>{r.produccionSugerida}</td>
-                    <td>{r.inventarioObjetivo}</td>
-                    <td>{r.sumaSucCf}</td>
-                    <td className="strong">{r.produccionRecomendada}</td>
-                    <td>{r.produccionReal}</td>
-                    <td className={r.diferenciaReal < 0 ? "negative" : r.diferenciaReal > 0 ? "positive" : ""}>
-                      {r.diferenciaReal > 0 ? "+" : ""}
-                      {formatNumber(r.diferenciaReal)}
-                    </td>
-                    <td>{r.precision === null ? "-" : formatPercent(r.precision, 0)}</td>
-                    <td>
-                      <span className={`pill ${meta.className}`}>{meta.label}</span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {!forecast.length && (
-            <div className="empty">
-              Carga <strong>stock fijo</strong> y <strong>ventas</strong> para generar el dashboard de producción.
-            </div>
-          )}
-          {forecast.length > 0 && !filtered.length && (
-            <div className="empty">
-              No hay productos comparables con producción real. Activa <strong>mostrar productos sin dato real</strong> para revisar todo el catálogo.
-            </div>
-          )}
-        </section>
       </main>
     </div>
   );
