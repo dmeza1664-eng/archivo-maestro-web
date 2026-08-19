@@ -100,7 +100,8 @@ const WEEKDAYS = [
 
 const WEEKDAY_ALIASES = [
   { names: ["LUNES", "LUN"], index: 1 },
-  { names: ["MARTES", "MAR"], index: 2 },
+  // Avoid "MAR": conflicts with the month abbreviation for March.
+  { names: ["MARTES", "MRT"], index: 2 },
   { names: ["MIERCOLES", "MIE"], index: 3 },
   { names: ["JUEVES", "JUE"], index: 4 },
   { names: ["VIERNES", "VIE"], index: 5 },
@@ -157,10 +158,16 @@ function getReglaOperativaLabel(producto, value) {
 }
 
 const WEEKDAY_BY_NORM = new Map(
-  WEEKDAYS.flatMap((day) => [
-    [norm(day.label), day.index],
-    [norm(day.label).slice(0, 3), day.index],
-  ])
+  WEEKDAYS.flatMap((day) => {
+    const full = norm(day.label);
+    const short = full.slice(0, 3);
+    // Skip "MAR": collides with the month abbreviation for March.
+    if (short === "MAR") return [[full, day.index]];
+    return [
+      [full, day.index],
+      [short, day.index],
+    ];
+  })
 );
 
 function weekdayIndexFromText(value) {
@@ -273,8 +280,9 @@ function formatPercent(value, digits = 0) {
 function parseDateCell(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
   if (typeof value === "number" && value > 20000 && value < 80000) {
-    const utcDays = Math.floor(value - 25569);
-    return new Date(utcDays * 86400 * 1000);
+    // Excel serial dates: build in local time to avoid UTC day-shift in Mexico.
+    const epoch = new Date(1899, 11, 30);
+    return new Date(epoch.getTime() + Math.floor(value) * 86400000);
   }
   const raw = String(value ?? "").trim();
   if (!raw) return null;
@@ -1124,26 +1132,32 @@ function App() {
 
   const realProductionValidation = useMemo(() => {
     const realRecords = realProduction.filter((row) => !isSliceProduct(row.producto));
-    const realProducts = new Set(realRecords.map((row) => normalizeProduct(row.producto)));
+    const monthPrefix = selectedMonth || "";
+    const monthScopedRecords = monthPrefix
+      ? realRecords.filter((row) => dateKey(row.fecha).startsWith(monthPrefix))
+      : realRecords;
+    const validationRecords = monthScopedRecords.length ? monthScopedRecords : realRecords;
+    const realProducts = new Set(validationRecords.map((row) => normalizeProduct(row.producto)));
     const forecastProducts = new Set(forecast.map((row) => normalizeProduct(row.producto)));
     const forecastWithoutReal = [...forecastProducts].filter((product) => !realProducts.has(product));
     const realWithoutForecast = [...realProducts].filter((product) => !forecastProducts.has(product));
-    const dateKeys = realRecords.map((row) => dateKey(row.fecha)).filter(Boolean).sort();
+    const dateKeys = validationRecords.map((row) => dateKey(row.fecha)).filter(Boolean).sort();
     const firstDate = dateKeys[0] || "";
     const lastDate = dateKeys[dateKeys.length - 1] || "";
     const formatDateKey = (key) => key.split("-").reverse().join("/");
 
     return {
-      recordCount: realRecords.length,
+      recordCount: validationRecords.length,
       productCount: realProducts.size,
       forecastWithoutRealCount: forecastWithoutReal.length,
       realWithoutForecastCount: realWithoutForecast.length,
       dateRange: firstDate
         ? `${formatDateKey(firstDate)}${lastDate !== firstDate ? ` al ${formatDateKey(lastDate)}` : ""}`
         : "Sin fechas en archivo",
+      scopedToMonth: Boolean(monthPrefix && monthScopedRecords.length),
       hasMismatch: forecastWithoutReal.length > 0 || realWithoutForecast.length > 0,
     };
-  }, [forecast, realProduction]);
+  }, [forecast, realProduction, selectedMonth]);
 
   const hasLoadedRealProduction = Boolean(files.real || realProduction.length);
 
@@ -1191,7 +1205,7 @@ function App() {
             <p>Planea la producción por día usando el promedio histórico del mismo día de semana.</p>
           </div>
           <button className="primary" onClick={() => exportToExcel(filtered, summary)} disabled={!forecast.length}>
-            <Download size={18} /> Exportar datos para MySQL
+            <Download size={18} /> Exportar resumen Excel
           </button>
         </header>
 
@@ -1280,7 +1294,9 @@ function App() {
                 ? "No se encontraron registros válidos en el archivo de producción real."
                 : realProductionValidation.hasMismatch
                   ? "Hay productos reales que no coinciden con el catálogo del pronóstico. Revisa nombres u homologación."
-                  : "Producción real validada correctamente."}
+                  : realProductionValidation.scopedToMonth
+                    ? `Producción real validada correctamente para ${selectedMonth}.`
+                    : "Producción real validada correctamente."}
             </p>
           </section>
         ) : (
@@ -1446,7 +1462,7 @@ function App() {
               <tbody>
                 {filteredDailyRows.map((row) => (
                   <tr key={`${row.fecha}-${row.producto}`}>
-                    <td>{row.fecha}</td>
+                    <td>{row.fechaDisplay}</td>
                     <td>{row.dia}</td>
                     <td>{row.producto}</td>
                     <td>{row.promedioUsado.toFixed(2)}</td>
@@ -1534,15 +1550,13 @@ function App() {
                 />
                 <KpiCard
                   icon={Database}
-                  label="Producción real"
-                  value={formatNumber(validationForecast.produccionReal)}
-                  caption={`Diferencia: ${formatNumber(
-                    validationForecast.produccionReal - validationSummary.produccionSugeridaMensual
-                  )}`}
+                  label="Producción real del mes"
+                  value={formatNumber(validationSummary.produccionRealMensual)}
+                  caption={`Diferencia: ${formatNumber(validationSummary.diferenciaMensual)}`}
                   tone={
-                    validationForecast.produccionReal < validationSummary.produccionSugeridaMensual
+                    validationSummary.produccionRealMensual < validationSummary.produccionSugeridaMensual
                       ? "danger"
-                      : validationForecast.produccionReal > validationSummary.produccionSugeridaMensual
+                      : validationSummary.produccionRealMensual > validationSummary.produccionSugeridaMensual
                         ? "warn"
                         : "ok"
                   }
@@ -1583,24 +1597,22 @@ function App() {
                       <strong>{formatNumber(validationSummary.pronosticoVentaMensual, 2)}</strong>
                     </div>
                     <div>
+                      <span>Colchón aplicado</span>
+                      <strong>{formatNumber(validationSummary.colchonDiarioMensual, 2)}</strong>
                     </div>
                     <div>
-                      <span>Producción real</span>
-                      <strong>{formatNumber(validationForecast.produccionReal)}</strong>
+                      <span>Producción sugerida</span>
+                      <strong>{formatNumber(validationSummary.produccionSugeridaMensual)}</strong>
+                    </div>
+                    <div>
+                      <span>Producción real del mes</span>
+                      <strong>{formatNumber(validationSummary.produccionRealMensual)}</strong>
                     </div>
                     <div>
                       <span>Precisión contra real</span>
                       <strong>
-                        {validationForecast.produccionReal > 0
-                          ? formatPercent(
-                              (1 -
-                                Math.abs(
-                                  validationSummary.produccionSugeridaMensual - validationForecast.produccionReal
-                                ) /
-                                  validationForecast.produccionReal) *
-                                100,
-                              1
-                            )
+                        {validationSummary.produccionRealMensual > 0
+                          ? formatPercent(validationSummary.precision, 1)
                           : "Sin dato real"}
                       </strong>
                     </div>
