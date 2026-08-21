@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "migrate": "node migrate.js",
+    "migrate:tidb": "node migrate-to-tidb.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

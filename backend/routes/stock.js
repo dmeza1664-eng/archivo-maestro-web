@@ -1,5 +1,6 @@
 const express = require('express');
 const { query, transaction } = require('../db');
+const { requireAuth, requireRole, writeAudit } = require('../auth');
 const {
   ensureProduct,
   extractRows,
@@ -11,8 +12,9 @@ const {
 } = require('./helpers');
 
 const router = express.Router();
+router.use(requireAuth);
 
-router.post('/bulk', async (req, res, next) => {
+router.post('/bulk', requireRole('admin', 'operador'), async (req, res, next) => {
   try {
     const rows = extractRows(req.body, ['stock', 'rows', 'data']);
 
@@ -40,6 +42,11 @@ router.post('/bulk', async (req, res, next) => {
         );
         insertedOrUpdated += 1;
       }
+
+      await writeAudit(connection, req.user.id, 'importar', 'stock_fijo', '', {
+        recibidas: rows.length,
+        actualizadas: insertedOrUpdated,
+      });
 
       return { insertedOrUpdated };
     });

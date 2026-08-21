@@ -103,10 +103,15 @@ const WEEKDAYS = [
   { index: 0, label: "Domingo" },
 ];
 
-const API_URL = String(import.meta.env.VITE_API_URL || "http://localhost:4000").replace(/\/$/, "");
+const API_URL = String(
+  import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:4000" : "")
+).replace(/\/$/, "");
 const SESSION_STORAGE_KEY = "archivoMaestroSession";
 const FORECAST_MODEL_VERSION = "categorySeasonal";
 const OPERATIONAL_MARGIN_PCT = 12;
+const API_PAGE_SIZE = 4000;
+const API_UPLOAD_BATCH_SIZE = 1500;
+const MAX_SNAPSHOT_BYTES = 3.5 * 1024 * 1024;
 
 function loadStoredSession() {
   try {
@@ -133,6 +138,94 @@ async function apiRequest(path, { token, method = "GET", body } = {}) {
     throw error;
   }
   return payload;
+}
+
+async function apiRequestAllRows(path, { token } = {}) {
+  const rows = [];
+  let cursor = 0;
+  for (let page = 0; page < 10000; page += 1) {
+    const separator = path.includes("?") ? "&" : "?";
+    const response = await apiRequest(
+      `${path}${separator}cursor=${encodeURIComponent(cursor)}&limit=${API_PAGE_SIZE}`,
+      { token }
+    );
+    rows.push(...(response.rows || []));
+    if (!response.hasMore) return { ...response, rows };
+    const nextCursor = Number(response.nextCursor);
+    if (!Number.isFinite(nextCursor) || nextCursor <= cursor) {
+      throw new Error("La sincronización devolvió un cursor inválido");
+    }
+    cursor = nextCursor;
+  }
+  throw new Error("La sincronización excedió el máximo de páginas permitido");
+}
+
+function consolidateRowsForUpload(rows, keyForRow, sumImporte = false) {
+  const consolidated = new Map();
+  for (const row of rows.filter((value) => !value.monthlyTotal)) {
+    const key = keyForRow(row);
+    const current = consolidated.get(key);
+    if (!current) {
+      consolidated.set(key, { ...row });
+      continue;
+    }
+    current.cantidad += row.cantidad;
+    if (sumImporte && row.importe !== null) current.importe = Number(current.importe || 0) + row.importe;
+  }
+  return [...consolidated.values()];
+}
+
+function consolidateSalesRowsForUpload(rows) {
+  return consolidateRowsForUpload(
+    rows,
+    (row) => [row.fecha, norm(row.producto_codigo), norm(row.sucursal), norm(row.cliente)].join("|"),
+    true
+  );
+}
+
+function consolidateOperationalRowsForUpload(rows, isProduction) {
+  return consolidateRowsForUpload(
+    rows,
+    (row) => [
+      row.fecha,
+      norm(row.producto_codigo),
+      isProduction ? norm(row.turno) : norm(row.sucursal),
+      isProduction ? "" : norm(row.motivo),
+    ].join("|")
+  );
+}
+
+async function uploadRowsInBatches({ endpoint, bodyKey, rows, archivo, token, onProgress }) {
+  const batches = [];
+  for (let offset = 0; offset < rows.length; offset += API_UPLOAD_BATCH_SIZE) {
+    batches.push(rows.slice(offset, offset + API_UPLOAD_BATCH_SIZE));
+  }
+  const totals = {
+    received: 0,
+    valid: 0,
+    rejected: 0,
+    consolidated: 0,
+    duplicatesInFile: 0,
+    inserted: 0,
+    updated: 0,
+    issues: [],
+  };
+  for (const [index, batch] of batches.entries()) {
+    onProgress?.(index + 1, batches.length);
+    const response = await apiRequest(endpoint, {
+      token,
+      method: "POST",
+      body: {
+        archivo: batches.length > 1 ? `${archivo} [lote ${index + 1}/${batches.length}]` : archivo,
+        [bodyKey]: batch,
+      },
+    });
+    for (const field of ["received", "valid", "rejected", "consolidated", "duplicatesInFile", "inserted", "updated"]) {
+      totals[field] += Number(response[field] || 0);
+    }
+    totals.issues.push(...(response.issues || []).slice(0, Math.max(0, 25 - totals.issues.length)));
+  }
+  return totals;
 }
 
 const WEEKDAY_ALIASES = [
@@ -2848,6 +2941,22 @@ function mergeRemoteRecords(localRows, remoteRows, keyForRow) {
   return [...localRows.filter((row) => !remoteKeys.has(keyForRow(row))), ...remoteRows];
 }
 
+function salesRecordKey(row) {
+  return [dateKey(row.fecha), normalizeProduct(row.producto || row.producto_codigo), norm(row.sucursal || row.canal), norm(row.cliente)].join("|");
+}
+
+function productionRecordKey(row) {
+  return [dateKey(row.fecha), normalizeProduct(row.producto || row.producto_codigo), norm(row.turno)].join("|");
+}
+
+function wasteRecordKey(row) {
+  return [dateKey(row.fecha), normalizeProduct(row.producto || row.producto_codigo), norm(row.sucursal || row.canal), norm(row.motivo)].join("|");
+}
+
+function snapshotOperationalRows(rows, keyForRow, persistedKeys = new Set()) {
+  return rows.filter((row) => row.monthlyTotal || !dateKey(row.fecha) || (!row.databaseSynced && !persistedKeys.has(keyForRow(row))));
+}
+
 function OperationalImportPanel({
   title,
   description,
@@ -3082,9 +3191,9 @@ function Dashboard({ session, onLogout }) {
       }
 
       const [salesSync, productionSync, wasteSync] = await Promise.all([
-        apiRequest("/api/ventas/sync", { token: session.token }).catch(() => ({ rows: [] })),
-        apiRequest("/api/produccion-real/sync", { token: session.token }).catch(() => ({ rows: [] })),
-        apiRequest("/api/bajas/sync", { token: session.token }).catch(() => ({ rows: [] })),
+        apiRequestAllRows("/api/ventas/sync", { token: session.token }).catch(() => ({ rows: [] })),
+        apiRequestAllRows("/api/produccion-real/sync", { token: session.token }).catch(() => ({ rows: [] })),
+        apiRequestAllRows("/api/bajas/sync", { token: session.token }).catch(() => ({ rows: [] })),
       ]);
       if (!active) return;
 
@@ -3098,7 +3207,8 @@ function Dashboard({ session, onLogout }) {
         canal: row.canal || "",
         cliente: row.cliente || "",
         tipo: "ventas",
-        sourceFile: "MySQL",
+        sourceFile: "Base de datos",
+        databaseSynced: true,
       }));
       const remoteProduction = (productionSync.rows || []).map((row) => ({
         fecha: row.fecha,
@@ -3107,7 +3217,8 @@ function Dashboard({ session, onLogout }) {
         productoOriginal: row.producto_nombre,
         cantidad: Number(row.cantidad),
         turno: row.turno || "",
-        sourceFile: "MySQL",
+        sourceFile: "Base de datos",
+        databaseSynced: true,
       }));
       const remoteWaste = (wasteSync.rows || []).map((row) => ({
         fecha: row.fecha,
@@ -3118,21 +3229,18 @@ function Dashboard({ session, onLogout }) {
         canal: row.sucursal || "",
         motivo: row.motivo || "",
         tipo: "bajas",
-        sourceFile: "MySQL",
+        sourceFile: "Base de datos",
+        databaseSynced: true,
       }));
       const localSales = Array.isArray(data.ventas) ? data.ventas : [];
       const localProduction = Array.isArray(data.realProduction) ? data.realProduction : [];
       const localWaste = Array.isArray(data.bajas) ? data.bajas : [];
-      const salesKey = (row) => [dateKey(row.fecha), normalizeProduct(row.producto), norm(row.sucursal || row.canal), norm(row.cliente)].join("|");
-      const productionKey = (row) => [dateKey(row.fecha), normalizeProduct(row.producto), norm(row.turno)].join("|");
-      const wasteKey = (row) => [dateKey(row.fecha), normalizeProduct(row.producto), norm(row.sucursal || row.canal), norm(row.motivo)].join("|");
-
       setStockRows(Array.isArray(data.stockRows) ? data.stockRows : []);
-      setVentas(mergeRemoteRecords(localSales, remoteSales, salesKey));
+      setVentas(mergeRemoteRecords(localSales, remoteSales, salesRecordKey));
       setVentasValidacion(Array.isArray(data.ventasValidacion) ? data.ventasValidacion : []);
-      setBajas(mergeRemoteRecords(localWaste, remoteWaste, wasteKey));
+      setBajas(mergeRemoteRecords(localWaste, remoteWaste, wasteRecordKey));
       setExistencias(Array.isArray(data.existencias) ? data.existencias : []);
-      setRealProduction(mergeRemoteRecords(localProduction, remoteProduction, productionKey));
+      setRealProduction(mergeRemoteRecords(localProduction, remoteProduction, productionRecordKey));
       setProducedMay(Array.isArray(data.producedMay) ? data.producedMay : []);
       setProducedJune(Array.isArray(data.producedJune) ? data.producedJune : []);
       setBajasJune(Array.isArray(data.bajasJune) ? data.bajasJune : []);
@@ -3147,7 +3255,7 @@ function Dashboard({ session, onLogout }) {
       setLastBackup(snapshot);
       setHasUnsavedChanges(false);
       setCloudStatus(
-        `${snapshot ? `Respaldo v${snapshot.version} restaurado. ` : ""}MySQL sincronizado: ${remoteSales.length} ventas, ${remoteProduction.length} producciones y ${remoteWaste.length} bajas.`
+        `${snapshot ? `Respaldo v${snapshot.version} restaurado. ` : ""}Base sincronizada: ${remoteSales.length} ventas, ${remoteProduction.length} producciones y ${remoteWaste.length} bajas.`
       );
     }
     restoreData().catch((error) => {
@@ -3219,37 +3327,42 @@ function Dashboard({ session, onLogout }) {
     };
   }, [selectedMonth, session.token]);
 
-  async function saveWorkspace({ silent = false } = {}) {
+  async function saveWorkspace({ silent = false, persistedKeys = {} } = {}) {
     setCloudSaving(true);
     if (!silent) setCloudStatus("Guardando respaldo...");
     try {
+      const contenido = {
+        schemaVersion: 2,
+        savedAt: new Date().toISOString(),
+        selectedMonth,
+        dailyBufferPct,
+        stockRows,
+        ventas: snapshotOperationalRows(ventas, salesRecordKey, persistedKeys.sales),
+        ventasValidacion,
+        bajas: snapshotOperationalRows(bajas, wasteRecordKey, persistedKeys.waste),
+        existencias,
+        realProduction: snapshotOperationalRows(realProduction, productionRecordKey, persistedKeys.production),
+        producedMay,
+        producedJune,
+        bajasJune,
+        bajasJuly,
+        monthlyCloseSales,
+        monthlyCloseProduction,
+        monthlyClosePeriod,
+        files,
+        productAliases,
+      };
+      const payloadBytes = new TextEncoder().encode(JSON.stringify(contenido)).byteLength;
+      if (payloadBytes > MAX_SNAPSHOT_BYTES) {
+        throw new Error("El respaldo aún contiene demasiados datos sin sincronizar. Guarda primero las ventas, producción y bajas en la base de datos.");
+      }
       const response = await apiRequest("/api/snapshots/workspace", {
         token: session.token,
         method: "POST",
         body: {
           periodo: "global",
           archivos: files,
-          contenido: {
-            schemaVersion: 1,
-            savedAt: new Date().toISOString(),
-            selectedMonth,
-            dailyBufferPct,
-            stockRows,
-            ventas,
-            ventasValidacion,
-            bajas,
-            existencias,
-            realProduction,
-            producedMay,
-            producedJune,
-            bajasJune,
-            bajasJuly,
-            monthlyCloseSales,
-            monthlyCloseProduction,
-            monthlyClosePeriod,
-            files,
-            productAliases,
-          },
+          contenido,
         },
       });
       const saved = { version: response.version, created_at: new Date().toISOString() };
@@ -3346,7 +3459,7 @@ function Dashboard({ session, onLogout }) {
     setSalesImporting(true);
     setSalesImportStatus("Validando y guardando ventas...");
     try {
-      const rows = pendingSalesImport.map((row) => {
+      const mappedRows = pendingSalesImport.map((row) => {
         const product = resolveOfficialProduct(row.producto, productAliases, officialProducts);
         return {
           fecha: dateKey(row.fecha),
@@ -3359,19 +3472,26 @@ function Dashboard({ session, onLogout }) {
           monthlyTotal: Boolean(row.monthlyTotal),
         };
       });
-      const response = await apiRequest("/api/ventas/importar", {
+      const rows = consolidateSalesRowsForUpload(mappedRows);
+      if (!rows.length) throw new Error("El archivo no contiene ventas diarias para guardar en la base de datos");
+      const response = await uploadRowsInBatches({
+        endpoint: "/api/ventas/importar",
+        bodyKey: "ventas",
+        rows,
+        archivo: salesImportFiles.join(", "),
         token: session.token,
-        method: "POST",
-        body: { archivo: salesImportFiles.join(", "), ventas: rows },
+        onProgress: (batch, total) => setSalesImportStatus(`Guardando ventas: lote ${batch} de ${total}...`),
       });
+      const importedKeys = new Set(rows.map(salesRecordKey));
+      setVentas((current) => current.map((row) => importedKeys.has(salesRecordKey(row)) ? { ...row, databaseSynced: true } : row));
       setPendingSalesImport([]);
       setSalesImportStatus("");
-      const backup = await saveWorkspace({ silent: true });
+      const backup = await saveWorkspace({ silent: true, persistedKeys: { sales: importedKeys } });
       setToast({
         tone: backup.ok ? "success" : "warning",
         message: backup.ok
           ? `Ventas guardadas: ${response.inserted} nuevas, ${response.updated} actualizadas. Respaldo v${backup.version} creado.`
-          : `Ventas guardadas en MySQL, pero el respaldo automático falló.`,
+          : `Ventas guardadas en la base de datos, pero el respaldo automático falló.`,
       });
     } catch (error) {
       if (error.status === 401) onLogout();
@@ -3414,7 +3534,7 @@ function Dashboard({ session, onLogout }) {
     setImporting(true);
     setStatus(`Validando y guardando ${isProduction ? "producción" : "bajas"}...`);
     try {
-      const rows = pending.map((row) => {
+      const mappedRows = pending.map((row) => {
         const product = resolveOfficialProduct(row.producto, productAliases, officialProducts);
         return {
           fecha: dateKey(row.fecha),
@@ -3427,24 +3547,36 @@ function Dashboard({ session, onLogout }) {
           monthlyTotal: Boolean(row.monthlyTotal),
         };
       });
+      const rows = consolidateOperationalRowsForUpload(mappedRows, isProduction);
+      if (!rows.length) throw new Error(`El archivo no contiene registros diarios de ${isProduction ? "producción" : "bajas"}`);
       const endpoint = isProduction ? "/api/produccion-real/importar" : "/api/bajas/importar";
       const bodyKey = isProduction ? "produccion" : "bajas";
-      const response = await apiRequest(endpoint, {
+      const response = await uploadRowsInBatches({
+        endpoint,
+        bodyKey,
+        rows,
+        archivo: isProduction ? productionImportFile : wasteImportFile,
         token: session.token,
-        method: "POST",
-        body: {
-          archivo: isProduction ? productionImportFile : wasteImportFile,
-          [bodyKey]: rows,
-        },
+        onProgress: (batch, total) => setStatus(`Guardando ${isProduction ? "producción" : "bajas"}: lote ${batch} de ${total}...`),
       });
+      const keyForRow = isProduction ? productionRecordKey : wasteRecordKey;
+      const importedKeys = new Set(rows.map(keyForRow));
+      if (isProduction) {
+        setRealProduction((current) => current.map((row) => importedKeys.has(productionRecordKey(row)) ? { ...row, databaseSynced: true } : row));
+      } else {
+        setBajas((current) => current.map((row) => importedKeys.has(wasteRecordKey(row)) ? { ...row, databaseSynced: true } : row));
+      }
       clearPending([]);
       setStatus("");
-      const backup = await saveWorkspace({ silent: true });
+      const backup = await saveWorkspace({
+        silent: true,
+        persistedKeys: isProduction ? { production: importedKeys } : { waste: importedKeys },
+      });
       setToast({
         tone: backup.ok ? "success" : "warning",
         message: backup.ok
           ? `${isProduction ? "Producción" : "Bajas"} guardadas: ${response.inserted} nuevas, ${response.updated} actualizadas. Respaldo v${backup.version} creado.`
-          : `${isProduction ? "Producción" : "Bajas"} guardadas en MySQL, pero el respaldo automático falló.`,
+          : `${isProduction ? "Producción" : "Bajas"} guardadas en la base de datos, pero el respaldo automático falló.`,
       });
     } catch (error) {
       if (error.status === 401) onLogout();
@@ -5536,7 +5668,7 @@ function App() {
   return <Dashboard session={session} onLogout={logout} />;
 }
 
-export { buildMonthlyCloseSummary, buildOperationalForecastScenario, buildWeeklyProgress, calculateForecast, filterVentasBeforeMonth, parseProductionReal, parseSalesOrReturns, parseStock };
+export { buildMonthlyCloseSummary, buildOperationalForecastScenario, buildWeeklyProgress, calculateForecast, consolidateOperationalRowsForUpload, consolidateSalesRowsForUpload, filterVentasBeforeMonth, parseProductionReal, parseSalesOrReturns, parseStock };
 
 if (typeof document !== "undefined") {
   createRoot(document.getElementById("root")).render(<App />);

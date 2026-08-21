@@ -98,6 +98,18 @@ function daysInMonth(mes) {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
+function paginationFromQuery(query, defaultLimit = 4000, maxLimit = 10000) {
+  const cursor = Number(query?.cursor || 0);
+  const requestedLimit = Number(query?.limit || defaultLimit);
+  if (!Number.isSafeInteger(cursor) || cursor < 0) {
+    throw httpError(400, 'El cursor de sincronización no es válido');
+  }
+  if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1) {
+    throw httpError(400, 'El límite de sincronización no es válido');
+  }
+  return { cursor, limit: Math.min(requestedLimit, maxLimit) };
+}
+
 function productInput(row, rowIndex) {
   const codigo = firstValue(row, [
     'producto_codigo',
@@ -176,6 +188,7 @@ module.exports = {
   httpError,
   mesFromDate,
   monthRange,
+  paginationFromQuery,
   toDateOnly,
   toNumber,
   validateMes,

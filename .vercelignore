@@ -1,0 +1,13 @@
+node_modules/
+backend/node_modules/
+dist/
+.env*
+**/.env*
+.git/
+.vercel/
+__MACOSX/
+*.cjs
+*.xlsx
+*.xls
+*.csv
+*.md

@@ -27,6 +27,48 @@ En Railway se puede usar `DATABASE_URL` con referencia a `MySQL.MYSQL_URL` en lu
 
 No hay credenciales dentro del codigo.
 
+## Despliegue completo en Vercel
+
+La raiz del repositorio contiene el frontend Vite y `api/index.js`, que publica esta misma aplicacion Express como una Vercel Function. `vercel.json` conserva `/api/*` para Express y envia las demas rutas al frontend.
+
+La base recomendada es TiDB Cloud desde Vercel Marketplace porque mantiene el protocolo y la sintaxis MySQL. La integracion agrega estas variables privadas al proyecto:
+
+```text
+TIDB_HOST
+TIDB_PORT
+TIDB_USER
+TIDB_PASSWORD
+TIDB_DATABASE
+```
+
+En Vercel no se necesita `PORT` ni `VITE_API_URL` para produccion; el frontend usa `/api` en el mismo dominio. Para desarrollo local, sin `VITE_API_URL`, se conserva `http://localhost:4000`.
+
+Configuracion adicional recomendada:
+
+```text
+DB_CONNECTION_LIMIT=2
+SESSION_DAYS=7
+```
+
+Vercel limita solicitudes y respuestas de Functions a 4.5 MB. Por eso las importaciones se dividen en lotes, los endpoints `/sync` estan paginados y el workspace no vuelve a guardar las filas diarias que ya existen en la base.
+
+### Migrar todo desde Railway
+
+La migracion requiere acceso temporal al MySQL de Railway o un respaldo logico. Nunca se ejecuta desde una Vercel Function.
+
+1. Crear y conectar una base TiDB vacia desde Vercel Marketplace.
+2. Obtener una URL de solo migracion para el MySQL origen.
+3. Cargar las variables TiDB en la terminal sin imprimirlas.
+4. Ejecutar:
+
+```bash
+SOURCE_DATABASE_URL=mysql://origen npm run migrate:tidb
+```
+
+`migrate-to-tidb.js` exige que el destino este vacio, copia las 13 tablas preservando IDs, usuarios, sesiones y snapshots, verifica conteos y crea una version reducida del workspace para Vercel. No elimina ni modifica el origen.
+
+Después de migrar, verificar `https://archivo-maestro-web.vercel.app/api/health`, login, sincronizacion, congelamiento y Revision mensual asistida antes de retirar Railway.
+
 ## Despliegue en Railway
 
 El repositorio contiene el frontend en la raiz y la API en `backend/`. El servicio de Railway debe apuntar a esa subcarpeta, de lo contrario Nixpacks construye el proyecto de Vite y el dominio queda sin proceso que responda.

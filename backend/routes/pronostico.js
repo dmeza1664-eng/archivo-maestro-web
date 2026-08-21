@@ -1,5 +1,6 @@
 const express = require('express');
 const { query, transaction } = require('../db');
+const { requireAuth, requireRole, writeAudit } = require('../auth');
 const {
   addMonths,
   daysInMonth,
@@ -10,8 +11,9 @@ const {
 } = require('./helpers');
 
 const router = express.Router();
+router.use(requireAuth);
 
-router.post('/calcular', async (req, res, next) => {
+router.post('/calcular', requireRole('admin', 'operador'), async (req, res, next) => {
   try {
     const mes = req.body?.mes;
     const metodo = req.body?.metodo || 'promedio_ventas';
@@ -73,6 +75,12 @@ router.post('/calcular', async (req, res, next) => {
           insertedOrUpdated += 1;
         }
       }
+
+      await writeAudit(connection, req.user.id, 'calcular', 'pronostico_diario', mes, {
+        metodo,
+        mesesHistoricos,
+        productosCalculados: averages.length,
+      });
 
       return {
         productosCalculados: averages.length,
