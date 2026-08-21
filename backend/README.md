@@ -20,9 +20,37 @@ DB_NAME=archivo_maestro
 DB_PORT=3306
 PORT=4000
 CORS_ORIGIN=http://localhost:5173
+APP_SETUP_KEY=una-clave-temporal-de-instalacion
 ```
 
+En Railway se puede usar `DATABASE_URL` con referencia a `MySQL.MYSQL_URL` en lugar de las variables `DB_*`.
+
 No hay credenciales dentro del codigo.
+
+## Despliegue en Railway
+
+El repositorio contiene el frontend en la raiz y la API en `backend/`. El servicio de Railway debe apuntar a esa subcarpeta, de lo contrario Nixpacks construye el proyecto de Vite y el dominio queda sin proceso que responda.
+
+Configuracion del servicio:
+
+```text
+Root Directory: backend
+Variables: DATABASE_URL (o DB_*), PORT, CORS_ORIGIN, APP_SETUP_KEY
+```
+
+`CORS_ORIGIN` debe incluir el dominio publicado del frontend, por ejemplo `https://archivo-maestro-web.vercel.app`.
+
+El archivo `railway.json` fija el comando de arranque y el health check en `/api/health`, de modo que un despliegue sin base de datos accesible se marca como fallido en lugar de quedar servido a medias.
+
+Verificacion despues de cada despliegue:
+
+```bash
+curl https://TU-API.up.railway.app/api/health
+```
+
+La respuesta esperada es `{"ok":true,"service":"archivo-maestro-backend","database":"connected"}`. Si el dominio responde 404 con la cabecera `x-railway-fallback: true`, el dominio existe pero no hay servicio activo detras: revisar que el servicio no este eliminado o detenido.
+
+En el frontend de Vercel debe existir `VITE_API_URL` con la URL publica de la API. Vite congela ese valor durante la compilacion, por lo que un cambio de URL exige un nuevo despliegue.
 
 ## Crear tablas
 
@@ -48,14 +76,40 @@ http://localhost:4000
 
 ```text
 POST /api/ventas/bulk
+POST /api/ventas/importar
 GET  /api/ventas?mes=2026-04
+GET  /api/ventas/importaciones
+GET  /api/ventas/sync
 POST /api/stock/bulk
 GET  /api/stock?mes=2026-04
 POST /api/produccion-real/bulk
+POST /api/produccion-real/importar
 GET  /api/produccion-real?mes=2026-04
+GET  /api/produccion-real/importaciones
+GET  /api/produccion-real/sync
+POST /api/bajas/importar
+GET  /api/bajas?mes=2026-04
+GET  /api/bajas/importaciones
+GET  /api/bajas/sync
 POST /api/pronostico/calcular
 GET  /api/pronostico?mes=2026-04
+GET  /api/auth/status
+POST /api/auth/setup
+POST /api/auth/login
+GET  /api/auth/me
+POST /api/auth/logout
+GET  /api/auth/users
+POST /api/auth/users
+GET  /api/snapshots
+GET  /api/snapshots/:type
+GET  /api/snapshots/:type/history
+POST /api/snapshots/:type
+GET  /api/audit
 ```
+
+Los respaldos son inmutables y versionados. Cada guardado registra usuario, fecha, tamaño y acción en la bitácora.
+
+La importación de ventas consolida filas repetidas por fecha, producto, sucursal y cliente. Si el registro ya existe, lo actualiza en lugar de duplicarlo. Los totales mensuales se rechazan en esta ruta porque no representan ventas diarias.
 
 ## Formato JSON desde el frontend
 
