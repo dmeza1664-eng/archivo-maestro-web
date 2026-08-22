@@ -500,6 +500,12 @@ function isValidProduct(value, row = []) {
   return true;
 }
 
+function isValidInventoryProduct(value, row = []) {
+  if (isValidProduct(value, row)) return true;
+  const product = norm(value);
+  return product.includes("SEMANA SANTA") && !isDateLikeValue(value) && !isCalendarRow(row);
+}
+
 function toNumber(value) {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   const cleaned = String(value ?? "")
@@ -748,9 +754,9 @@ function rowsFromFirstSheet(workbook) {
 }
 
 const STOCK_SHEET_CANDIDATES = [
-  "EXIST. SUCURSALES Y RESTANTE CF",
   "TOTAL A TENER SUC.(EXIST.+DIST)",
   "STOCK DE SUCURSALES",
+  "EXIST. SUCURSALES Y RESTANTE CF",
 ];
 
 function findStockSheet(workbook) {
@@ -773,16 +779,18 @@ function parseStock(workbook) {
   for (let i = 0; i < Math.min(rows.length, 12); i++) {
     const row = rows[i].map(norm);
     const productIndex = row.findIndex((cell) => cell.includes("PRODUCTO"));
-    const totalIndex = row.findIndex(
+    const exactStockIndex = row.findIndex((cell) => cell === "STOCK");
+    const fallbackTotalIndex = row.findIndex(
       (cell, index) =>
         index > 0 &&
         (cell === "TOTAL" ||
           (cell.includes("TOTAL") && !cell.includes("SUC") && !cell.includes("GRAL") && !cell.includes("GENERAL")))
     );
-    if (productIndex >= 0 && totalIndex >= 0) {
+    const resolvedStockIndex = exactStockIndex >= 0 ? exactStockIndex : fallbackTotalIndex;
+    if (productIndex >= 0 && resolvedStockIndex >= 0) {
       headerIndex = i;
       productCol = productIndex;
-      stockCol = totalIndex;
+      stockCol = resolvedStockIndex;
       break;
     }
   }
@@ -790,7 +798,7 @@ function parseStock(workbook) {
   const parsed = [];
   const start = headerIndex >= 0 ? headerIndex + 1 : 0;
   for (let i = start; i < rows.length; i++) {
-    if (!isValidProduct(rows[i][productCol], rows[i])) continue;
+    if (!isValidInventoryProduct(rows[i][productCol], rows[i])) continue;
     const productoOriginal = String(rows[i][productCol] ?? "").trim();
     const product = normalizeProduct(productoOriginal);
     const stock = toNumber(rows[i][stockCol]);
@@ -800,7 +808,9 @@ function parseStock(workbook) {
 }
 
 function parseExistencias(workbook) {
-  const rows = rowsFromFirstSheet(workbook);
+  const sheetName = workbook.SheetNames.find((name) => norm(name).includes("EXISTENCIA EN SUCURSALES"));
+  const sheet = sheetName ? workbook.Sheets[sheetName] : workbook.Sheets[workbook.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
   let headerIndex = -1;
   let productCol = -1;
@@ -813,7 +823,9 @@ function parseExistencias(workbook) {
     const p = row.findIndex((x) => x.includes("PRODUCTO"));
     const total = row.findIndex((x) => x.includes("TOTAL") && (x.includes("GRAL") || x.includes("SUC")));
     const cf = row.findIndex((x) => x.includes("CUARTO") || x === "C.F." || x === "CF");
-    const suma = row.findIndex((x) => x.includes("SUMA") && x.includes("SUC"));
+    const suma = row.findIndex(
+      (x) => (x.includes("SUMA") && x.includes("SUC")) || (x.includes("SUCURSALES") && (x.includes("C.F") || x.includes("CF")))
+    );
     if (p >= 0 && total >= 0 && cf >= 0 && suma >= 0) {
       headerIndex = i;
       productCol = p;
@@ -828,7 +840,7 @@ function parseExistencias(workbook) {
 
   const parsed = [];
   for (let i = headerIndex + 1; i < rows.length; i++) {
-    if (!isValidProduct(rows[i][productCol], rows[i])) continue;
+    if (!isValidInventoryProduct(rows[i][productCol], rows[i])) continue;
     const productoOriginal = String(rows[i][productCol] ?? "").trim();
     const product = normalizeProduct(productoOriginal);
     parsed.push({
@@ -954,6 +966,57 @@ function parseMonthlyDailySheets(workbook, type = "ventas", monthHint = null) {
   return out;
 }
 
+function parseBajasReport(workbook) {
+  const sheetName = workbook.SheetNames.find((name) => norm(name) === "REPORTE");
+  if (!sheetName) return [];
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
+  let headerIndex = -1;
+  let productCol = -1;
+  let qtyCol = -1;
+  let dateCol = -1;
+  let branchCol = -1;
+  let reasonCol = -1;
+
+  for (let i = 0; i < Math.min(rows.length, 8); i += 1) {
+    const row = rows[i].map(norm);
+    const product = row.findIndex((value) => value.includes("PRODUCTO"));
+    const quantity = row.findIndex((value) => value.includes("CANT"));
+    const date = row.findIndex((value) => value.includes("FECHA"));
+    if (product < 0 || quantity < 0 || date < 0) continue;
+    headerIndex = i;
+    productCol = product;
+    qtyCol = quantity;
+    dateCol = date;
+    branchCol = row.findIndex((value) => value.includes("SUCURSAL"));
+    reasonCol = row.findIndex((value) => value.includes("MOTIVO"));
+    break;
+  }
+
+  if (headerIndex < 0) return [];
+  const parsed = [];
+  for (let i = headerIndex + 1; i < rows.length; i += 1) {
+    if (!isValidInventoryProduct(rows[i][productCol], rows[i])) continue;
+    const fecha = parseDateCell(rows[i][dateCol]);
+    const cantidad = toNumber(rows[i][qtyCol]);
+    if (!fecha || cantidad === 0) continue;
+    const productoOriginal = String(rows[i][productCol] ?? "").trim();
+    const sucursal = branchCol >= 0 ? String(rows[i][branchCol] ?? "").trim() : "";
+    parsed.push({
+      fecha,
+      producto: normalizeProduct(productoOriginal),
+      productoOriginal,
+      cantidad,
+      importe: 0,
+      sucursal,
+      canal: sucursal,
+      cliente: "",
+      motivo: reasonCol >= 0 ? String(rows[i][reasonCol] ?? "").trim() : "",
+      tipo: "bajas",
+    });
+  }
+  return parsed;
+}
+
 function parseWideSales(workbook, type = "ventas", monthHint = null, yearHint = 2026, fileName = "") {
   const parsed = [];
   const skip = new Set(["RESUMEN", "REPORTE", "TOTAL", "TOTALES", "CONCENTRADO", "HOJA1"]);
@@ -1042,6 +1105,10 @@ function parseWideSales(workbook, type = "ventas", monthHint = null, yearHint = 
 function parseSalesOrReturns(workbook, type, fileName = "") {
   const yearHint = inferYearHintFromFileName(fileName);
   const monthHint = inferMonthHintFromFileName(fileName, yearHint);
+  if (type === "bajas") {
+    const report = parseBajasReport(workbook);
+    if (report.length > 0) return report;
+  }
   const wide = parseWideSales(workbook, type, monthHint, yearHint, fileName);
   if (wide.length > 0) return wide;
   const bySheets = parseMonthlyDailySheets(workbook, type, monthHint);
@@ -1183,10 +1250,41 @@ function parseMonthlySummaryWorkbook(workbook, monthHint = null) {
   }));
 }
 
+function parseBajasSummaryWorkbook(workbook) {
+  const sheetName = workbook.SheetNames.find((name) => norm(name).includes("BAJAS") && norm(name) !== "REPORTE");
+  if (!sheetName) return [];
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
+  const headerIndex = rows.findIndex((row) => {
+    const values = row.map(norm);
+    return values.some((value) => value.includes("ETIQUETAS") || value.includes("PRODUCTO")) &&
+      values.some((value) => value.includes("CANT") || value.includes("SUMA"));
+  });
+  if (headerIndex < 0) return [];
+  const header = rows[headerIndex].map(norm);
+  const productCol = header.findIndex((value) => value.includes("ETIQUETAS") || value.includes("PRODUCTO"));
+  const quantityCol = header.findIndex((value) => value.includes("CANT") || value.includes("SUMA"));
+  const map = new Map();
+  for (let index = headerIndex + 1; index < rows.length; index += 1) {
+    const original = String(rows[index][productCol] ?? "").trim();
+    if (!isValidInventoryProduct(original) || /^ERICK?\b/.test(norm(original))) continue;
+    const product = normalizeProduct(original);
+    const quantity = toNumber(rows[index][quantityCol]);
+    if (quantity === 0) continue;
+    map.set(product, (map.get(product) || 0) + quantity);
+  }
+  return [...map.entries()].map(([producto, cantidad]) => ({ producto, cantidad, monthlyTotal: true }));
+}
+
 async function parseMonthlySummaryFile(file) {
   if (!file) return [];
   const workbook = await readWorkbook(file);
   return parseMonthlySummaryWorkbook(workbook);
+}
+
+async function parseBajasSummaryFile(file) {
+  if (!file) return [];
+  const workbook = await readWorkbook(file);
+  return parseBajasSummaryWorkbook(workbook);
 }
 
 function groupByProduct(records) {
@@ -2979,7 +3077,7 @@ function OperationalImportPanel({
         </div>
         {pendingRows.length > 0 && (
           <button className="primary" type="button" onClick={onImport} disabled={!canSave || importing || preview.daily === 0}>
-            <Database size={18} /> {importing ? "Guardando..." : "Guardar en MySQL"}
+            <Database size={18} /> {importing ? "Guardando..." : "Guardar en la base"}
           </button>
         )}
       </div>
@@ -3427,16 +3525,30 @@ function Dashboard({ session, onLogout }) {
     const validFiles = filesToRead.filter(Boolean);
     if (!validFiles.length) return;
 
+    const hasCanonicalJuneClose = validFiles.some((file) => {
+      const hint = inferMonthHintFromFileName(file.name);
+      return hint?.monthIndex === 5 && !norm(file.name).includes("MAYO");
+    });
     const parsedFiles = await Promise.all(
       validFiles.map(async (file) => {
         const workbook = await readWorkbook(file);
-        return parseSalesOrReturns(workbook, "ventas", file.name).map((row) => ({ ...row, sourceFile: file.name }));
+        let rows = parseSalesOrReturns(workbook, "ventas", file.name);
+        if (hasCanonicalJuneClose && norm(file.name).includes("MAYO") && norm(file.name).includes("JUNIO")) {
+          rows = rows.filter((row) => dateKey(row.fecha).slice(0, 7) !== "2026-06");
+        }
+        return rows.map((row) => ({ ...row, sourceFile: file.name }));
       })
     );
     const parsed = parsedFiles.flat();
     setVentas((current) => {
       const selectedNames = new Set(validFiles.map((file) => file.name));
-      const withoutReplacedFiles = current.filter((row) => !row.sourceFile || !selectedNames.has(row.sourceFile));
+      const withoutReplacedFiles = current.filter((row) => {
+        if (row.sourceFile && selectedNames.has(row.sourceFile)) return false;
+        if (hasCanonicalJuneClose && norm(row.sourceFile).includes("MAYO") && norm(row.sourceFile).includes("JUNIO")) {
+          return dateKey(row.fecha).slice(0, 7) !== "2026-06";
+        }
+        return true;
+      });
       const rowsToAppend = parsedFiles.flatMap((rows, index) => {
         const fileName = validFiles[index].name;
         const hasTaggedRows = current.some((row) => row.sourceFile === fileName);
@@ -3446,7 +3558,7 @@ function Dashboard({ session, onLogout }) {
     });
     setPendingSalesImport(parsed);
     setSalesImportFiles(validFiles.map((file) => file.name));
-    setSalesImportStatus(parsed.length ? "Revisa el resumen antes de guardar en MySQL." : "No se reconocieron ventas en los archivos.");
+    setSalesImportStatus(parsed.length ? "Revisa el resumen antes de guardar en la base." : "No se reconocieron ventas en los archivos.");
     setFiles((current) => ({
       ...current,
       ventas: [...new Set([...loadedNames, ...validFiles.map((file) => file.name)])].join(", "),
@@ -3507,7 +3619,7 @@ function Dashboard({ session, onLogout }) {
     setRealProduction(parsed);
     setPendingProductionImport(parsed);
     setProductionImportFile(file.name);
-    setProductionImportStatus(parsed.length ? "Revisa la producción antes de guardarla en MySQL." : "No se reconocieron registros de producción.");
+    setProductionImportStatus(parsed.length ? "Revisa la producción antes de guardarla en la base." : "No se reconocieron registros de producción.");
     setFiles((f) => ({ ...f, real: file.name }));
     setHasUnsavedChanges(true);
   }
@@ -3519,7 +3631,7 @@ function Dashboard({ session, onLogout }) {
     setBajas(parsed);
     setPendingWasteImport(parsed);
     setWasteImportFile(file.name);
-    setWasteImportStatus(parsed.length ? "Revisa las bajas antes de guardarlas en MySQL." : "No se reconocieron registros de bajas.");
+    setWasteImportStatus(parsed.length ? "Revisa las bajas antes de guardarlas en la base." : "No se reconocieron registros de bajas.");
     setFiles((current) => ({ ...current, bajas: file.name }));
     setHasUnsavedChanges(true);
   }
@@ -3586,9 +3698,9 @@ function Dashboard({ session, onLogout }) {
     }
   }
 
-  async function handleMonthlySummaryFile(file, key, setter) {
+  async function handleMonthlySummaryFile(file, key, setter, parser = parseMonthlySummaryFile) {
     if (!file) return;
-    const parsed = await parseMonthlySummaryFile(file);
+    const parsed = await parser(file);
     setter(parsed);
     setFiles((current) => ({ ...current, [key]: file.name }));
     setHasUnsavedChanges(true);
@@ -5011,7 +5123,7 @@ function Dashboard({ session, onLogout }) {
                   onClick={importSalesToDatabase}
                   disabled={!canSave || salesImporting || salesImportPreview.daily === 0}
                 >
-                  <Database size={18} /> {salesImporting ? "Guardando..." : "Guardar ventas en MySQL"}
+                  <Database size={18} /> {salesImporting ? "Guardando..." : "Guardar ventas en la base"}
                 </button>
               )}
             </div>
@@ -5092,13 +5204,13 @@ function Dashboard({ session, onLogout }) {
                 <UploadBox
                   title="Bajas junio"
                   description="Hoja BAJAS ERICK."
-                  onFile={(file) => handleMonthlySummaryFile(file, "bajasJune", setBajasJune)}
+                  onFile={(file) => handleMonthlySummaryFile(file, "bajasJune", setBajasJune, parseBajasSummaryFile)}
                   fileName={files.bajasJune}
                 />
                 <UploadBox
                   title="Bajas julio"
                   description="Referencia real, puede ser corte parcial."
-                  onFile={(file) => handleMonthlySummaryFile(file, "bajasJuly", setBajasJuly)}
+                  onFile={(file) => handleMonthlySummaryFile(file, "bajasJuly", setBajasJuly, parseBajasSummaryFile)}
                   fileName={files.bajasJuly}
                 />
               </section>
@@ -5668,7 +5780,7 @@ function App() {
   return <Dashboard session={session} onLogout={logout} />;
 }
 
-export { buildMonthlyCloseSummary, buildOperationalForecastScenario, buildWeeklyProgress, calculateForecast, consolidateOperationalRowsForUpload, consolidateSalesRowsForUpload, filterVentasBeforeMonth, parseProductionReal, parseSalesOrReturns, parseStock };
+export { buildMonthlyCloseSummary, buildOperationalForecastScenario, buildWeeklyProgress, calculateForecast, consolidateOperationalRowsForUpload, consolidateSalesRowsForUpload, filterVentasBeforeMonth, parseBajasSummaryWorkbook, parseExistencias, parseProductionReal, parseSalesOrReturns, parseStock };
 
 if (typeof document !== "undefined") {
   createRoot(document.getElementById("root")).render(<App />);
