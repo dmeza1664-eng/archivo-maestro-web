@@ -3556,8 +3556,18 @@ function Dashboard({ session, onLogout }) {
       });
       return [...withoutReplacedFiles, ...rowsToAppend];
     });
-    setPendingSalesImport(parsed);
-    setSalesImportFiles(validFiles.map((file) => file.name));
+    setPendingSalesImport((current) => {
+      const selectedNames = new Set(validFiles.map((file) => file.name));
+      const retained = current.filter((row) => {
+        if (row.sourceFile && selectedNames.has(row.sourceFile)) return false;
+        if (hasCanonicalJuneClose && norm(row.sourceFile).includes("MAYO") && norm(row.sourceFile).includes("JUNIO")) {
+          return dateKey(row.fecha).slice(0, 7) !== "2026-06";
+        }
+        return true;
+      });
+      return [...retained, ...parsed];
+    });
+    setSalesImportFiles((current) => [...new Set([...current, ...validFiles.map((file) => file.name)])]);
     setSalesImportStatus(parsed.length ? "Revisa el resumen antes de guardar en la base." : "No se reconocieron ventas en los archivos.");
     setFiles((current) => ({
       ...current,
