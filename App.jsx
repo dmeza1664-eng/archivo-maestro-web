@@ -635,6 +635,61 @@ function datesForMonth(monthValue) {
   return dates;
 }
 
+function lastDateOfMonth(year, monthIndex) {
+  return dateKey(new Date(year, monthIndex + 1, 0));
+}
+
+function inventoryCutoffStatus(cutoffDate, selectedMonth) {
+  const cutoff = dateKey(cutoffDate);
+  if (!cutoff || !/^\d{4}-(0[1-9]|1[0-2])$/.test(String(selectedMonth || ""))) {
+    return { status: "missing", cutoff: cutoff || "", windowStart: "", windowEnd: "" };
+  }
+  const [year, month] = selectedMonth.split("-").map(Number);
+  const windowStart = dateKey(new Date(year, month - 2, 1));
+  const windowEnd = dateKey(new Date(year, month, 0));
+  return {
+    status: cutoff >= windowStart && cutoff <= windowEnd ? "fresh" : "stale",
+    cutoff,
+    windowStart,
+    windowEnd,
+  };
+}
+
+function productionDateKeyForDemand(date, monthKeySet) {
+  const key = dateKey(date);
+  if (date.getDay() !== 0) return key;
+  const previous = new Date(date);
+  previous.setDate(previous.getDate() - 1);
+  const previousKey = dateKey(previous);
+  if (monthKeySet.has(previousKey)) return previousKey;
+  const laterSaturday = [...monthKeySet]
+    .filter((candidate) => candidate > key)
+    .find((candidate) => parseDateCell(`${candidate}T12:00:00`)?.getDay() === 6);
+  return laterSaturday || key;
+}
+
+function allocateIntegerTotal(weights, total) {
+  const safeTotal = Math.max(0, Math.round(Number(total) || 0));
+  const slots = weights.map((weight) => Math.max(0, Number(weight) || 0));
+  if (!slots.length || safeTotal === 0) return slots.map(() => 0);
+  const weightSum = slots.reduce((sum, weight) => sum + weight, 0);
+  if (weightSum <= 0) {
+    const allocated = slots.map(() => 0);
+    allocated[0] = safeTotal;
+    return allocated;
+  }
+  const raw = slots.map((weight) => (weight / weightSum) * safeTotal);
+  const floors = raw.map((value) => Math.floor(value));
+  let remain = safeTotal - floors.reduce((sum, value) => sum + value, 0);
+  const order = raw
+    .map((value, index) => ({ index, frac: value - Math.floor(value) }))
+    .sort((a, b) => b.frac - a.frac || a.index - b.index);
+  for (let step = 0; step < remain; step += 1) {
+    floors[order[step % order.length].index] += 1;
+  }
+  return floors;
+}
+
 function monthKeyFromDate(date) {
   const d = parseDateCell(date);
   if (!d) return "";
@@ -852,6 +907,23 @@ function parseExistencias(workbook) {
     });
   }
   return parsed;
+}
+
+function inferInventoryCutoffDate(workbook, fileName = "") {
+  const sheetName = workbook.SheetNames.find((name) => norm(name).includes("EXISTENCIA EN SUCURSALES")) || workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const rows = sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" }) : [];
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    for (const cell of (rows[i] || []).slice(0, 12)) {
+      const parsed = parseDateCell(cell);
+      if (parsed) return { date: dateKey(parsed), source: "celda del archivo" };
+    }
+  }
+  const fromName = parseDateCell(String(fileName || "").replace(/\.[^.]+$/, "").replace(/[_-]+/g, " "));
+  if (fromName) return { date: dateKey(fromName), source: "nombre de archivo" };
+  const hint = inferMonthHintFromFileName(fileName);
+  if (hint) return { date: lastDateOfMonth(hint.year, hint.monthIndex), source: "mes del archivo" };
+  return { date: "", source: "" };
 }
 
 function inferYearHintFromFileName(fileName = "", fallbackYear = 2026) {
@@ -1877,26 +1949,44 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
   const realDailyMap = aggregateDailyProductionRows(realProduction);
   const salesDailyMap = aggregateDailySalesRows(ventasReales);
   const monthDates = datesForMonth(selectedMonth);
+  const monthKeySet = new Set(monthDates.map((date) => dateKey(date)));
   const productRows = monthlyRows.filter((row) => isValidProduct(row.producto) && !isSliceProduct(row.producto));
 
   return productRows.flatMap((productRow) => {
     const product = productRow.producto;
-    return monthDates.map((date) => {
-      const key = dateKey(date);
-      const weekday = date.getDay();
-      const dayName = weekdayLabel(weekday);
-      const pronosticoVentaDia = getWeekdayAverage(productRow, dayName);
-      const colchonDiario = pronosticoVentaDia * (dailyBufferPct / 100);
-      const baseConColchonDia = pronosticoVentaDia + colchonDiario;
-      const produccionSugeridaDia = getProduccionSugerida(product, baseConColchonDia);
-      const realKey = `${product}|${key}`;
+    const demandByDate = monthDates.map((date) => {
+      const pronosticoVentaDia = getWeekdayAverage(productRow, weekdayLabel(date.getDay()));
+      return {
+        date,
+        key: dateKey(date),
+        weekday: date.getDay(),
+        pronosticoVentaDia,
+        colchonDiario: pronosticoVentaDia * (dailyBufferPct / 100),
+        baseConColchonDia: pronosticoVentaDia * (1 + dailyBufferPct / 100),
+      };
+    });
+    const productionWeights = demandByDate.map((row) => {
+      if (row.weekday === 0) return 0;
+      const sundayDemand = demandByDate
+        .filter((candidate) => candidate.weekday === 0 && productionDateKeyForDemand(candidate.date, monthKeySet) === row.key)
+        .reduce((sum, candidate) => sum + candidate.baseConColchonDia, 0);
+      return row.baseConColchonDia + sundayDemand;
+    });
+    const allocated = allocateIntegerTotal(productionWeights, productRow.produccionSugerida);
+
+    return demandByDate.map((row, index) => {
+      const produccionSugeridaDia = allocated[index];
+      const realKey = `${product}|${row.key}`;
       const hasRealData = realDailyMap.has(realKey);
       const produccionRealDia = hasRealData ? realDailyMap.get(realKey) : null;
       const diferenciaPiezas = hasRealData ? produccionRealDia - produccionSugeridaDia : null;
       const hasVentaReal = salesDailyMap.has(realKey);
       const ventaRealDia = hasVentaReal ? salesDailyMap.get(realKey) : null;
-      const diferenciaVenta = hasVentaReal ? ventaRealDia - pronosticoVentaDia : null;
-      const precisionVenta = precisionScore(pronosticoVentaDia, ventaRealDia);
+      const diferenciaVenta = hasVentaReal ? ventaRealDia - row.pronosticoVentaDia : null;
+      const precisionVenta = precisionScore(row.pronosticoVentaDia, ventaRealDia);
+      const productionTarget = productionDateKeyForDemand(row.date, monthKeySet);
+      const sundayMoved = row.weekday === 0 && productionTarget !== row.key;
+      const receivedSunday = row.weekday === 6 && productionWeights[index] > row.baseConColchonDia + 0.01;
 
       let estatus = "Sin dato real";
       if (hasRealData && diferenciaPiezas < 0) estatus = "Riesgo faltante";
@@ -1911,18 +2001,23 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
         else estatusVenta = "Dentro de rango";
       }
 
+      let reglaOperativa = getReglaOperativaLabel(product, row.baseConColchonDia);
+      if (row.weekday === 0) reglaOperativa = "Domingo: no producir; demanda al sábado";
+      else if (receivedSunday) reglaOperativa = `${reglaOperativa} · incluye demanda del domingo`;
+
       return {
-        fecha: key,
-        fechaDisplay: displayDate(date),
-        weekday,
-        dia: weekdayLabel(weekday),
+        fecha: row.key,
+        fechaDisplay: displayDate(row.date),
+        weekday: row.weekday,
+        dia: weekdayLabel(row.weekday),
         producto: product,
-        promedioUsado: pronosticoVentaDia,
-        pronosticoVentaDia,
-        colchonDiario,
-        baseConColchonDia,
-        reglaOperativa: getReglaOperativaLabel(product, baseConColchonDia),
+        promedioUsado: row.pronosticoVentaDia,
+        pronosticoVentaDia: row.pronosticoVentaDia,
+        colchonDiario: row.colchonDiario,
+        baseConColchonDia: row.baseConColchonDia,
+        reglaOperativa,
         produccionSugeridaDia,
+        produccionDestino: sundayMoved ? productionTarget : row.key,
         produccionRealDia,
         hasRealData,
         diferenciaPiezas,
@@ -2450,6 +2545,7 @@ function buildMonthlyReviewRows({
   historicalVentas,
   loadedExistencias,
   inputs = {},
+  inventoryUsable = false,
 }) {
   const forecastByProduct = new Map(forecastRows.map((row) => [normalizeProduct(row.producto), row]));
   const existenceByProduct = new Map(
@@ -2469,9 +2565,10 @@ function buildMonthlyReviewRows({
       sourceRow.pronosticoOperativo ?? sourceRow.produccionSugerida ?? baseForecast * (1 + OPERATIONAL_MARGIN_PCT / 100)
     );
     const hasLoadedInventory = existenceByProduct.has(product);
-    const inventory = input.inventoryOverride === null || input.inventoryOverride === undefined || input.inventoryOverride === ""
+    const capturedInventory = input.inventoryOverride === null || input.inventoryOverride === undefined || input.inventoryOverride === ""
       ? (hasLoadedInventory ? existenceByProduct.get(product) : 0)
       : Math.max(0, toNumber(input.inventoryOverride));
+    const deductedInventory = inventoryUsable ? capturedInventory : 0;
     const stats = historicalMonthlyStats(historicalVentas, product);
     const reasons = [];
     let severity = "ok";
@@ -2510,9 +2607,12 @@ function buildMonthlyReviewRows({
       reasons.unshift("Producto ESTACIONAL: requiere confirmar su temporada; no se ajustó automáticamente.");
       severity = "warn";
     } else {
-      proposed = Math.max(0, getProduccionSugerida(product, baseForecast * (1 + marginPct / 100) - inventory));
-      if (hasLoadedInventory || input.inventoryOverride !== null && input.inventoryOverride !== undefined && input.inventoryOverride !== "") {
-        reasons.push(`Se descontaron ${formatNumber(inventory, 0)} piezas de existencia.`);
+      proposed = Math.max(0, getProduccionSugerida(product, baseForecast * (1 + marginPct / 100) - deductedInventory));
+      if (!inventoryUsable && (hasLoadedInventory || capturedInventory > 0)) {
+        reasons.push("Existencias fuera de ventana o sin fecha de corte: no se descontaron.");
+        if (severity === "ok") severity = "warn";
+      } else if (hasLoadedInventory || input.inventoryOverride !== null && input.inventoryOverride !== undefined && input.inventoryOverride !== "") {
+        reasons.push(`Se descontaron ${formatNumber(deductedInventory, 0)} piezas de existencia.`);
       } else {
         reasons.push("Sin existencias capturadas: la propuesta puede estar sobrestimada.");
         if (severity === "ok") severity = "warn";
@@ -2530,7 +2630,7 @@ function buildMonthlyReviewRows({
       orden: sourceRow.orden ?? forecastRow.orden,
       status: productStatus,
       note: String(input.note || ""),
-      inventory,
+      inventory: capturedInventory,
       inventoryOverride: input.inventoryOverride ?? null,
       hasLoadedInventory,
       baseForecast,
@@ -2564,6 +2664,7 @@ function exportMonthlyReview({ rows, review, selectedMonth, sourceVersion }) {
     { Indicador: "Plan operativo base", Valor: Number(rows.reduce((sum, row) => sum + row.baseOperational, 0).toFixed(2)) },
     { Indicador: "Plan después de decisiones", Valor: Number(finalTotal.toFixed(2)) },
     { Indicador: "Aceptadas / rechazadas / pendientes", Valor: `${accepted.length} / ${rejected.length} / ${pending.length}` },
+    { Indicador: "Fecha de corte existencias", Valor: review.inventoryCutoff || "Sin fecha" },
     { Indicador: "Nota general", Valor: review.generalNote || "" },
   ];
   const detail = rows.map((row) => ({
@@ -2586,7 +2687,7 @@ function exportMonthlyReview({ rows, review, selectedMonth, sourceVersion }) {
     { Regla: "Separación", Detalle: "La revisión nunca modifica el pronóstico congelado; produce un plan operativo separado." },
     { Regla: "Sin look-ahead", Detalle: "Solo usa información anterior al mes objetivo, estatus, notas y existencias capturadas." },
     { Regla: "Volatilidad", Detalle: "Colchón de 8%, 12% o 15% según la variación de los últimos seis meses disponibles." },
-    { Regla: "Existencias", Detalle: "Las existencias se descuentan del pronóstico con colchón antes de aplicar la regla de producción." },
+    { Regla: "Existencias", Detalle: "Solo se descuentan si la fecha de corte cae entre el mes anterior y el mes planificado." },
     { Regla: "Estatus", Detalle: "BAJA y BAJO PEDIDO salen del plan regular. ESTACIONAL exige confirmación manual." },
   ];
   const workbook = XLSX.utils.book_new();
@@ -2730,6 +2831,7 @@ function exportDailyToExcel(rows, summary) {
     { Indicador: "Margen de seguridad mensual", Valor: Number(summary.colchonDiarioMensual.toFixed(2)) },
     { Indicador: "Base con margen mensual", Valor: Number(summary.baseConColchonMensual.toFixed(2)) },
     { Indicador: "Produccion sugerida mensual", Valor: summary.produccionSugeridaMensual },
+    { Indicador: "Regla domingo", Valor: "Sin produccion; la demanda se cubre el sabado. La suma diaria iguala el total mensual." },
     { Indicador: "Produccion real mensual", Valor: summary.produccionRealMensual },
     { Indicador: "Diferencia mensual", Valor: summary.diferenciaMensual },
     { Indicador: "Precision %", Valor: Number(summary.precision.toFixed(1)) },
@@ -2745,6 +2847,7 @@ function exportDailyToExcel(rows, summary) {
     "Base con margen de seguridad": Number((row.baseConColchonDia || 0).toFixed(2)),
     "Regla operativa": row.reglaOperativa,
     "Produccion sugerida dia": row.produccionSugeridaDia,
+    "Produccion destino": row.produccionDestino || row.fecha,
     "Produccion real dia": row.produccionRealDia ?? "",
     "Diferencia piezas": row.diferenciaPiezas ?? "",
     Estatus: STATUS_META[row.estatus]?.label || row.estatus,
@@ -3165,6 +3268,7 @@ function Dashboard({ session, onLogout }) {
   const [ventasValidacion, setVentasValidacion] = useState([]);
   const [bajas, setBajas] = useState([]);
   const [existencias, setExistencias] = useState([]);
+  const [existenciasCutoff, setExistenciasCutoff] = useState({ date: "", source: "", fileName: "" });
   const [realProduction, setRealProduction] = useState([]);
   const [producedMay, setProducedMay] = useState([]);
   const [producedJune, setProducedJune] = useState([]);
@@ -3338,6 +3442,13 @@ function Dashboard({ session, onLogout }) {
       setVentasValidacion(Array.isArray(data.ventasValidacion) ? data.ventasValidacion : []);
       setBajas(mergeRemoteRecords(localWaste, remoteWaste, wasteRecordKey));
       setExistencias(Array.isArray(data.existencias) ? data.existencias : []);
+      setExistenciasCutoff(data.existenciasCutoff && typeof data.existenciasCutoff === "object"
+        ? {
+            date: dateKey(data.existenciasCutoff.date) || "",
+            source: String(data.existenciasCutoff.source || ""),
+            fileName: String(data.existenciasCutoff.fileName || ""),
+          }
+        : { date: "", source: "", fileName: "" });
       setRealProduction(mergeRemoteRecords(localProduction, remoteProduction, productionRecordKey));
       setProducedMay(Array.isArray(data.producedMay) ? data.producedMay : []);
       setProducedJune(Array.isArray(data.producedJune) ? data.producedJune : []);
@@ -3439,6 +3550,7 @@ function Dashboard({ session, onLogout }) {
         ventasValidacion,
         bajas: snapshotOperationalRows(bajas, wasteRecordKey, persistedKeys.waste),
         existencias,
+        existenciasCutoff,
         realProduction: snapshotOperationalRows(realProduction, productionRecordKey, persistedKeys.production),
         producedMay,
         producedJune,
@@ -3516,6 +3628,21 @@ function Dashboard({ session, onLogout }) {
     const wb = await readWorkbook(file);
     setter(parser(wb));
     setFiles((f) => ({ ...f, [key]: file.name }));
+    setHasUnsavedChanges(true);
+  }
+
+  async function handleExistenciasFile(file) {
+    if (!file) return;
+    const workbook = await readWorkbook(file);
+    const parsed = parseExistencias(workbook);
+    const inferred = inferInventoryCutoffDate(workbook, file.name);
+    setExistencias(parsed);
+    setExistenciasCutoff({
+      date: inferred.date || "",
+      source: inferred.source || "",
+      fileName: file.name,
+    });
+    setFiles((current) => ({ ...current, existencias: file.name }));
     setHasUnsavedChanges(true);
   }
 
@@ -3890,6 +4017,11 @@ function Dashboard({ session, onLogout }) {
     () => operationalScenario.reduce((sum, row) => sum + row.pronosticoOperativo, 0),
     [operationalScenario]
   );
+  const inventoryCutoff = useMemo(
+    () => inventoryCutoffStatus(existenciasCutoff.date, selectedMonth),
+    [existenciasCutoff.date, selectedMonth]
+  );
+  const inventoryBlocksApproval = existencias.length > 0 && inventoryCutoff.status !== "fresh";
   const monthlyReviewSourceRows = useMemo(
     () => monthlyReviewSource?.contenido?.rows?.length ? monthlyReviewSource.contenido.rows : operationalScenario,
     [monthlyReviewSource, operationalScenario]
@@ -3901,8 +4033,9 @@ function Dashboard({ session, onLogout }) {
       historicalVentas,
       loadedExistencias: effectiveExistencias,
       inputs: monthlyReview.inputs,
+      inventoryUsable: inventoryCutoff.status === "fresh",
     }),
-    [monthlyReviewSourceRows, forecast, historicalVentas, effectiveExistencias, monthlyReview.inputs]
+    [monthlyReviewSourceRows, forecast, historicalVentas, effectiveExistencias, monthlyReview.inputs, inventoryCutoff.status]
   );
   const filteredMonthlyReviewRows = useMemo(
     () => monthlyReviewRows.filter((row) => {
@@ -4005,6 +4138,15 @@ function Dashboard({ session, onLogout }) {
       setToast({ tone: "warning", message: "El pronóstico congelado cambió. Recarga la revisión antes de guardarla." });
       return;
     }
+    if (targetState === "approved" && inventoryBlocksApproval) {
+      setToast({
+        tone: "warning",
+        message: inventoryCutoff.status === "missing"
+          ? "Captura la fecha de corte de existencias antes de aprobar."
+          : `Las existencias del ${displayDate(inventoryCutoff.cutoff)} están fuera de la ventana ${displayDate(inventoryCutoff.windowStart)} a ${displayDate(inventoryCutoff.windowEnd)}.`,
+      });
+      return;
+    }
     setMonthlyReviewSaving(true);
     try {
       const savedAt = new Date().toISOString();
@@ -4026,6 +4168,8 @@ function Dashboard({ session, onLogout }) {
             sourceModelVersion: monthlyReviewSource.contenido?.modelVersion || FORECAST_MODEL_VERSION,
             parentVersion: monthlyReview.parentVersion || monthlyReview.version || null,
             generalNote: monthlyReview.generalNote,
+            inventoryCutoff: inventoryCutoff.cutoff,
+            inventoryCutoffStatus: inventoryCutoff.status,
             inputs: monthlyReview.inputs,
             summary: monthlyReviewSummary,
             rows: monthlyReviewRows,
@@ -4249,7 +4393,7 @@ function Dashboard({ session, onLogout }) {
     { label: "Stock fijo", loaded: Boolean(files.stock || stockRows.length) },
     { label: "Producción real", loaded: Boolean(files.real || realProduction.length) },
     { label: "Bajas/devoluciones", loaded: Boolean(files.bajas || bajas.length) },
-    { label: "Existencias", loaded: Boolean(files.existencias || existencias.length) },
+    { label: "Existencias", loaded: Boolean(files.existencias || existencias.length), detail: existencias.length ? (inventoryCutoff.cutoff ? displayDate(inventoryCutoff.cutoff) : "Sin fecha de corte") : "" },
   ];
   const canSave = session.user.rol === "admin" || session.user.rol === "operador";
 
@@ -4283,8 +4427,10 @@ function Dashboard({ session, onLogout }) {
               className="secondary"
               type="button"
               onClick={freezeAndExportForecast}
-              disabled={!canSave || cloudSaving || forecastFreezing || !forecast.length}
-              title="Guarda una versión inmutable por producto y descarga el mismo pronóstico en Excel"
+              disabled={!canSave || cloudSaving || forecastFreezing || !forecast.length || (Boolean(monthlyReviewSource) && session.user.rol !== "admin")}
+              title={monthlyReviewSource && session.user.rol !== "admin"
+                ? "Este mes ya está congelado. Solo un administrador puede emitir otra versión."
+                : "Guarda una versión inmutable por producto y descarga el mismo pronóstico en Excel"}
             >
               <ShieldCheck size={18} /> {forecastFreezing ? "Congelando..." : "Congelar mes"}
             </button>
@@ -4600,7 +4746,7 @@ function Dashboard({ session, onLogout }) {
                   type="button"
                   onClick={() => exportMonthlyReview({
                     rows: monthlyReviewRows,
-                    review: monthlyReview,
+                    review: { ...monthlyReview, inventoryCutoff: inventoryCutoff.cutoff },
                     selectedMonth,
                     sourceVersion: monthlyReviewSource?.version,
                   })}
@@ -4621,8 +4767,14 @@ function Dashboard({ session, onLogout }) {
                     className="primary"
                     type="button"
                     onClick={() => saveMonthlyReview("approved")}
-                    disabled={!monthlyReviewSource || monthlyReviewSaving || monthlyReviewSummary.pending > 0}
-                    title={monthlyReviewSummary.pending ? "Decide todas las propuestas antes de aprobar" : "Aprobar plan operativo"}
+                    disabled={!monthlyReviewSource || monthlyReviewSaving || monthlyReviewSummary.pending > 0 || inventoryBlocksApproval}
+                    title={
+                      monthlyReviewSummary.pending
+                        ? "Decide todas las propuestas antes de aprobar"
+                        : inventoryBlocksApproval
+                          ? "La fecha de corte de existencias debe estar en la ventana del mes"
+                          : "Aprobar plan operativo"
+                    }
                   >
                     <CheckCircle2 size={17} /> Aprobar plan
                   </button>
@@ -4630,10 +4782,17 @@ function Dashboard({ session, onLogout }) {
               </div>
             </div>
 
-            <p className={`monthly-review-note ${monthlyReviewSource ? "success" : "warning"}`}>
+            <p className={`monthly-review-note ${monthlyReviewSource && !inventoryBlocksApproval ? "success" : "warning"}`}>
               {monthlyReviewSource
                 ? `Fuente inmutable: pronóstico congelado ${selectedMonth}, versión ${monthlyReviewSource.version}. ${monthlyReview.state === "approved" ? "Editar cualquier dato abrirá un nuevo borrador." : "El pronóstico original no será modificado."}`
                 : `Aún no existe un pronóstico congelado para ${selectedMonth}. Puedes revisar propuestas provisionales, pero debes usar “Congelar mes” antes de guardarlas.`}
+              {existencias.length
+                ? inventoryCutoff.status === "fresh"
+                  ? ` Existencias con corte ${displayDate(inventoryCutoff.cutoff)} (ventana ${displayDate(inventoryCutoff.windowStart)} a ${displayDate(inventoryCutoff.windowEnd)}).`
+                  : inventoryCutoff.status === "missing"
+                    ? " Falta la fecha de corte de existencias: no se descuentan y no se puede aprobar."
+                    : ` Existencias del ${displayDate(inventoryCutoff.cutoff)} fuera de ventana: no se descuentan y no se puede aprobar.`
+                : ""}
             </p>
 
             <section className="monthly-review-kpis">
@@ -5019,7 +5178,7 @@ function Dashboard({ session, onLogout }) {
               <div className="file-status-item" key={item.label}>
                 <span className={`status-dot ${item.loaded ? "loaded" : ""}`} />
                 <strong>{item.label}</strong>
-                <small>{item.loaded ? "Cargado" : "Pendiente"}</small>
+                <small>{item.detail || (item.loaded ? "Cargado" : "Pendiente")}</small>
               </div>
             ))}
           </div>
@@ -5105,8 +5264,8 @@ function Dashboard({ session, onLogout }) {
           />
           <UploadBox
             title="Existencias"
-            description="TOTAL SUC., C.F. y SUMA SUC. Y C.F."
-            onFile={(file) => handleFile(file, parseExistencias, "existencias", setExistencias)}
+            description="Hoja EXISTENCIA EN SUCURSALES. Confirma la fecha de corte antes de descontar inventario."
+            onFile={handleExistenciasFile}
             fileName={files.existencias}
           />
           <UploadBox
@@ -5117,6 +5276,33 @@ function Dashboard({ session, onLogout }) {
             fileName={files.real}
           />
         </section>
+
+        {existencias.length > 0 && (
+          <section className={`inventory-cutoff-bar ${inventoryCutoff.status === "fresh" ? "success" : "warning"}`}>
+            <label>
+              Fecha de corte de existencias
+              <input
+                type="date"
+                value={existenciasCutoff.date || ""}
+                onChange={(event) => {
+                  setExistenciasCutoff((current) => ({
+                    ...current,
+                    date: event.target.value,
+                    source: "captura manual",
+                  }));
+                  setHasUnsavedChanges(true);
+                }}
+              />
+            </label>
+            <p>
+              {inventoryCutoff.status === "fresh"
+                ? `Válidas para ${selectedMonth}: ${displayDate(inventoryCutoff.windowStart)} a ${displayDate(inventoryCutoff.windowEnd)}${existenciasCutoff.source ? ` · origen: ${existenciasCutoff.source}` : ""}.`
+                : inventoryCutoff.status === "missing"
+                  ? "Sin fecha de corte: la revisión no descuenta inventario y no se puede aprobar."
+                  : `Fuera de ventana (${displayDate(inventoryCutoff.windowStart)} a ${displayDate(inventoryCutoff.windowEnd)}): no se descuentan y no se puede aprobar.`}
+            </p>
+          </section>
+        )}
 
         {(pendingSalesImport.length > 0 || salesImportStatus) && (
           <section className="sales-import-section">
@@ -5439,7 +5625,8 @@ function Dashboard({ session, onLogout }) {
           </div>
           <div className="notes-list">
             <p>El pronóstico elige el método con menor error en el mes anterior y aplica una calibración limitada.</p>
-            <p>La producción sugerida aplica el margen de seguridad.</p>
+            <p>La producción sugerida mensual se reparte en seis días: domingo queda en cero y su demanda pasa al sábado.</p>
+            <p>Las existencias solo se descuentan si la fecha de corte cae entre el mes anterior y el mes planificado.</p>
             <p>Para pasteles GDE, MED y CH, la producción se ajusta a mínimo 10 y múltiplos de 5.</p>
             <p>Si el cálculo es menor a 8, se sugiere no producir.</p>
             <p>La vista Validación de cálculos permite auditar cada producto.</p>
