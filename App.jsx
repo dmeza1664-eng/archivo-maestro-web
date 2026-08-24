@@ -1715,6 +1715,31 @@ function sameMonthPreviousYear(monthKey) {
   return year && month ? `${year - 1}-${String(month).padStart(2, "0")}` : "";
 }
 
+function computeAnnualGrowthFactor(monthlyData, targetMonth, lookbackMonths = 1) {
+  const ratios = [];
+  let cursor = previousMonthKey(targetMonth);
+  const limit = Math.max(1, Number(lookbackMonths) || 1);
+  for (let index = 0; index < limit && cursor; index += 1) {
+    const priorYear = sameMonthPreviousYear(cursor);
+    const current = monthlyData.get(cursor)?.total || 0;
+    const previous = monthlyData.get(priorYear)?.total || 0;
+    if (current > 0 && previous >= 10) ratios.push(current / previous);
+    cursor = previousMonthKey(cursor);
+  }
+  if (!ratios.length) return 1;
+  return clamp(ratios.length === 1 ? ratios[0] : median(ratios), 0.8, 1.2);
+}
+
+function forecastTuningOptions(modelVersion = "") {
+  const version = String(modelVersion || "");
+  if (version === "csG1S50") return { growthLookback: 1, seasonalSplit: 0.5 };
+  if (version === "csG6S50") return { growthLookback: 6, seasonalSplit: 0.5 };
+  if (version === "csG3S25") return { growthLookback: 3, seasonalSplit: 0.25 };
+  if (version === "csG3S20") return { growthLookback: 3, seasonalSplit: 0.2 };
+  if (version === "csG1S25") return { growthLookback: 1, seasonalSplit: 0.25 };
+  return { growthLookback: 3, seasonalSplit: 0.5 };
+}
+
 function buildMonthlyForecastData(records) {
   const monthlyData = new Map();
   for (const record of records) {
@@ -1817,7 +1842,11 @@ function median(values) {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
-function buildForecastCandidates(monthlyData, targetMonth) {
+function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {}) {
+  const growthLookback = Math.max(1, Number(forecastOptions.growthLookback) || 1);
+  const seasonalSplit = Number.isFinite(Number(forecastOptions.seasonalSplit))
+    ? Number(forecastOptions.seasonalSplit)
+    : 0.5;
   const historicalMonths = [...monthlyData.keys()].filter((monthKey) => monthKey < targetMonth).sort();
   const recentMonths = historicalMonths.slice(-3);
   const latestMonth = recentMonths.at(-1);
@@ -1883,11 +1912,7 @@ function buildForecastCandidates(monthlyData, targetMonth) {
   if (monthlyData.has(priorYearMonth)) {
     const previousTargetMonth = previousMonthKey(targetMonth);
     const previousYearReference = sameMonthPreviousYear(previousTargetMonth);
-    const currentPreviousTotal = monthlyData.get(previousTargetMonth)?.total || 0;
-    const priorPreviousTotal = monthlyData.get(previousYearReference)?.total || 0;
-    const growth = currentPreviousTotal > 0 && priorPreviousTotal > 0
-      ? clamp(currentPreviousTotal / priorPreviousTotal, 0.8, 1.2)
-      : 1;
+    const growth = computeAnnualGrowthFactor(monthlyData, targetMonth, growthLookback);
     const seasonalBase = weightedWeekdayAverages(monthlyData, [priorYearMonth], [1]);
     const adjustedSeasonal = scaleForecastAverages(seasonalBase, growth);
     addCandidate(
@@ -1900,7 +1925,7 @@ function buildForecastCandidates(monthlyData, targetMonth) {
     const seasonalTotal = forecastTotalFromAverages(adjustedSeasonal, targetMonth);
     const recentTotal = forecastTotalFromAverages(recentBase, targetMonth);
     const referencesDiffer = Math.max(seasonalTotal, recentTotal) > 0 &&
-      Math.abs(seasonalTotal - recentTotal) / Math.max(seasonalTotal, recentTotal) > 0.5;
+      Math.abs(seasonalTotal - recentTotal) / Math.max(seasonalTotal, recentTotal) > seasonalSplit;
     addCandidate(
       "Estacional-reciente",
       blendForecastAverages(adjustedSeasonal, recentBase, referencesDiffer ? 0.5 : 0.9),
@@ -1911,7 +1936,7 @@ function buildForecastCandidates(monthlyData, targetMonth) {
   return candidates;
 }
 
-function calculateForecastModelLegacy(records, selectedMonth, useLatestAvailableBacktest = true) {
+function calculateForecastModelLegacy(records, selectedMonth, useLatestAvailableBacktest = true, forecastOptions = {}) {
   const monthlyData = buildMonthlyForecastData(records);
   const historicalMonths = [...monthlyData.keys()].filter((month) => month < selectedMonth).sort();
   const previousCalendarMonth = previousMonthKey(selectedMonth);
@@ -1919,7 +1944,7 @@ function calculateForecastModelLegacy(records, selectedMonth, useLatestAvailable
     ? previousCalendarMonth
     : historicalMonths.at(-1) || previousCalendarMonth;
   const backtestActual = monthlyData.get(backtestMonth)?.total || 0;
-  const backtestCandidates = buildForecastCandidates(monthlyData, backtestMonth);
+  const backtestCandidates = buildForecastCandidates(monthlyData, backtestMonth, forecastOptions);
   let selectedMethod = "Último mes por día";
   let backtestError = Infinity;
   for (const [method, candidate] of backtestCandidates.entries()) {
@@ -1930,7 +1955,7 @@ function calculateForecastModelLegacy(records, selectedMonth, useLatestAvailable
     }
   }
 
-  const targetCandidates = buildForecastCandidates(monthlyData, selectedMonth);
+  const targetCandidates = buildForecastCandidates(monthlyData, selectedMonth, forecastOptions);
   const selected = targetCandidates.get(selectedMethod) ||
     targetCandidates.get("Promedio 3 meses por día") ||
     targetCandidates.values().next().value ||
@@ -1953,12 +1978,12 @@ function calculateForecastModelLegacy(records, selectedMonth, useLatestAvailable
   };
 }
 
-function calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight) {
+function calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, forecastOptions = {}) {
   const product = normalizeProduct(records[0]?.producto || "");
   const useConservativeBacktest = /\b(GALLETA|BOLLO|PAN)\b/.test(product);
-  const legacy = calculateForecastModelLegacy(records, selectedMonth, !useConservativeBacktest);
+  const legacy = calculateForecastModelLegacy(records, selectedMonth, !useConservativeBacktest, forecastOptions);
   if (useConservativeBacktest) return legacy;
-  const candidates = buildForecastCandidates(buildMonthlyForecastData(records), selectedMonth);
+  const candidates = buildForecastCandidates(buildMonthlyForecastData(records), selectedMonth, forecastOptions);
   const seasonal = candidates.get("Estacional-reciente") || candidates.get("Mismo mes año anterior");
   const recent = candidates.get("Último mes por día");
   if (!seasonal || !recent || recent.total <= 0 || Math.abs(seasonal.total - recent.total) / recent.total < 0.08) {
@@ -2018,9 +2043,9 @@ function calculateForecastModelSeasonalAdaptive(records, selectedMonth, candidat
 function calculateForecastModelForVersion(records, selectedMonth, product, modelVersion) {
   const version = String(modelVersion || FORECAST_MODEL_VERSION);
   if (version === "seasonalAdaptive") return calculateForecastModelSeasonalAdaptive(records, selectedMonth);
-  if (version === "categorySeasonal") {
+  if (version === "categorySeasonal" || version.startsWith("csG")) {
     const seasonalWeight = ["Otros", "Mini medianos"].includes(productCategory(product)) ? 0.5 : 0.75;
-    return calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight);
+    return calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, forecastTuningOptions(version));
   }
   if (version.startsWith("seasonal")) {
     return calculateForecastModelSeasonal(records, selectedMonth, Number(version.replace("seasonal", "")) / 100);
@@ -6279,6 +6304,7 @@ export {
   parseSalesOrReturns,
   parseStock,
   resolveCanonicalMonthSources,
+  computeAnnualGrowthFactor,
 };
 
 if (typeof document !== "undefined") {

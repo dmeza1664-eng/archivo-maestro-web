@@ -54,6 +54,7 @@ async function main() {
     parseSalesOrReturns,
     parseStock,
     resolveCanonicalMonthSources,
+    computeAnnualGrowthFactor,
   } = await loadAppFunctions();
 
   assert(monthsNamedInFileName("VENTAS DE MAYO Y JUNIO 2026.xlsx").join(",") === "2026-05,2026-06", "el combinado debe nombrar mayo y junio");
@@ -157,6 +158,17 @@ async function main() {
   const remapped = parseSalesOrReturns(wideWorkbook, "ventas", "VENTAS DE MAYO Y JUNIO.xlsx");
   assert(remapped.length >= 2, "la hoja ancha debe producir ventas diarias");
   assert(remapped.every((row) => monthKey(row) === "2026-06"), "hoja JULIO en archivo mayo-junio se interpreta como junio");
+
+  const growthData = new Map([
+    ["2025-03", { total: 100 }],
+    ["2025-04", { total: 80 }],
+    ["2025-05", { total: 100 }],
+    ["2026-03", { total: 110 }],
+    ["2026-04", { total: 100 }],
+    ["2026-05", { total: 90 }],
+  ]);
+  assert(Math.abs(computeAnnualGrowthFactor(growthData, "2026-06", 1) - 0.9) < 1e-9, "un mes de crecimiento usa solo el mes previo");
+  assert(Math.abs(computeAnnualGrowthFactor(growthData, "2026-06", 3) - 1.1) < 1e-9, "tres meses usan la mediana anual");
 
   console.log("parser-test ok");
 }
