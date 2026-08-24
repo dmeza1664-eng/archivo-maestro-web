@@ -160,6 +160,37 @@ async function apiRequestAllRows(path, { token } = {}) {
   throw new Error("La sincronización excedió el máximo de páginas permitido");
 }
 
+async function fetchOperationalSync(path, token) {
+  try {
+    const response = await apiRequestAllRows(path, { token });
+    return { ok: true, rows: response.rows || [], error: "", status: 200 };
+  } catch (error) {
+    return {
+      ok: false,
+      rows: [],
+      error: error.message || "Error de sincronización",
+      status: error.status || 0,
+    };
+  }
+}
+
+function isDatabaseSyncComplete(sync) {
+  return Boolean(sync?.sales?.ok && sync?.production?.ok && sync?.waste?.ok);
+}
+
+function databaseSyncStatusText(snapshot, sync) {
+  const backup = snapshot ? `Respaldo v${snapshot.version} restaurado. ` : "";
+  const parts = [
+    sync.sales.ok ? `${sync.sales.count} ventas` : `ventas no sincronizadas (${sync.sales.error})`,
+    sync.production.ok ? `${sync.production.count} producciones` : `producción no sincronizada (${sync.production.error})`,
+    sync.waste.ok ? `${sync.waste.count} bajas` : `bajas no sincronizadas (${sync.waste.error})`,
+  ];
+  if (isDatabaseSyncComplete(sync)) {
+    return `${backup}Base sincronizada: ${parts[0]}, ${parts[1]} y ${parts[2]}.`;
+  }
+  return `${backup}Sincronización incompleta: ${parts.join("; ")}.`;
+}
+
 function consolidateRowsForUpload(rows, keyForRow, sumImporte = false) {
   const consolidated = new Map();
   for (const row of rows.filter((value) => !value.monthlyTotal)) {
@@ -195,11 +226,21 @@ function consolidateOperationalRowsForUpload(rows, isProduction) {
   );
 }
 
-async function uploadRowsInBatches({ endpoint, bodyKey, rows, archivo, token, onProgress }) {
+async function uploadRowsInBatches({
+  endpoint,
+  bodyKey,
+  rows,
+  archivo,
+  token,
+  onProgress,
+  importRunId,
+  startBatch = 1,
+}) {
   const batches = [];
   for (let offset = 0; offset < rows.length; offset += API_UPLOAD_BATCH_SIZE) {
     batches.push(rows.slice(offset, offset + API_UPLOAD_BATCH_SIZE));
   }
+  const runId = importRunId || (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `run-${Date.now()}`);
   const totals = {
     received: 0,
     valid: 0,
@@ -209,23 +250,51 @@ async function uploadRowsInBatches({ endpoint, bodyKey, rows, archivo, token, on
     inserted: 0,
     updated: 0,
     issues: [],
+    importRunId: runId,
+    completedBatch: Math.max(0, startBatch - 1),
+    totalBatches: batches.length,
   };
-  for (const [index, batch] of batches.entries()) {
-    onProgress?.(index + 1, batches.length);
-    const response = await apiRequest(endpoint, {
-      token,
-      method: "POST",
-      body: {
-        archivo: batches.length > 1 ? `${archivo} [lote ${index + 1}/${batches.length}]` : archivo,
-        [bodyKey]: batch,
-      },
-    });
-    for (const field of ["received", "valid", "rejected", "consolidated", "duplicatesInFile", "inserted", "updated"]) {
-      totals[field] += Number(response[field] || 0);
+  const firstBatch = Math.max(1, startBatch);
+  try {
+    for (let index = firstBatch - 1; index < batches.length; index += 1) {
+      onProgress?.(index + 1, batches.length);
+      const response = await apiRequest(endpoint, {
+        token,
+        method: "POST",
+        body: {
+          archivo: batches.length > 1 ? `${archivo} [lote ${index + 1}/${batches.length}]` : archivo,
+          importRunId: runId,
+          batchIndex: index + 1,
+          batchTotal: batches.length,
+          [bodyKey]: batches[index],
+        },
+      });
+      for (const field of ["received", "valid", "rejected", "consolidated", "duplicatesInFile", "inserted", "updated"]) {
+        totals[field] += Number(response[field] || 0);
+      }
+      totals.issues.push(...(response.issues || []).slice(0, Math.max(0, 25 - totals.issues.length)));
+      totals.completedBatch = index + 1;
     }
-    totals.issues.push(...(response.issues || []).slice(0, Math.max(0, 25 - totals.issues.length)));
+  } catch (error) {
+    error.importProgress = { ...totals };
+    const failedBatch = totals.completedBatch + 1;
+    error.message = totals.completedBatch
+      ? `Lotes 1 a ${totals.completedBatch} de ${batches.length} ya están en la base. Falló el lote ${failedBatch}: ${error.message}`
+      : `Falló el lote 1 de ${batches.length}: ${error.message}`;
+    throw error;
   }
   return totals;
+}
+
+function accumulateImportRun(previous, progress) {
+  const completed = Number(progress?.completedBatch || 0);
+  return {
+    importRunId: progress?.importRunId || previous?.importRunId || null,
+    nextBatch: completed + 1,
+    totalBatches: Number(progress?.totalBatches || previous?.totalBatches || 0),
+    inserted: Number(previous?.inserted || 0) + Number(progress?.inserted || 0),
+    updated: Number(previous?.updated || 0) + Number(progress?.updated || 0),
+  };
 }
 
 const WEEKDAY_ALIASES = [
@@ -3168,8 +3237,15 @@ function OperationalImportPanel({
   importing,
   canSave,
   onImport,
+  resumeFromBatch = null,
 }) {
   if (!pendingRows.length && !status) return null;
+  const statusIsError = status.startsWith("No ") || status.includes("Falló");
+  const buttonLabel = importing
+    ? "Guardando..."
+    : resumeFromBatch
+      ? `Reanudar desde lote ${resumeFromBatch}`
+      : "Guardar en la base";
   return (
     <section className="sales-import-section">
       <div className="section-heading compact-heading">
@@ -3180,7 +3256,7 @@ function OperationalImportPanel({
         </div>
         {pendingRows.length > 0 && (
           <button className="primary" type="button" onClick={onImport} disabled={!canSave || importing || preview.daily === 0}>
-            <Database size={18} /> {importing ? "Guardando..." : "Guardar en la base"}
+            <Database size={18} /> {buttonLabel}
           </button>
         )}
       </div>
@@ -3194,7 +3270,7 @@ function OperationalImportPanel({
           <div><span>Rango diario</span><strong>{preview.firstDate ? `${preview.firstDate} a ${preview.lastDate}` : "Sin fechas"}</strong></div>
         </div>
       )}
-      <p className={`sales-import-status ${status.startsWith("No ") ? "error" : ""}`}>{status}</p>
+      <p className={`sales-import-status ${statusIsError ? "error" : ""}`}>{status}</p>
       {preview.monthlyTotals > 0 && pendingRows.length > 0 && (
         <p className="sales-import-note">Los totales mensuales no se convierten en registros diarios.</p>
       )}
@@ -3293,6 +3369,7 @@ function Dashboard({ session, onLogout }) {
   const [validationProduct, setValidationProduct] = useState("");
   const [productAliases, setProductAliases] = useState(loadStoredProductAliases);
   const [cloudStatus, setCloudStatus] = useState("Buscando respaldo...");
+  const [databaseSync, setDatabaseSync] = useState(null);
   const [cloudSaving, setCloudSaving] = useState(false);
   const [forecastFreezing, setForecastFreezing] = useState(false);
   const [monthlyReview, setMonthlyReview] = useState({
@@ -3317,14 +3394,17 @@ function Dashboard({ session, onLogout }) {
   const [salesImportFiles, setSalesImportFiles] = useState([]);
   const [salesImporting, setSalesImporting] = useState(false);
   const [salesImportStatus, setSalesImportStatus] = useState("");
+  const [salesImportRun, setSalesImportRun] = useState(null);
   const [pendingProductionImport, setPendingProductionImport] = useState([]);
   const [productionImportFile, setProductionImportFile] = useState("");
   const [productionImporting, setProductionImporting] = useState(false);
   const [productionImportStatus, setProductionImportStatus] = useState("");
+  const [productionImportRun, setProductionImportRun] = useState(null);
   const [pendingWasteImport, setPendingWasteImport] = useState([]);
   const [wasteImportFile, setWasteImportFile] = useState("");
   const [wasteImporting, setWasteImporting] = useState(false);
   const [wasteImportStatus, setWasteImportStatus] = useState("");
+  const [wasteImportRun, setWasteImportRun] = useState(null);
   const [toast, setToast] = useState(null);
 
   const salesImportPreview = useMemo(() => {
@@ -3393,13 +3473,17 @@ function Dashboard({ session, onLogout }) {
       }
 
       const [salesSync, productionSync, wasteSync] = await Promise.all([
-        apiRequestAllRows("/api/ventas/sync", { token: session.token }).catch(() => ({ rows: [] })),
-        apiRequestAllRows("/api/produccion-real/sync", { token: session.token }).catch(() => ({ rows: [] })),
-        apiRequestAllRows("/api/bajas/sync", { token: session.token }).catch(() => ({ rows: [] })),
+        fetchOperationalSync("/api/ventas/sync", session.token),
+        fetchOperationalSync("/api/produccion-real/sync", session.token),
+        fetchOperationalSync("/api/bajas/sync", session.token),
       ]);
+      if ([salesSync, productionSync, wasteSync].some((result) => result.status === 401)) {
+        onLogout();
+        return;
+      }
       if (!active) return;
 
-      const remoteSales = (salesSync.rows || []).map((row) => ({
+      const remoteSales = (salesSync.ok ? salesSync.rows : []).map((row) => ({
         fecha: row.fecha,
         producto: normalizeProduct(row.producto_codigo),
         productoOriginal: row.producto_nombre,
@@ -3412,7 +3496,7 @@ function Dashboard({ session, onLogout }) {
         sourceFile: "Base de datos",
         databaseSynced: true,
       }));
-      const remoteProduction = (productionSync.rows || []).map((row) => ({
+      const remoteProduction = (productionSync.ok ? productionSync.rows : []).map((row) => ({
         fecha: row.fecha,
         fechaKey: row.fecha,
         producto: normalizeProduct(row.producto_codigo),
@@ -3422,7 +3506,7 @@ function Dashboard({ session, onLogout }) {
         sourceFile: "Base de datos",
         databaseSynced: true,
       }));
-      const remoteWaste = (wasteSync.rows || []).map((row) => ({
+      const remoteWaste = (wasteSync.ok ? wasteSync.rows : []).map((row) => ({
         fecha: row.fecha,
         producto: normalizeProduct(row.producto_codigo),
         productoOriginal: row.producto_nombre,
@@ -3463,12 +3547,25 @@ function Dashboard({ session, onLogout }) {
       if (Number.isFinite(Number(data.dailyBufferPct))) setDailyBufferPct(Number(data.dailyBufferPct));
       setLastBackup(snapshot);
       setHasUnsavedChanges(false);
-      setCloudStatus(
-        `${snapshot ? `Respaldo v${snapshot.version} restaurado. ` : ""}Base sincronizada: ${remoteSales.length} ventas, ${remoteProduction.length} producciones y ${remoteWaste.length} bajas.`
-      );
+      const nextSync = {
+        sales: { ok: salesSync.ok, count: remoteSales.length, error: salesSync.error },
+        production: { ok: productionSync.ok, count: remoteProduction.length, error: productionSync.error },
+        waste: { ok: wasteSync.ok, count: remoteWaste.length, error: wasteSync.error },
+      };
+      setDatabaseSync(nextSync);
+      setCloudStatus(databaseSyncStatusText(snapshot, nextSync));
     }
     restoreData().catch((error) => {
       if (!active) return;
+      if (error.status === 401) {
+        onLogout();
+        return;
+      }
+      setDatabaseSync({
+        sales: { ok: false, count: 0, error: error.message },
+        production: { ok: false, count: 0, error: error.message },
+        waste: { ok: false, count: 0, error: error.message },
+      });
       setCloudStatus(`No se pudo restaurar: ${error.message}`);
     });
     return () => {
@@ -3578,7 +3675,11 @@ function Dashboard({ session, onLogout }) {
       const saved = { version: response.version, created_at: new Date().toISOString() };
       setLastBackup(saved);
       setHasUnsavedChanges(false);
-      setCloudStatus(`Respaldo v${response.version} guardado correctamente`);
+      setCloudStatus(
+        isDatabaseSyncComplete(databaseSync)
+          ? `Respaldo v${response.version} guardado correctamente`
+          : `Respaldo v${response.version} guardado. Sincronización incompleta: no se puede congelar.`
+      );
       if (!silent) setToast({ tone: "success", message: `Respaldo v${response.version} guardado.` });
       return { ok: true, version: response.version };
     } catch (error) {
@@ -3694,6 +3795,7 @@ function Dashboard({ session, onLogout }) {
       });
       return [...retained, ...parsed];
     });
+    setSalesImportRun(null);
     setSalesImportFiles((current) => [...new Set([...current, ...validFiles.map((file) => file.name)])]);
     setSalesImportStatus(parsed.length ? "Revisa el resumen antes de guardar en la base." : "No se reconocieron ventas en los archivos.");
     setFiles((current) => ({
@@ -3707,6 +3809,7 @@ function Dashboard({ session, onLogout }) {
     if (!pendingSalesImport.length) return;
     setSalesImporting(true);
     setSalesImportStatus("Validando y guardando ventas...");
+    const previousRun = salesImportRun;
     try {
       const mappedRows = pendingSalesImport.map((row) => {
         const product = resolveOfficialProduct(row.producto, productAliases, officialProducts);
@@ -3729,22 +3832,30 @@ function Dashboard({ session, onLogout }) {
         rows,
         archivo: salesImportFiles.join(", "),
         token: session.token,
+        importRunId: previousRun?.importRunId,
+        startBatch: previousRun?.nextBatch || 1,
         onProgress: (batch, total) => setSalesImportStatus(`Guardando ventas: lote ${batch} de ${total}...`),
       });
+      const inserted = Number(previousRun?.inserted || 0) + Number(response.inserted || 0);
+      const updated = Number(previousRun?.updated || 0) + Number(response.updated || 0);
       const importedKeys = new Set(rows.map(salesRecordKey));
       setVentas((current) => current.map((row) => importedKeys.has(salesRecordKey(row)) ? { ...row, databaseSynced: true } : row));
       setPendingSalesImport([]);
+      setSalesImportRun(null);
       setSalesImportStatus("");
       const backup = await saveWorkspace({ silent: true, persistedKeys: { sales: importedKeys } });
       setToast({
         tone: backup.ok ? "success" : "warning",
         message: backup.ok
-          ? `Ventas guardadas: ${response.inserted} nuevas, ${response.updated} actualizadas. Respaldo v${backup.version} creado.`
+          ? `Ventas guardadas: ${inserted} nuevas, ${updated} actualizadas. Respaldo v${backup.version} creado.`
           : `Ventas guardadas en la base de datos, pero el respaldo automático falló.`,
       });
     } catch (error) {
       if (error.status === 401) onLogout();
-      else setSalesImportStatus(error.message);
+      else {
+        setSalesImportRun(accumulateImportRun(previousRun, error.importProgress));
+        setSalesImportStatus(error.message);
+      }
     } finally {
       setSalesImporting(false);
     }
@@ -3755,6 +3866,7 @@ function Dashboard({ session, onLogout }) {
     const parsed = (await parseProductionRealFile(file)).map((row) => ({ ...row, sourceFile: file.name }));
     setRealProduction(parsed);
     setPendingProductionImport(parsed);
+    setProductionImportRun(null);
     setProductionImportFile(file.name);
     setProductionImportStatus(parsed.length ? "Revisa la producción antes de guardarla en la base." : "No se reconocieron registros de producción.");
     setFiles((f) => ({ ...f, real: file.name }));
@@ -3767,6 +3879,7 @@ function Dashboard({ session, onLogout }) {
     const parsed = parseSalesOrReturns(workbook, "bajas", file.name).map((row) => ({ ...row, sourceFile: file.name }));
     setBajas(parsed);
     setPendingWasteImport(parsed);
+    setWasteImportRun(null);
     setWasteImportFile(file.name);
     setWasteImportStatus(parsed.length ? "Revisa las bajas antes de guardarlas en la base." : "No se reconocieron registros de bajas.");
     setFiles((current) => ({ ...current, bajas: file.name }));
@@ -3780,6 +3893,8 @@ function Dashboard({ session, onLogout }) {
     const setImporting = isProduction ? setProductionImporting : setWasteImporting;
     const setStatus = isProduction ? setProductionImportStatus : setWasteImportStatus;
     const clearPending = isProduction ? setPendingProductionImport : setPendingWasteImport;
+    const setRun = isProduction ? setProductionImportRun : setWasteImportRun;
+    const previousRun = isProduction ? productionImportRun : wasteImportRun;
     setImporting(true);
     setStatus(`Validando y guardando ${isProduction ? "producción" : "bajas"}...`);
     try {
@@ -3806,8 +3921,12 @@ function Dashboard({ session, onLogout }) {
         rows,
         archivo: isProduction ? productionImportFile : wasteImportFile,
         token: session.token,
+        importRunId: previousRun?.importRunId,
+        startBatch: previousRun?.nextBatch || 1,
         onProgress: (batch, total) => setStatus(`Guardando ${isProduction ? "producción" : "bajas"}: lote ${batch} de ${total}...`),
       });
+      const inserted = Number(previousRun?.inserted || 0) + Number(response.inserted || 0);
+      const updated = Number(previousRun?.updated || 0) + Number(response.updated || 0);
       const keyForRow = isProduction ? productionRecordKey : wasteRecordKey;
       const importedKeys = new Set(rows.map(keyForRow));
       if (isProduction) {
@@ -3816,6 +3935,7 @@ function Dashboard({ session, onLogout }) {
         setBajas((current) => current.map((row) => importedKeys.has(wasteRecordKey(row)) ? { ...row, databaseSynced: true } : row));
       }
       clearPending([]);
+      setRun(null);
       setStatus("");
       const backup = await saveWorkspace({
         silent: true,
@@ -3824,12 +3944,15 @@ function Dashboard({ session, onLogout }) {
       setToast({
         tone: backup.ok ? "success" : "warning",
         message: backup.ok
-          ? `${isProduction ? "Producción" : "Bajas"} guardadas: ${response.inserted} nuevas, ${response.updated} actualizadas. Respaldo v${backup.version} creado.`
+          ? `${isProduction ? "Producción" : "Bajas"} guardadas: ${inserted} nuevas, ${updated} actualizadas. Respaldo v${backup.version} creado.`
           : `${isProduction ? "Producción" : "Bajas"} guardadas en la base de datos, pero el respaldo automático falló.`,
       });
     } catch (error) {
       if (error.status === 401) onLogout();
-      else setStatus(error.message);
+      else {
+        setRun(accumulateImportRun(previousRun, error.importProgress));
+        setStatus(error.message);
+      }
     } finally {
       setImporting(false);
     }
@@ -4200,6 +4323,15 @@ function Dashboard({ session, onLogout }) {
 
   async function freezeAndExportForecast() {
     if (!operationalScenario.length || forecastFreezing) return;
+    if (!isDatabaseSyncComplete(databaseSync)) {
+      setToast({
+        tone: "warning",
+        message: databaseSync
+          ? "No se puede congelar con ventas, producción o bajas incompletas."
+          : "Espera a que termine la sincronización con la base.",
+      });
+      return;
+    }
     setForecastFreezing(true);
     try {
       let workspaceVersion = lastBackup?.version || null;
@@ -4396,6 +4528,19 @@ function Dashboard({ session, onLogout }) {
     { label: "Existencias", loaded: Boolean(files.existencias || existencias.length), detail: existencias.length ? (inventoryCutoff.cutoff ? displayDate(inventoryCutoff.cutoff) : "Sin fecha de corte") : "" },
   ];
   const canSave = session.user.rol === "admin" || session.user.rol === "operador";
+  const databaseSyncBlocked = !isDatabaseSyncComplete(databaseSync);
+  const freezeBlockedReason = !databaseSync
+    ? "Espera a que termine la sincronización con la base."
+    : databaseSyncBlocked
+      ? "No se puede congelar con ventas, producción o bajas incompletas."
+      : monthlyReviewSource && session.user.rol !== "admin"
+        ? "Este mes ya está congelado. Solo un administrador puede emitir otra versión."
+        : "Guarda una versión inmutable por producto y descarga el mismo pronóstico en Excel";
+  const cloudStatusTone = cloudStatus.startsWith("No se pudo")
+    ? "error"
+    : databaseSync && databaseSyncBlocked
+      ? "warning"
+      : "";
 
   return (
     <div className="app">
@@ -4427,10 +4572,8 @@ function Dashboard({ session, onLogout }) {
               className="secondary"
               type="button"
               onClick={freezeAndExportForecast}
-              disabled={!canSave || cloudSaving || forecastFreezing || !forecast.length || (Boolean(monthlyReviewSource) && session.user.rol !== "admin")}
-              title={monthlyReviewSource && session.user.rol !== "admin"
-                ? "Este mes ya está congelado. Solo un administrador puede emitir otra versión."
-                : "Guarda una versión inmutable por producto y descarga el mismo pronóstico en Excel"}
+              disabled={!canSave || cloudSaving || forecastFreezing || !forecast.length || databaseSyncBlocked || (Boolean(monthlyReviewSource) && session.user.rol !== "admin")}
+              title={freezeBlockedReason}
             >
               <ShieldCheck size={18} /> {forecastFreezing ? "Congelando..." : "Congelar mes"}
             </button>
@@ -5182,7 +5325,7 @@ function Dashboard({ session, onLogout }) {
               </div>
             ))}
           </div>
-          <div className={`cloud-status ${cloudStatus.startsWith("No se pudo") ? "error" : ""}`}>
+          <div className={`cloud-status ${cloudStatusTone}`}>
             <Database size={17} />
             <span>{cloudStatus}</span>
             {lastBackup?.created_at && <small>Último respaldo: {new Date(lastBackup.created_at).toLocaleString("es-MX")}</small>}
@@ -5319,7 +5462,11 @@ function Dashboard({ session, onLogout }) {
                   onClick={importSalesToDatabase}
                   disabled={!canSave || salesImporting || salesImportPreview.daily === 0}
                 >
-                  <Database size={18} /> {salesImporting ? "Guardando..." : "Guardar ventas en la base"}
+                  <Database size={18} /> {salesImporting
+                    ? "Guardando..."
+                    : salesImportRun?.nextBatch > 1
+                      ? `Reanudar desde lote ${salesImportRun.nextBatch}`
+                      : "Guardar ventas en la base"}
                 </button>
               )}
             </div>
@@ -5338,7 +5485,7 @@ function Dashboard({ session, onLogout }) {
               </div>
             )}
 
-            <p className={`sales-import-status ${salesImportStatus.startsWith("No ") ? "error" : ""}`}>
+            <p className={`sales-import-status ${salesImportStatus.startsWith("No ") || salesImportStatus.includes("Falló") ? "error" : ""}`}>
               {salesImportStatus}
             </p>
             {salesImportPreview.monthlyTotals > 0 && pendingSalesImport.length > 0 && (
@@ -5359,6 +5506,7 @@ function Dashboard({ session, onLogout }) {
           importing={productionImporting}
           canSave={canSave}
           onImport={() => importOperationalToDatabase("produccion")}
+          resumeFromBatch={productionImportRun?.nextBatch > 1 ? productionImportRun.nextBatch : null}
         />
 
         <OperationalImportPanel
@@ -5371,6 +5519,7 @@ function Dashboard({ session, onLogout }) {
           importing={wasteImporting}
           canSave={canSave}
           onImport={() => importOperationalToDatabase("bajas")}
+          resumeFromBatch={wasteImportRun?.nextBatch > 1 ? wasteImportRun.nextBatch : null}
         />
 
         <details className="historical-validation-section advanced-details">

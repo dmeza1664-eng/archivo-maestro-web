@@ -7,6 +7,7 @@ const {
   firstValue,
   monthRange,
   paginationFromQuery,
+  parseImportMeta,
   toDateOnly,
   toNumber,
 } = require('./helpers');
@@ -75,6 +76,7 @@ async function importSales(req, res, next) {
   try {
     const rows = extractRows(req.body, ['ventas', 'rows', 'data']);
     const archivo = normalizedText(req.body?.archivo, 255);
+    const batchMeta = parseImportMeta(req.body, rows.length);
     const { valid, rejected } = normalizeImportRows(rows);
     const consolidated = consolidateRows(valid);
     if (!consolidated.length) {
@@ -145,6 +147,9 @@ async function importSales(req, res, next) {
       const detail = {
         duplicadasEnArchivo: valid.length - consolidated.length,
         errores: rejected.slice(0, 25),
+        importRunId: batchMeta.importRunId,
+        batchIndex: batchMeta.batchIndex,
+        batchTotal: batchMeta.batchTotal,
       };
       const [importRecord] = await connection.execute(
         `INSERT INTO importaciones_ventas
@@ -171,9 +176,15 @@ async function importSales(req, res, next) {
         insertadas: inserted,
         actualizadas: updated,
         rechazadas: rejected.length,
+        importRunId: batchMeta.importRunId,
+        batchIndex: batchMeta.batchIndex,
+        batchTotal: batchMeta.batchTotal,
       });
       return {
         importId: importRecord.insertId,
+        importRunId: batchMeta.importRunId,
+        batchIndex: batchMeta.batchIndex,
+        batchTotal: batchMeta.batchTotal,
         valid: valid.length,
         rejected: rejected.length,
         consolidated: consolidated.length,

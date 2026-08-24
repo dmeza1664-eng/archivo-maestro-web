@@ -2980,6 +2980,19 @@ tbody tr:hover {
   border-color: rgba(211, 92, 92, 0.2);
 }
 
+.cloud-status.error svg {
+  color: #d35c5c;
+}
+
+.cloud-status.warning {
+  background: rgba(211, 160, 92, 0.08);
+  border-color: rgba(211, 160, 92, 0.25);
+}
+
+.cloud-status.warning svg {
+  color: #d3a05c;
+}
+
 .app-toast {
   align-items: center;
   backdrop-filter: blur(14px);

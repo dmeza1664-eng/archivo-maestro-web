@@ -110,6 +110,29 @@ function paginationFromQuery(query, defaultLimit = 4000, maxLimit = 10000) {
   return { cursor, limit: Math.min(requestedLimit, maxLimit) };
 }
 
+const MAX_IMPORT_BATCH_ROWS = 1500;
+
+function parseImportMeta(body, rowCount) {
+  if (rowCount > MAX_IMPORT_BATCH_ROWS) {
+    throw httpError(
+      400,
+      `Cada lote admite máximo ${MAX_IMPORT_BATCH_ROWS} filas. Usa la carga por lotes de la aplicación.`
+    );
+  }
+  const importRunId = String(body?.importRunId || '').trim().slice(0, 80) || null;
+  const batchIndex = Number(body?.batchIndex);
+  const batchTotal = Number(body?.batchTotal);
+  const hasBatch = Number.isInteger(batchIndex) && Number.isInteger(batchTotal);
+  if (hasBatch && (batchIndex < 1 || batchTotal < 1 || batchIndex > batchTotal)) {
+    throw httpError(400, 'El lote de importación es inválido');
+  }
+  return {
+    importRunId,
+    batchIndex: hasBatch ? batchIndex : 1,
+    batchTotal: hasBatch ? batchTotal : 1,
+  };
+}
+
 function productInput(row, rowIndex) {
   const codigo = firstValue(row, [
     'producto_codigo',
@@ -189,6 +212,8 @@ module.exports = {
   mesFromDate,
   monthRange,
   paginationFromQuery,
+  parseImportMeta,
+  MAX_IMPORT_BATCH_ROWS,
   toDateOnly,
   toNumber,
   validateMes,

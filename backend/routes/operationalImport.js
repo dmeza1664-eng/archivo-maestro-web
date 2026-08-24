@@ -7,6 +7,7 @@ const {
   firstValue,
   monthRange,
   paginationFromQuery,
+  parseImportMeta,
   toDateOnly,
   toNumber,
 } = require('./helpers');
@@ -76,6 +77,7 @@ function createOperationalRouter(config) {
     try {
       const rows = extractRows(req.body, config.bodyKeys);
       const archivo = normalizedText(req.body?.archivo, 255);
+      const batchMeta = parseImportMeta(req.body, rows.length);
       const { valid, rejected } = normalizeRows(rows);
       const consolidated = consolidateRows(valid);
       if (!consolidated.length) {
@@ -144,6 +146,9 @@ function createOperationalRouter(config) {
         const detail = {
           duplicadasEnArchivo: valid.length - consolidated.length,
           errores: rejected.slice(0, 25),
+          importRunId: batchMeta.importRunId,
+          batchIndex: batchMeta.batchIndex,
+          batchTotal: batchMeta.batchTotal,
         };
         const [importRecord] = await connection.execute(
           `INSERT INTO importaciones_operativas
@@ -171,9 +176,15 @@ function createOperationalRouter(config) {
           insertadas: inserted,
           actualizadas: updated,
           rechazadas: rejected.length,
+          importRunId: batchMeta.importRunId,
+          batchIndex: batchMeta.batchIndex,
+          batchTotal: batchMeta.batchTotal,
         });
         return {
           importId: importRecord.insertId,
+          importRunId: batchMeta.importRunId,
+          batchIndex: batchMeta.batchIndex,
+          batchTotal: batchMeta.batchTotal,
           valid: valid.length,
           rejected: rejected.length,
           consolidated: consolidated.length,
