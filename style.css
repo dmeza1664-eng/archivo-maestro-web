@@ -2989,8 +2989,41 @@ tbody tr:hover {
   border-color: rgba(211, 160, 92, 0.25);
 }
 
-.cloud-status.warning svg {
-  color: #d3a05c;
+.sales-conflict-bar {
+  background: rgba(211, 160, 92, 0.08);
+  border: 1px solid rgba(211, 160, 92, 0.25);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+}
+
+.sales-conflict-bar p {
+  color: var(--muted-strong);
+  font-size: 12px;
+  margin: 0;
+}
+
+.sales-conflict-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sales-conflict-row strong {
+  font-size: 12px;
+}
+
+.sales-conflict-row span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sales-conflict-row .secondary {
+  font-size: 11px;
+  padding: 4px 8px;
 }
 
 .app-toast {

@@ -115,16 +115,37 @@ const MAX_SNAPSHOT_BYTES = 3.5 * 1024 * 1024;
 
 function loadStoredSession() {
   try {
-    const value = JSON.parse(localStorage.getItem(SESSION_STORAGE_KEY) || "null");
-    return value?.token && value?.user ? value : null;
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY) || localStorage.getItem(SESSION_STORAGE_KEY);
+    const value = JSON.parse(raw || "null");
+    if (!value?.user) return null;
+    const session = { token: API_URL ? value.token || "" : "", user: value.user };
+    writeStoredSession(session);
+    return session.token || !API_URL ? session : null;
   } catch {
     return null;
   }
 }
 
+function writeStoredSession(session) {
+  if (!session?.user) return;
+  const stored = API_URL ? { token: session.token, user: session.user } : { user: session.user };
+  try {
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stored));
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Si el navegador bloquea el storage, la sesión vive en memoria y en la cookie HttpOnly.
+  }
+}
+
+function clearStoredSession() {
+  sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  localStorage.removeItem(SESSION_STORAGE_KEY);
+}
+
 async function apiRequest(path, { token, method = "GET", body } = {}) {
   const response = await fetch(`${API_URL}${path}`, {
     method,
+    credentials: "include",
     headers: {
       ...(body ? { "Content-Type": "application/json" } : {}),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -1000,26 +1021,109 @@ function inferYearHintFromFileName(fileName = "", fallbackYear = 2026) {
   return yearMatch ? Number(yearMatch[0]) : fallbackYear;
 }
 
-function inferMonthHintFromFileName(fileName = "", fallbackYear = 2026) {
+const MONTH_FILE_ALIASES = [
+  ["ENERO", 0],
+  ["FEBRERO", 1],
+  ["FEEEBRERO", 1],
+  ["MARZO", 2],
+  ["ABRIL", 3],
+  ["MAYO", 4],
+  ["JUNIO", 5],
+  ["JULIO", 6],
+  ["AGOSTO", 7],
+  ["SEPTIEMBRE", 8],
+  ["OCTUBRE", 9],
+  ["NOVIEMBRE", 10],
+  ["DICIEMBRE", 11],
+];
+
+function monthKeyFromYearIndex(year, monthIndex) {
+  return `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+}
+
+function monthsNamedInFileName(fileName = "", fallbackYear = 2026) {
   const text = norm(fileName);
-  const aliases = [
-    ["ENERO", 0],
-    ["FEBRERO", 1],
-    ["FEEEBRERO", 1],
-    ["MARZO", 2],
-    ["ABRIL", 3],
-    ["MAYO", 4],
-    ["JUNIO", 5],
-    ["JULIO", 6],
-    ["AGOSTO", 7],
-    ["SEPTIEMBRE", 8],
-    ["OCTUBRE", 9],
-    ["NOVIEMBRE", 10],
-    ["DICIEMBRE", 11],
-  ];
-  const monthIndexes = [...new Set(aliases.filter(([alias]) => text.includes(alias)).map(([, monthIndex]) => monthIndex))];
-  if (monthIndexes.length !== 1) return null;
-  return { year: inferYearHintFromFileName(fileName, fallbackYear), monthIndex: monthIndexes[0] };
+  const year = inferYearHintFromFileName(fileName, fallbackYear);
+  const monthIndexes = [...new Set(MONTH_FILE_ALIASES.filter(([alias]) => text.includes(alias)).map(([, monthIndex]) => monthIndex))];
+  return monthIndexes.map((monthIndex) => monthKeyFromYearIndex(year, monthIndex));
+}
+
+function inferMonthHintFromFileName(fileName = "", fallbackYear = 2026) {
+  const named = monthsNamedInFileName(fileName, fallbackYear);
+  if (named.length !== 1) return null;
+  const [year, month] = named[0].split("-").map(Number);
+  return { year, monthIndex: month - 1 };
+}
+
+function recordMonthKey(row) {
+  return dateKey(row.fecha).slice(0, 7);
+}
+
+function isDatabaseSalesSource(sourceFile) {
+  return !sourceFile || sourceFile === "Base de datos";
+}
+
+function sourceRankForMonth(fileName, monthKey) {
+  const named = monthsNamedInFileName(fileName);
+  if (named.length === 1 && named[0] === monthKey) return 3;
+  if (!named.length) return 2;
+  if (named.includes(monthKey)) return 1;
+  return 0;
+}
+
+function displayMonthLabel(monthKey) {
+  const [year, month] = String(monthKey || "").split("-").map(Number);
+  if (!year || !month) return monthKey || "";
+  const label = new Date(year, month - 1, 1).toLocaleDateString("es-MX", { month: "long", year: "numeric" });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function resolveCanonicalMonthSources(entries, overrides = {}) {
+  const names = entries.map((entry) => entry.name);
+  const byName = new Map(entries.map((entry) => [entry.name, { name: entry.name, rows: [...(entry.rows || [])] }]));
+  const months = new Set();
+  for (const entry of byName.values()) {
+    for (const row of entry.rows) {
+      const key = recordMonthKey(row);
+      if (/^\d{4}-\d{2}$/.test(key)) months.add(key);
+    }
+  }
+  const decisions = [];
+  for (const month of [...months].sort()) {
+    const candidates = names.filter((name) => byName.get(name).rows.some((row) => recordMonthKey(row) === month));
+    if (candidates.length < 2) continue;
+    const override = overrides[month];
+    const winner = candidates.includes(override)
+      ? override
+      : [...candidates].sort((left, right) => {
+          const rankDiff = sourceRankForMonth(right, month) - sourceRankForMonth(left, month);
+          return rankDiff || names.indexOf(right) - names.indexOf(left);
+        })[0];
+    const omitted = candidates.filter((name) => name !== winner);
+    for (const name of omitted) {
+      const entry = byName.get(name);
+      entry.rows = entry.rows.filter((row) => recordMonthKey(row) !== month);
+    }
+    decisions.push({ month, winner, omitted });
+  }
+  return { entries: names.map((name) => byName.get(name)), decisions };
+}
+
+function shiftMonthKey(monthKey, delta) {
+  const [year, month] = String(monthKey).split("-").map(Number);
+  const shifted = new Date(year, month - 1 + delta, 1);
+  return monthKeyFromYearIndex(shifted.getFullYear(), shifted.getMonth());
+}
+
+function inferSheetMonthHint(fileName, sheetName, yearHint) {
+  let sheetMonthHint = inferMonthHintFromFileName(sheetName, yearHint);
+  const named = monthsNamedInFileName(fileName, yearHint);
+  if (named.length < 2 || !sheetMonthHint) return sheetMonthHint;
+  const lastNamed = named[named.length - 1];
+  const sheetKey = monthKeyFromYearIndex(sheetMonthHint.year, sheetMonthHint.monthIndex);
+  if (sheetKey !== shiftMonthKey(lastNamed, 1)) return sheetMonthHint;
+  const [year, month] = lastNamed.split("-").map(Number);
+  return { year, monthIndex: month - 1 };
 }
 
 function parseMonthlyDailySheets(workbook, type = "ventas", monthHint = null) {
@@ -1141,6 +1245,7 @@ function parseBajasReport(workbook) {
     const cantidad = toNumber(rows[i][qtyCol]);
     if (!fecha || cantidad === 0) continue;
     const productoOriginal = String(rows[i][productCol] ?? "").trim();
+    if (/^ERICK?\b/.test(norm(productoOriginal))) continue;
     const sucursal = branchCol >= 0 ? String(rows[i][branchCol] ?? "").trim() : "";
     parsed.push({
       fecha,
@@ -1196,12 +1301,7 @@ function parseWideSales(workbook, type = "ventas", monthHint = null, yearHint = 
 
     const weekdayHeaders = rows[weekdayHeaderIndex] || [];
     const dateHeaders = rows[dateHeaderIndex] || [];
-    let sheetMonthHint = inferMonthHintFromFileName(sheetName, yearHint);
-    const fileText = norm(fileName);
-    if (fileText.includes("MAYO") && fileText.includes("JUNIO") && norm(sheetName).includes("JULIO")) {
-      // La fuente histórica combinada tiene la hoja de junio etiquetada como JULIO 2026.
-      sheetMonthHint = { year: yearHint, monthIndex: 5 };
-    }
+    let sheetMonthHint = inferSheetMonthHint(fileName, sheetName, yearHint);
     const inferredMonth = sheetMonthHint || monthHint || inferMonthYearFromWideHeaders(weekdayHeaders, dateHeaders);
     const inferredMonthDays = inferredMonth ? new Date(inferredMonth.year, inferredMonth.monthIndex + 1, 0).getDate() : null;
     const startRow = Math.max(weekdayHeaderIndex, dateHeaderIndex) + 1;
@@ -3395,6 +3495,9 @@ function Dashboard({ session, onLogout }) {
   const [salesImporting, setSalesImporting] = useState(false);
   const [salesImportStatus, setSalesImportStatus] = useState("");
   const [salesImportRun, setSalesImportRun] = useState(null);
+  const [salesExcelSources, setSalesExcelSources] = useState({});
+  const [salesMonthOverrides, setSalesMonthOverrides] = useState({});
+  const [salesSourceDecisions, setSalesSourceDecisions] = useState([]);
   const [pendingProductionImport, setPendingProductionImport] = useState([]);
   const [productionImportFile, setProductionImportFile] = useState("");
   const [productionImporting, setProductionImporting] = useState(false);
@@ -3753,55 +3856,68 @@ function Dashboard({ session, onLogout }) {
     const validFiles = filesToRead.filter(Boolean);
     if (!validFiles.length) return;
 
-    const hasCanonicalJuneClose = validFiles.some((file) => {
-      const hint = inferMonthHintFromFileName(file.name);
-      return hint?.monthIndex === 5 && !norm(file.name).includes("MAYO");
-    });
     const parsedFiles = await Promise.all(
       validFiles.map(async (file) => {
         const workbook = await readWorkbook(file);
-        let rows = parseSalesOrReturns(workbook, "ventas", file.name);
-        if (hasCanonicalJuneClose && norm(file.name).includes("MAYO") && norm(file.name).includes("JUNIO")) {
-          rows = rows.filter((row) => dateKey(row.fecha).slice(0, 7) !== "2026-06");
-        }
+        const rows = parseSalesOrReturns(workbook, "ventas", file.name);
         return rows.map((row) => ({ ...row, sourceFile: file.name }));
       })
     );
-    const parsed = parsedFiles.flat();
-    setVentas((current) => {
-      const selectedNames = new Set(validFiles.map((file) => file.name));
-      const withoutReplacedFiles = current.filter((row) => {
-        if (row.sourceFile && selectedNames.has(row.sourceFile)) return false;
-        if (hasCanonicalJuneClose && norm(row.sourceFile).includes("MAYO") && norm(row.sourceFile).includes("JUNIO")) {
-          return dateKey(row.fecha).slice(0, 7) !== "2026-06";
-        }
-        return true;
-      });
-      const rowsToAppend = parsedFiles.flatMap((rows, index) => {
-        const fileName = validFiles[index].name;
-        const hasTaggedRows = current.some((row) => row.sourceFile === fileName);
-        return loadedNames.has(fileName) && !hasTaggedRows ? [] : rows;
-      });
-      return [...withoutReplacedFiles, ...rowsToAppend];
-    });
-    setPendingSalesImport((current) => {
-      const selectedNames = new Set(validFiles.map((file) => file.name));
-      const retained = current.filter((row) => {
-        if (row.sourceFile && selectedNames.has(row.sourceFile)) return false;
-        if (hasCanonicalJuneClose && norm(row.sourceFile).includes("MAYO") && norm(row.sourceFile).includes("JUNIO")) {
-          return dateKey(row.fecha).slice(0, 7) !== "2026-06";
-        }
-        return true;
-      });
-      return [...retained, ...parsed];
-    });
+    const incomingByName = Object.fromEntries(validFiles.map((file, index) => [file.name, parsedFiles[index]]));
+    const nextSources = { ...salesExcelSources };
+    if (!Object.keys(nextSources).length) {
+      for (const row of ventas) {
+        if (isDatabaseSalesSource(row.sourceFile)) continue;
+        if (!nextSources[row.sourceFile]) nextSources[row.sourceFile] = [];
+        nextSources[row.sourceFile].push(row);
+      }
+    }
+    Object.assign(nextSources, incomingByName);
+    const resolved = resolveCanonicalMonthSources(
+      Object.entries(nextSources).map(([name, rows]) => ({ name, rows })),
+      salesMonthOverrides
+    );
+    const excelRows = resolved.entries.flatMap((entry) => entry.rows.map((row) => ({ ...row, sourceFile: entry.name })));
+    const dbRows = ventas.filter((row) => isDatabaseSalesSource(row.sourceFile));
+    const pendingNames = new Set([
+      ...pendingSalesImport.map((row) => row.sourceFile).filter(Boolean),
+      ...validFiles.map((file) => file.name),
+    ]);
+    setSalesExcelSources(nextSources);
+    setSalesSourceDecisions(resolved.decisions);
+    setVentas([...dbRows, ...excelRows]);
+    setPendingSalesImport(excelRows.filter((row) => pendingNames.has(row.sourceFile)));
     setSalesImportRun(null);
     setSalesImportFiles((current) => [...new Set([...current, ...validFiles.map((file) => file.name)])]);
-    setSalesImportStatus(parsed.length ? "Revisa el resumen antes de guardar en la base." : "No se reconocieron ventas en los archivos.");
+    const decisionText = resolved.decisions
+      .map((decision) => `${displayMonthLabel(decision.month)}: se usó ${decision.winner}; se omitió de ${decision.omitted.join(", ")}.`)
+      .join(" ");
+    const parsedCount = parsedFiles.flat().length;
+    setSalesImportStatus(
+      parsedCount
+        ? `${decisionText}${decisionText ? " " : ""}Revisa el resumen antes de guardar en la base.`
+        : "No se reconocieron ventas en los archivos."
+    );
     setFiles((current) => ({
       ...current,
       ventas: [...new Set([...loadedNames, ...validFiles.map((file) => file.name)])].join(", "),
     }));
+    setHasUnsavedChanges(true);
+  }
+
+  function chooseSalesMonthSource(month, winner) {
+    const overrides = { ...salesMonthOverrides, [month]: winner };
+    const resolved = resolveCanonicalMonthSources(
+      Object.entries(salesExcelSources).map(([name, rows]) => ({ name, rows })),
+      overrides
+    );
+    const excelRows = resolved.entries.flatMap((entry) => entry.rows.map((row) => ({ ...row, sourceFile: entry.name })));
+    const dbRows = ventas.filter((row) => isDatabaseSalesSource(row.sourceFile));
+    const pendingNames = new Set(pendingSalesImport.map((row) => row.sourceFile).filter(Boolean));
+    setSalesMonthOverrides(overrides);
+    setSalesSourceDecisions(resolved.decisions);
+    setVentas([...dbRows, ...excelRows]);
+    setPendingSalesImport(excelRows.filter((row) => pendingNames.has(row.sourceFile)));
     setHasUnsavedChanges(true);
   }
 
@@ -5420,6 +5536,23 @@ function Dashboard({ session, onLogout }) {
           />
         </section>
 
+        {salesSourceDecisions.length > 0 && (
+          <section className="sales-conflict-bar">
+            <p>Hay más de un archivo para el mismo mes. Se usó el cierre específico; puedes cambiar la fuente canónica.</p>
+            {salesSourceDecisions.map((decision) => (
+              <div className="sales-conflict-row" key={decision.month}>
+                <strong>{displayMonthLabel(decision.month)}</strong>
+                <span>Usando {decision.winner}</span>
+                {decision.omitted.map((name) => (
+                  <button key={name} className="secondary" type="button" onClick={() => chooseSalesMonthSource(decision.month, name)}>
+                    Usar {name}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </section>
+        )}
+
         {existencias.length > 0 && (
           <section className={`inventory-cutoff-bar ${inventoryCutoff.status === "fresh" ? "success" : "warning"}`}>
             <label>
@@ -6049,7 +6182,7 @@ function App() {
         if (session && response.user) {
           const nextSession = { ...session, user: response.user };
           setSession(nextSession);
-          localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextSession));
+          writeStoredSession(nextSession);
         } else {
           setNeedsSetup(Boolean(response.needsSetup));
         }
@@ -6058,7 +6191,7 @@ function App() {
       .catch((error) => {
         if (!active) return;
         if (session && error.status === 401) {
-          localStorage.removeItem(SESSION_STORAGE_KEY);
+          clearStoredSession();
           setSession(null);
         }
         setAuthError(`No se pudo conectar con el servidor: ${error.message}`);
@@ -6080,7 +6213,7 @@ function App() {
         body: credentials,
       });
       const nextSession = { token: response.token, user: response.user };
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextSession));
+      writeStoredSession(nextSession);
       setNeedsSetup(false);
       setSession(nextSession);
     } catch (error) {
@@ -6092,7 +6225,7 @@ function App() {
 
   async function logout() {
     const current = session;
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    clearStoredSession();
     setSession(null);
     setNeedsSetup(false);
     setAuthError("");
@@ -6126,7 +6259,25 @@ function App() {
   return <Dashboard session={session} onLogout={logout} />;
 }
 
-export { buildMonthlyCloseSummary, buildOperationalForecastScenario, buildWeeklyProgress, calculateForecast, consolidateOperationalRowsForUpload, consolidateSalesRowsForUpload, filterVentasBeforeMonth, parseBajasSummaryWorkbook, parseExistencias, parseProductionReal, parseSalesOrReturns, parseStock };
+export {
+  buildMonthlyCloseSummary,
+  buildOperationalForecastScenario,
+  buildWeeklyProgress,
+  calculateForecast,
+  consolidateOperationalRowsForUpload,
+  consolidateSalesRowsForUpload,
+  filterVentasBeforeMonth,
+  inferMonthHintFromFileName,
+  monthsNamedInFileName,
+  parseBajasReport,
+  parseBajasSummaryWorkbook,
+  parseExistencias,
+  parseMonthlySummaryWorkbook,
+  parseProductionReal,
+  parseSalesOrReturns,
+  parseStock,
+  resolveCanonicalMonthSources,
+};
 
 if (typeof document !== "undefined") {
   createRoot(document.getElementById("root")).render(<App />);

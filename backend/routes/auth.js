@@ -1,7 +1,10 @@
 const express = require('express');
 const { query, transaction } = require('../db');
+const { createMemoryRateLimiter } = require('../rateLimit');
 const {
+  attachSessionCookie,
   createSession,
+  expireSessionCookie,
   hashPassword,
   publicUser,
   requireAuth,
@@ -12,6 +15,11 @@ const {
 } = require('../auth');
 
 const router = express.Router();
+const loginRateLimit = createMemoryRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  maxAttempts: 8,
+  message: 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.',
+});
 
 function validateCredentials(usuario, password) {
   if (!/^[A-Za-z0-9._-]{3,80}$/.test(usuario || '')) {
@@ -35,7 +43,7 @@ router.get('/status', async (_req, res, next) => {
   }
 });
 
-router.post('/setup', async (req, res, next) => {
+router.post('/setup', loginRateLimit, async (req, res, next) => {
   try {
     const setupKey = String(req.body?.setupKey || '');
     if (!process.env.APP_SETUP_KEY || setupKey !== process.env.APP_SETUP_KEY) {
@@ -63,13 +71,14 @@ router.post('/setup', async (req, res, next) => {
       await writeAudit(connection, user.id, 'crear', 'usuario', String(user.id), { rol: 'admin', inicial: true });
       return { token, user };
     });
+    attachSessionCookie(req, res, result.token);
     res.status(201).json({ ok: true, token: result.token, user: publicUser(result.user) });
   } catch (error) {
     next(error);
   }
 });
 
-router.post('/login', async (req, res, next) => {
+router.post('/login', loginRateLimit, async (req, res, next) => {
   try {
     const usuario = String(req.body?.usuario || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
@@ -81,6 +90,7 @@ router.post('/login', async (req, res, next) => {
       );
       const user = rows[0];
       if (!user || !(await verifyPassword(password, user.password_salt, user.password_hash))) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
         const error = new Error('Usuario o contraseña incorrectos');
         error.status = 401;
         throw error;
@@ -90,6 +100,7 @@ router.post('/login', async (req, res, next) => {
       await writeAudit(connection, user.id, 'iniciar_sesion', 'sesion');
       return { token, user };
     });
+    attachSessionCookie(req, res, result.token);
     res.json({ ok: true, token: result.token, user: publicUser(result.user) });
   } catch (error) {
     next(error);
@@ -106,6 +117,7 @@ router.post('/logout', requireAuth, async (req, res, next) => {
       await connection.execute('DELETE FROM sesiones WHERE token_hash = ?', [tokenHash(req.authToken)]);
       await writeAudit(connection, req.user.id, 'cerrar_sesion', 'sesion');
     });
+    expireSessionCookie(req, res);
     res.json({ ok: true });
   } catch (error) {
     next(error);

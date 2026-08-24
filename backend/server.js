@@ -21,9 +21,11 @@ const allowedOrigins = String(process.env.CORS_ORIGIN || '')
   .filter(Boolean);
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || !allowedOrigins.length || allowedOrigins.includes(origin)) return callback(null, true);
+    if (!origin) return callback(null, true);
+    if (!allowedOrigins.length || allowedOrigins.includes(origin)) return callback(null, origin);
     return callback(new Error('Origen no permitido'));
   },
+  credentials: true,
 }));
 app.use(express.json({ limit: '4mb' }));
 
