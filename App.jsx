@@ -131,7 +131,7 @@ function writeStoredSession(session) {
   const stored = API_URL ? { token: session.token, user: session.user } : { user: session.user };
   try {
     sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stored));
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(stored));
   } catch {
     // Si el navegador bloquea el storage, la sesión vive en memoria y en la cookie HttpOnly.
   }
@@ -6173,36 +6173,40 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    const request = session
-      ? apiRequest("/api/auth/me", { token: session.token })
-      : apiRequest("/api/auth/status");
-    request
-      .then((response) => {
+    async function restoreSession() {
+      try {
+        const me = await apiRequest("/api/auth/me", { token: session?.token });
         if (!active) return;
-        if (session && response.user) {
-          const nextSession = { ...session, user: response.user };
-          setSession(nextSession);
-          writeStoredSession(nextSession);
-        } else {
-          setNeedsSetup(Boolean(response.needsSetup));
-        }
+        const nextSession = { token: session?.token || "", user: me.user };
+        setSession(nextSession);
+        writeStoredSession(nextSession);
+        setNeedsSetup(false);
         setAuthError("");
-      })
-      .catch((error) => {
+      } catch (error) {
         if (!active) return;
-        if (session && error.status === 401) {
+        if (error.status === 401) {
           clearStoredSession();
           setSession(null);
+          try {
+            const status = await apiRequest("/api/auth/status");
+            if (!active) return;
+            setNeedsSetup(Boolean(status.needsSetup));
+            setAuthError("");
+          } catch (statusError) {
+            setAuthError(`No se pudo conectar con el servidor: ${statusError.message}`);
+          }
+        } else {
+          setAuthError(`No se pudo conectar con el servidor: ${error.message}`);
         }
-        setAuthError(`No se pudo conectar con el servidor: ${error.message}`);
-      })
-      .finally(() => {
+      } finally {
         if (active) setAuthChecking(false);
-      });
+      }
+    }
+    restoreSession();
     return () => {
       active = false;
     };
-  }, [session?.token]);
+  }, []);
 
   async function authenticate(credentials) {
     setAuthSubmitting(true);
@@ -6229,9 +6233,7 @@ function App() {
     setSession(null);
     setNeedsSetup(false);
     setAuthError("");
-    if (current?.token) {
-      apiRequest("/api/auth/logout", { token: current.token, method: "POST" }).catch(() => {});
-    }
+    apiRequest("/api/auth/logout", { token: current?.token, method: "POST" }).catch(() => {});
     try {
       const response = await apiRequest("/api/auth/status");
       setNeedsSetup(Boolean(response.needsSetup));

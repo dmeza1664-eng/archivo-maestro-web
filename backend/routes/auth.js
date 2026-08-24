@@ -1,6 +1,10 @@
 const express = require('express');
 const { query, transaction } = require('../db');
-const { createMemoryRateLimiter } = require('../rateLimit');
+const {
+  createMemoryRateLimiter,
+  createPersistLoginRateLimit,
+  recordLoginFailure,
+} = require('../rateLimit');
 const {
   attachSessionCookie,
   createSession,
@@ -15,10 +19,16 @@ const {
 } = require('../auth');
 
 const router = express.Router();
+const loginRateLimitMessage = 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.';
 const loginRateLimit = createMemoryRateLimiter({
   windowMs: 15 * 60 * 1000,
   maxAttempts: 8,
-  message: 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.',
+  message: loginRateLimitMessage,
+});
+const persistLoginRateLimit = createPersistLoginRateLimit(query, {
+  windowMinutes: 15,
+  maxAttempts: 8,
+  message: loginRateLimitMessage,
 });
 
 function validateCredentials(usuario, password) {
@@ -43,7 +53,7 @@ router.get('/status', async (_req, res, next) => {
   }
 });
 
-router.post('/setup', loginRateLimit, async (req, res, next) => {
+router.post('/setup', loginRateLimit, persistLoginRateLimit, async (req, res, next) => {
   try {
     const setupKey = String(req.body?.setupKey || '');
     if (!process.env.APP_SETUP_KEY || setupKey !== process.env.APP_SETUP_KEY) {
@@ -78,7 +88,7 @@ router.post('/setup', loginRateLimit, async (req, res, next) => {
   }
 });
 
-router.post('/login', loginRateLimit, async (req, res, next) => {
+router.post('/login', loginRateLimit, persistLoginRateLimit, async (req, res, next) => {
   try {
     const usuario = String(req.body?.usuario || '').trim().toLowerCase();
     const password = String(req.body?.password || '');
@@ -90,9 +100,9 @@ router.post('/login', loginRateLimit, async (req, res, next) => {
       );
       const user = rows[0];
       if (!user || !(await verifyPassword(password, user.password_salt, user.password_hash))) {
-        await new Promise((resolve) => setTimeout(resolve, 400));
         const error = new Error('Usuario o contraseña incorrectos');
         error.status = 401;
+        error.loginFailed = true;
         throw error;
       }
       await connection.execute('UPDATE usuarios SET ultimo_acceso = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
@@ -103,6 +113,10 @@ router.post('/login', loginRateLimit, async (req, res, next) => {
     attachSessionCookie(req, res, result.token);
     res.json({ ok: true, token: result.token, user: publicUser(result.user) });
   } catch (error) {
+    if (error.loginFailed) {
+      await recordLoginFailure(query, req, String(req.body?.usuario || '').trim().toLowerCase()).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
     next(error);
   }
 });
