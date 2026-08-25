@@ -109,6 +109,7 @@ const API_URL = String(
 const SESSION_STORAGE_KEY = "archivoMaestroSession";
 const FORECAST_MODEL_VERSION = "categorySeasonal";
 const OPERATIONAL_MARGIN_PCT = 12;
+const MIN_SALES_DAILY_COVERAGE = 0.7;
 const API_PAGE_SIZE = 4000;
 const API_UPLOAD_BATCH_SIZE = 1500;
 const MAX_SNAPSHOT_BYTES = 3.5 * 1024 * 1024;
@@ -1078,6 +1079,13 @@ function displayMonthLabel(monthKey) {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
+function shortMonthLabel(monthKey) {
+  const [year, month] = String(monthKey || "").split("-").map(Number);
+  if (!year || !month) return monthKey || "";
+  const label = new Date(year, month - 1, 1).toLocaleDateString("es-MX", { month: "short" }).replace(".", "");
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 function resolveCanonicalMonthSources(entries, overrides = {}) {
   const names = entries.map((entry) => entry.name);
   const byName = new Map(entries.map((entry) => [entry.name, { name: entry.name, rows: [...(entry.rows || [])] }]));
@@ -1554,7 +1562,7 @@ function filterIncompleteHistoricalMonths(records) {
   }
   const incompleteMonths = new Set(
     [...coverage.entries()]
-      .filter(([, value]) => !value.monthlyTotal && value.days.size > 1 && value.days.size / value.daysInMonth < 0.7)
+      .filter(([, value]) => !value.monthlyTotal && value.days.size > 1 && value.days.size / value.daysInMonth < MIN_SALES_DAILY_COVERAGE)
       .map(([key]) => key)
   );
   return incompleteMonths.size
@@ -1708,6 +1716,198 @@ function previousMonthKey(monthKey) {
   if (!year || !month) return "";
   const previous = new Date(year, month - 2, 1);
   return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function daysInMonthKey(monthKey) {
+  const [year, month] = String(monthKey).split("-").map(Number);
+  if (!year || !month) return 0;
+  return new Date(year, month, 0).getDate();
+}
+
+function salesCoverageStatusLabel(status) {
+  if (status === "complete") return "Diario + cierre";
+  if (status === "daily-only") return "Solo diario";
+  if (status === "close-only") return "Solo cierre";
+  if (status === "close-and-partial-daily") return "Cierre y diario incompleto";
+  if (status === "partial-daily") return "Diario incompleto";
+  return "Sin ventas";
+}
+
+function emptySalesMonthCoverage(monthKey) {
+  return {
+    monthKey,
+    daysInMonth: daysInMonthKey(monthKey),
+    dailyDays: 0,
+    dailyTotal: 0,
+    closeTotal: 0,
+    dailyRows: 0,
+    closeRows: 0,
+    hasDaily: false,
+    hasClose: false,
+    hasPartialDaily: false,
+    status: "empty",
+  };
+}
+
+function buildSalesMonthCoverage(records) {
+  const coverage = new Map();
+  for (const row of records || []) {
+    const monthKey = monthKeyFromRecord(row);
+    if (!monthKey) continue;
+    const current = coverage.get(monthKey) || {
+      dailyDays: new Set(),
+      dailyTotal: 0,
+      closeTotal: 0,
+      dailyRows: 0,
+      closeRows: 0,
+    };
+    if (row.inferredZeroMonth) {
+      coverage.set(monthKey, current);
+      continue;
+    }
+    if (row.monthlyTotal) {
+      current.closeRows += 1;
+      current.closeTotal += toNumber(row.cantidad);
+    } else {
+      const date = parseDateCell(row.fecha);
+      if (date) {
+        current.dailyDays.add(date.getDate());
+        current.dailyTotal += toNumber(row.cantidad);
+        current.dailyRows += 1;
+      }
+    }
+    coverage.set(monthKey, current);
+  }
+
+  return [...coverage.keys()].sort().map((monthKey) => {
+    const value = coverage.get(monthKey);
+    const daysInMonth = daysInMonthKey(monthKey);
+    const dailyDays = value.dailyDays.size;
+    const hasClose = value.closeRows > 0;
+    const hasDaily = dailyDays > 1 && (!daysInMonth || dailyDays / daysInMonth >= MIN_SALES_DAILY_COVERAGE);
+    const hasPartialDaily = dailyDays > 0 && !hasDaily;
+    let status = "empty";
+    if (hasDaily && hasClose) status = "complete";
+    else if (hasDaily) status = "daily-only";
+    else if (hasClose && hasPartialDaily) status = "close-and-partial-daily";
+    else if (hasClose) status = "close-only";
+    else if (hasPartialDaily) status = "partial-daily";
+    return {
+      monthKey,
+      daysInMonth,
+      dailyDays,
+      dailyTotal: value.dailyTotal,
+      closeTotal: value.closeTotal,
+      dailyRows: value.dailyRows,
+      closeRows: value.closeRows,
+      hasDaily,
+      hasClose,
+      hasPartialDaily,
+      status,
+    };
+  });
+}
+
+function monthCoverageByKey(coverageRows, monthKey) {
+  if (!monthKey) return emptySalesMonthCoverage("");
+  return coverageRows.find((row) => row.monthKey === monthKey) || emptySalesMonthCoverage(monthKey);
+}
+
+function selectSalesCoverageForDisplay(coverageRows, selectedMonth) {
+  const previous = previousMonthKey(selectedMonth);
+  const recent = new Set();
+  let cursor = previous;
+  for (let index = 0; index < 6 && cursor; index += 1) {
+    recent.add(cursor);
+    cursor = previousMonthKey(cursor);
+  }
+  const keys = new Set([previous, selectedMonth].filter(Boolean));
+  for (const row of coverageRows || []) {
+    if (recent.has(row.monthKey) && row.status !== "complete") keys.add(row.monthKey);
+  }
+  return [...keys].sort().map((key) => monthCoverageByKey(coverageRows, key));
+}
+
+function assessForecastFreezeReadiness({
+  selectedMonth,
+  coverageRows = [],
+  databaseSync = null,
+  alreadyFrozen = false,
+  isAdmin = false,
+  capturedStatuses = 0,
+  catalogCount = 0,
+} = {}) {
+  const blockers = [];
+  const warnings = [];
+  const previous = previousMonthKey(selectedMonth);
+  const previousCoverage = monthCoverageByKey(coverageRows, previous);
+  const targetCoverage = monthCoverageByKey(coverageRows, selectedMonth);
+
+  if (!databaseSync) {
+    blockers.push({ code: "sync-pending", message: "Espera a que termine la sincronización con la base." });
+  } else if (!isDatabaseSyncComplete(databaseSync)) {
+    blockers.push({ code: "sync-incomplete", message: "No se puede congelar con ventas, producción o bajas incompletas." });
+  }
+
+  if (alreadyFrozen && !isAdmin) {
+    blockers.push({
+      code: "already-frozen",
+      message: "Este mes ya está congelado. Solo un administrador puede emitir otra versión.",
+    });
+  }
+
+  if (targetCoverage.dailyRows > 0 || targetCoverage.closeRows > 0) {
+    blockers.push({
+      code: "target-has-sales",
+      message: `No se puede congelar ${displayMonthLabel(selectedMonth)}: ya hay ventas de ese mes. El pronóstico debe congelarse antes de conocer el resultado.`,
+    });
+  }
+
+  if (previous) {
+    const previousLabel = displayMonthLabel(previous);
+    if (!previousCoverage.hasClose && !previousCoverage.hasDaily && !previousCoverage.hasPartialDaily) {
+      blockers.push({
+        code: "previous-missing",
+        message: `No hay ventas de ${previousLabel}. Carga el cierre mensual y el detalle diario.`,
+      });
+    } else {
+      if (!previousCoverage.hasClose) {
+        blockers.push({
+          code: "previous-missing-close",
+          message: `Falta el cierre mensual de ${previousLabel}. Cárgalo junto con el detalle diario.`,
+        });
+      }
+      if (!previousCoverage.hasDaily) {
+        blockers.push({
+          code: "previous-missing-daily",
+          message: previousCoverage.hasPartialDaily
+            ? `El detalle diario de ${previousLabel} está incompleto (${previousCoverage.dailyDays} de ${previousCoverage.daysInMonth} días).`
+            : `Falta el detalle diario de ${previousLabel}. El cierre solo no conserva la forma por día de semana.`,
+        });
+      }
+    }
+  }
+
+  if (catalogCount > 0 && capturedStatuses <= 0) {
+    warnings.push({
+      code: "missing-status",
+      message: "Ningún producto tiene estatus (ACTIVO, BAJA, ESTACIONAL). Se puede congelar, pero las bajas no se aplicarán hasta la revisión.",
+    });
+  } else if (catalogCount > 0 && capturedStatuses < catalogCount) {
+    warnings.push({
+      code: "partial-status",
+      message: `Estatus capturado en ${capturedStatuses} de ${catalogCount} productos. El resto se tratará como ACTIVO.`,
+    });
+  }
+
+  return {
+    canFreeze: blockers.length === 0,
+    blockers,
+    warnings,
+    previousMonth: previousCoverage,
+    targetMonth: targetCoverage,
+    previousMonthKey: previous,
+  };
 }
 
 function sameMonthPreviousYear(monthKey) {
@@ -2714,6 +2914,10 @@ function buildOperationalForecastScenario(forecastRows, marginPct = OPERATIONAL_
 
 const MONTHLY_REVIEW_STATUSES = ["ACTIVO", "BAJA", "BAJO PEDIDO", "ESTACIONAL"];
 
+function countCapturedProductStatuses(inputs) {
+  return Object.values(inputs || {}).filter((input) => MONTHLY_REVIEW_STATUSES.includes(String(input?.status || ""))).length;
+}
+
 function historicalMonthlyStats(records, product) {
   const productRecords = records.filter(
     (record) => normalizeProduct(record.producto) === normalizeProduct(product)
@@ -3398,6 +3602,53 @@ function OperationalImportPanel({
       <p className={`sales-import-status ${statusIsError ? "error" : ""}`}>{status}</p>
       {preview.monthlyTotals > 0 && pendingRows.length > 0 && (
         <p className="sales-import-note">Los totales mensuales no se convierten en registros diarios.</p>
+      )}
+    </section>
+  );
+}
+
+function FreezeReadinessStrip({ readiness, selectedMonth }) {
+  if (!selectedMonth) return null;
+  const previousShort = shortMonthLabel(readiness.previousMonthKey);
+  const targetShort = shortMonthLabel(selectedMonth);
+  const syncOk = !readiness.blockers.some((item) => item.code === "sync-pending" || item.code === "sync-incomplete");
+  const targetOk = !readiness.blockers.some((item) => item.code === "target-has-sales");
+  const chips = [
+    { key: "sync", label: "Sync", value: syncOk ? "OK" : "No", tone: syncOk ? "ok" : "blocked" },
+    {
+      key: "close",
+      label: `Cierre ${previousShort}`,
+      value: readiness.previousMonth.hasClose ? "OK" : "No",
+      tone: readiness.previousMonth.hasClose ? "ok" : "blocked",
+    },
+    {
+      key: "daily",
+      label: `Diario ${previousShort}`,
+      value: readiness.previousMonth.hasDaily
+        ? "OK"
+        : `${readiness.previousMonth.dailyDays}/${readiness.previousMonth.daysInMonth || 0}`,
+      tone: readiness.previousMonth.hasDaily ? "ok" : "blocked",
+    },
+    {
+      key: "target",
+      label: `${targetShort} sin ventas`,
+      value: targetOk ? "OK" : "Hay ventas",
+      tone: targetOk ? "ok" : "blocked",
+    },
+  ];
+  const alert = readiness.blockers[0] || (readiness.canFreeze ? readiness.warnings[0] : null);
+  return (
+    <section className={`freeze-strip ${readiness.canFreeze ? (readiness.warnings.length ? "warning" : "success") : "warning"}`}>
+      <div className="freeze-strip-stats">
+        {chips.map((chip) => (
+          <div key={chip.key} className={`freeze-strip-stat ${chip.tone}`}>
+            <strong>{chip.value}</strong>
+            <span>{chip.label}</span>
+          </div>
+        ))}
+      </div>
+      {alert && (
+        <p className={`freeze-strip-alert ${readiness.canFreeze ? "warn" : "blocked"}`}>{alert.message}</p>
       )}
     </section>
   );
@@ -4247,6 +4498,24 @@ function Dashboard({ session, onLogout }) {
     return filterVentasByMonth(effectiveVentas, selectedMonth, "include");
   }, [effectiveVentas, effectiveVentasValidacion, selectedMonth]);
 
+  const salesMonthCoverage = useMemo(() => {
+    const extra = [];
+    if (monthlyClosePeriod === selectedMonth) extra.push(...effectiveMonthlyCloseSales);
+    extra.push(...effectiveVentasValidacion.filter((record) => {
+      const monthKey = monthKeyFromRecord(record);
+      return !monthKey || monthKey === selectedMonth;
+    }));
+    return buildSalesMonthCoverage(extra.length ? [...effectiveVentas, ...extra] : effectiveVentas);
+  }, [effectiveVentas, effectiveMonthlyCloseSales, effectiveVentasValidacion, monthlyClosePeriod, selectedMonth]);
+
+  const pendingIncompleteSalesMonths = useMemo(() => {
+    const pending = buildSalesMonthCoverage(pendingSalesImport);
+    const combined = new Map(salesMonthCoverage.map((row) => [row.monthKey, row]));
+    return pending
+      .map((row) => ({ ...row, combinedStatus: combined.get(row.monthKey)?.status || row.status }))
+      .filter((row) => row.combinedStatus !== "complete");
+  }, [pendingSalesImport, salesMonthCoverage]);
+
   const historicalMonthKeys = useMemo(() => {
     const keys = new Set(historicalVentas.map((record) => monthKeyFromRecord(record)).filter(Boolean));
     return [...keys].sort();
@@ -4286,6 +4555,27 @@ function Dashboard({ session, onLogout }) {
     [existenciasCutoff.date, selectedMonth]
   );
   const inventoryBlocksApproval = existencias.length > 0 && inventoryCutoff.status !== "fresh";
+  const freezeReadiness = useMemo(
+    () =>
+      assessForecastFreezeReadiness({
+        selectedMonth,
+        coverageRows: salesMonthCoverage,
+        databaseSync,
+        alreadyFrozen: Boolean(monthlyReviewSource),
+        isAdmin: session.user.rol === "admin",
+        capturedStatuses: countCapturedProductStatuses(monthlyReview.inputs),
+        catalogCount: forecast.length,
+      }),
+    [
+      selectedMonth,
+      salesMonthCoverage,
+      databaseSync,
+      monthlyReviewSource,
+      session.user.rol,
+      monthlyReview.inputs,
+      forecast.length,
+    ]
+  );
   const monthlyReviewSourceRows = useMemo(
     () => monthlyReviewSource?.contenido?.rows?.length ? monthlyReviewSource.contenido.rows : operationalScenario,
     [monthlyReviewSource, operationalScenario]
@@ -4464,12 +4754,10 @@ function Dashboard({ session, onLogout }) {
 
   async function freezeAndExportForecast() {
     if (!operationalScenario.length || forecastFreezing) return;
-    if (!isDatabaseSyncComplete(databaseSync)) {
+    if (!freezeReadiness.canFreeze) {
       setToast({
         tone: "warning",
-        message: databaseSync
-          ? "No se puede congelar con ventas, producción o bajas incompletas."
-          : "Espera a que termine la sincronización con la base.",
+        message: freezeReadiness.blockers[0]?.message || "Falta información para congelar este mes.",
       });
       return;
     }
@@ -4670,13 +4958,9 @@ function Dashboard({ session, onLogout }) {
   ];
   const canSave = session.user.rol === "admin" || session.user.rol === "operador";
   const databaseSyncBlocked = !isDatabaseSyncComplete(databaseSync);
-  const freezeBlockedReason = !databaseSync
-    ? "Espera a que termine la sincronización con la base."
-    : databaseSyncBlocked
-      ? "No se puede congelar con ventas, producción o bajas incompletas."
-      : monthlyReviewSource && session.user.rol !== "admin"
-        ? "Este mes ya está congelado. Solo un administrador puede emitir otra versión."
-        : "Guarda una versión inmutable por producto y descarga el mismo pronóstico en Excel";
+  const freezeBlockedReason = freezeReadiness.canFreeze
+    ? (freezeReadiness.warnings[0]?.message || "Guarda una versión inmutable por producto y descarga el mismo pronóstico en Excel")
+    : freezeReadiness.blockers[0]?.message || "Falta información para congelar este mes.";
   const cloudStatusTone = cloudStatus.startsWith("No se pudo")
     ? "error"
     : databaseSync && databaseSyncBlocked
@@ -4713,7 +4997,7 @@ function Dashboard({ session, onLogout }) {
               className="secondary"
               type="button"
               onClick={freezeAndExportForecast}
-              disabled={!canSave || cloudSaving || forecastFreezing || !forecast.length || databaseSyncBlocked || (Boolean(monthlyReviewSource) && session.user.rol !== "admin")}
+              disabled={!canSave || cloudSaving || forecastFreezing || !forecast.length || !freezeReadiness.canFreeze}
               title={freezeBlockedReason}
             >
               <ShieldCheck size={18} /> {forecastFreezing ? "Congelando..." : "Congelar mes"}
@@ -4727,6 +5011,7 @@ function Dashboard({ session, onLogout }) {
               <LogOut size={18} />
             </button>
           </div>
+          <FreezeReadinessStrip readiness={freezeReadiness} selectedMonth={selectedMonth} />
         </header>
 
         {toast && (
@@ -5651,6 +5936,12 @@ function Dashboard({ session, onLogout }) {
                 Los totales mensuales permanecen disponibles para el pronóstico, pero no se guardan como ventas diarias.
               </p>
             )}
+            {pendingIncompleteSalesMonths.length > 0 && (
+              <p className="sales-import-note">
+                Meses incompletos: {pendingIncompleteSalesMonths.map((row) => `${displayMonthLabel(row.monthKey)} (${salesCoverageStatusLabel(row.combinedStatus)})`).join("; ")}.
+                Carga el cierre mensual y el detalle diario del mismo mes.
+              </p>
+            )}
           </section>
         )}
 
@@ -6287,12 +6578,15 @@ function App() {
 }
 
 export {
+  assessForecastFreezeReadiness,
   buildMonthlyCloseSummary,
   buildOperationalForecastScenario,
+  buildSalesMonthCoverage,
   buildWeeklyProgress,
   calculateForecast,
   consolidateOperationalRowsForUpload,
   consolidateSalesRowsForUpload,
+  countCapturedProductStatuses,
   filterVentasBeforeMonth,
   inferMonthHintFromFileName,
   monthsNamedInFileName,

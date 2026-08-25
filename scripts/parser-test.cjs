@@ -55,6 +55,9 @@ async function main() {
     parseStock,
     resolveCanonicalMonthSources,
     computeAnnualGrowthFactor,
+    assessForecastFreezeReadiness,
+    buildSalesMonthCoverage,
+    countCapturedProductStatuses,
   } = await loadAppFunctions();
 
   assert(monthsNamedInFileName("VENTAS DE MAYO Y JUNIO 2026.xlsx").join(",") === "2026-05,2026-06", "el combinado debe nombrar mayo y junio");
@@ -169,6 +172,105 @@ async function main() {
   ]);
   assert(Math.abs(computeAnnualGrowthFactor(growthData, "2026-06", 1) - 0.9) < 1e-9, "un mes de crecimiento usa solo el mes previo");
   assert(Math.abs(computeAnnualGrowthFactor(growthData, "2026-06", 3) - 1.1) < 1e-9, "tres meses usan la mediana anual");
+
+  function dailyRowsForMonth(monthKey, dayCount, quantity = 10) {
+    const [year, month] = monthKey.split("-").map(Number);
+    return Array.from({ length: dayCount }, (_, index) => ({
+      fecha: new Date(year, month - 1, index + 1),
+      producto: "BOLILLO",
+      cantidad: quantity,
+    }));
+  }
+
+  function closeRowForMonth(monthKey, quantity = 300) {
+    const [year, month] = monthKey.split("-").map(Number);
+    return {
+      fecha: new Date(year, month - 1, 1),
+      producto: "BOLILLO",
+      cantidad: quantity,
+      monthlyTotal: true,
+      monthDays: new Date(year, month, 0).getDate(),
+    };
+  }
+
+  const completeSync = {
+    sales: { ok: true, count: 1 },
+    production: { ok: true, count: 1 },
+    waste: { ok: true, count: 1 },
+  };
+
+  const juneDailyOnly = buildSalesMonthCoverage(dailyRowsForMonth("2026-06", 30));
+  assert(juneDailyOnly[0].status === "daily-only", "30 días de junio sin cierre deben marcar solo diario");
+
+  const juneCloseOnly = buildSalesMonthCoverage([closeRowForMonth("2026-06")]);
+  assert(juneCloseOnly[0].status === "close-only", "cierre de junio sin diario debe marcar solo cierre");
+
+  const juneComplete = buildSalesMonthCoverage([...dailyRowsForMonth("2026-06", 30), closeRowForMonth("2026-06", 25220)]);
+  assert(juneComplete[0].status === "complete", "diario y cierre juntos marcan el mes completo");
+
+  const junePartial = buildSalesMonthCoverage([...dailyRowsForMonth("2026-06", 10), closeRowForMonth("2026-06")]);
+  assert(junePartial[0].status === "close-and-partial-daily", "10 días más cierre no alcanzan cobertura diaria");
+
+  const inferredOnly = buildSalesMonthCoverage([{
+    fecha: new Date(2026, 5, 1),
+    producto: "BOLILLO",
+    cantidad: 0,
+    monthlyTotal: true,
+    monthDays: 30,
+    inferredZeroMonth: true,
+  }]);
+  assert(!inferredOnly.length || inferredOnly[0].status === "empty", "ceros inferidos no cuentan como cierre");
+
+  const ready = assessForecastFreezeReadiness({
+    selectedMonth: "2026-08",
+    coverageRows: buildSalesMonthCoverage([...dailyRowsForMonth("2026-07", 31), closeRowForMonth("2026-07")]),
+    databaseSync: completeSync,
+    catalogCount: 111,
+    capturedStatuses: 111,
+  });
+  assert(ready.canFreeze, "julio completo y agosto sin ventas debe permitir congelar");
+
+  const withAugustSales = assessForecastFreezeReadiness({
+    selectedMonth: "2026-08",
+    coverageRows: buildSalesMonthCoverage([
+      ...dailyRowsForMonth("2026-07", 31),
+      closeRowForMonth("2026-07"),
+      ...dailyRowsForMonth("2026-08", 24),
+    ]),
+    databaseSync: completeSync,
+  });
+  assert(withAugustSales.blockers.some((item) => item.code === "target-has-sales"), "ventas de agosto bloquean congelar agosto");
+
+  const julyDailyOnly = assessForecastFreezeReadiness({
+    selectedMonth: "2026-08",
+    coverageRows: buildSalesMonthCoverage(dailyRowsForMonth("2026-07", 31)),
+    databaseSync: completeSync,
+  });
+  assert(julyDailyOnly.blockers.some((item) => item.code === "previous-missing-close"), "julio solo diario bloquea por falta de cierre");
+
+  const julyCloseOnly = assessForecastFreezeReadiness({
+    selectedMonth: "2026-08",
+    coverageRows: buildSalesMonthCoverage([closeRowForMonth("2026-07")]),
+    databaseSync: completeSync,
+  });
+  assert(julyCloseOnly.blockers.some((item) => item.code === "previous-missing-daily"), "julio solo cierre bloquea por falta de diario");
+
+  const incompleteSync = assessForecastFreezeReadiness({
+    selectedMonth: "2026-08",
+    coverageRows: buildSalesMonthCoverage([...dailyRowsForMonth("2026-07", 31), closeRowForMonth("2026-07")]),
+    databaseSync: { sales: { ok: false, error: "timeout" }, production: { ok: true, count: 1 }, waste: { ok: true, count: 1 } },
+  });
+  assert(incompleteSync.blockers.some((item) => item.code === "sync-incomplete"), "sync incompleto debe bloquear");
+
+  const missingStatus = assessForecastFreezeReadiness({
+    selectedMonth: "2026-08",
+    coverageRows: buildSalesMonthCoverage([...dailyRowsForMonth("2026-07", 31), closeRowForMonth("2026-07")]),
+    databaseSync: completeSync,
+    catalogCount: 111,
+    capturedStatuses: 0,
+  });
+  assert(missingStatus.canFreeze && missingStatus.warnings.some((item) => item.code === "missing-status"), "falta de estatus avisa pero no bloquea");
+  assert(countCapturedProductStatuses({ "PAN DE MUERTO": { status: "ESTACIONAL" }, OTRO: {} }) === 1, "estatus capturado cuenta solo valores válidos");
 
   console.log("parser-test ok");
 }
