@@ -56,6 +56,7 @@ async function main() {
     resolveCanonicalMonthSources,
     computeAnnualGrowthFactor,
     assessForecastFreezeReadiness,
+    assessStockSheetSelection,
     buildSalesMonthCoverage,
     countCapturedProductStatuses,
   } = await loadAppFunctions();
@@ -113,6 +114,39 @@ async function main() {
   const existenciasRows = parseExistencias(existenciasWorkbook);
   assert(existenciasRows.length === 1 && existenciasRows[0].sumaSucCf === 12, "existencias no debe confundirse con stock");
   assert(parseStock(existenciasWorkbook)[0]?.stock !== 12, "parseStock no debe tomar existencias como stock objetivo");
+
+  // El 2026-08-21 un cambio de orden en las hojas candidatas saco del catalogo
+  // los 16 productos de temporada sin avisar. La advertencia evita repetirlo.
+  const catalogDriftWorkbook = workbookFromSheets({
+    "TOTAL A TENER SUC.(EXIST.+DIST)": [
+      ["PRODUCTO", "STOCK"],
+      ["BOLILLO", 100],
+    ],
+    "EXIST. SUCURSALES Y RESTANTE CF": [
+      ["PRODUCTO", "STOCK"],
+      ["BOLILLO", 80],
+      ["PAN MUERTO IND AZUCAR 50GR", 0],
+    ],
+  });
+  const drift = assessStockSheetSelection(catalogDriftWorkbook);
+  assert(drift.chosenSheet === "TOTAL A TENER SUC.(EXIST.+DIST)", "el catalogo debe seguir saliendo de la hoja prioritaria");
+  assert(drift.missingTotal === 1, "debe contar los productos que la hoja elegida no trae");
+  assert(/PAN MUERTO IND AZUCAR 50GR/.test(drift.message), "la advertencia debe nombrar el producto ausente");
+  assert(drift.alternatives[0]?.sheet === "EXIST. SUCURSALES Y RESTANTE CF", "debe decir en que hoja si estaba");
+
+  const catalogAgreesWorkbook = workbookFromSheets({
+    "TOTAL A TENER SUC.(EXIST.+DIST)": [
+      ["PRODUCTO", "STOCK"],
+      ["BOLILLO", 100],
+    ],
+    "STOCK DE SUCURSALES": [
+      ["PRODUCTO", "STOCK"],
+      ["BOLILLO", 90],
+    ],
+  });
+  const agrees = assessStockSheetSelection(catalogAgreesWorkbook);
+  assert(agrees.missingTotal === 0, "hojas con el mismo universo no deben advertir");
+  assert(agrees.message === "", "sin diferencias no hay mensaje que mostrar");
 
   const bajasWorkbook = workbookFromSheets({
     Resumen: [

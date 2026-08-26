@@ -905,19 +905,63 @@ const STOCK_SHEET_CANDIDATES = [
   "EXIST. SUCURSALES Y RESTANTE CF",
 ];
 
-function findStockSheet(workbook) {
+function matchSheetName(workbook, candidate) {
+  const normalizedCandidate = norm(candidate);
+  return workbook.SheetNames.find(
+    (name) => norm(name) === normalizedCandidate || norm(name).includes(normalizedCandidate)
+  );
+}
+
+function findStockSheetName(workbook) {
   for (const candidate of STOCK_SHEET_CANDIDATES) {
-    const normalizedCandidate = norm(candidate);
-    const match = workbook.SheetNames.find(
-      (name) => norm(name) === normalizedCandidate || norm(name).includes(normalizedCandidate)
-    );
-    if (match) return workbook.Sheets[match];
+    const match = matchSheetName(workbook, candidate);
+    if (match) return match;
   }
-  return workbook.Sheets[workbook.SheetNames[0]];
+  return workbook.SheetNames[0];
+}
+
+function findStockSheet(workbook) {
+  return workbook.Sheets[findStockSheetName(workbook)];
 }
 
 function parseStock(workbook) {
-  const rows = XLSX.utils.sheet_to_json(findStockSheet(workbook), { header: 1, defval: "" });
+  return parseStockSheet(findStockSheet(workbook));
+}
+
+// El catalogo de productos sale de una sola hoja del stock ideal. El archivo
+// guarda varias hojas que son fotos de fechas distintas, asi que cambiar de
+// hoja cambia el universo del pronostico. Eso ya paso el 2026-08-21 y dejo
+// fuera los 16 productos de temporada sin que nada avisara.
+function assessStockSheetSelection(workbook) {
+  const chosenSheet = findStockSheetName(workbook);
+  if (!chosenSheet) return { chosenSheet: "", products: 0, alternatives: [], missingTotal: 0, message: "" };
+
+  const chosenProducts = new Set(parseStockSheet(workbook.Sheets[chosenSheet]).map((row) => row.producto));
+  const alternatives = [];
+  for (const candidate of STOCK_SHEET_CANDIDATES) {
+    const name = matchSheetName(workbook, candidate);
+    if (!name || name === chosenSheet) continue;
+    const missing = parseStockSheet(workbook.Sheets[name])
+      .map((row) => row.producto)
+      .filter((product) => !chosenProducts.has(product));
+    if (missing.length) alternatives.push({ sheet: name, missing });
+  }
+
+  const missingProducts = [...new Set(alternatives.flatMap((item) => item.missing))];
+  const sample = missingProducts.slice(0, 3).join(", ");
+  return {
+    chosenSheet,
+    products: chosenProducts.size,
+    alternatives,
+    missingTotal: missingProducts.length,
+    message: missingProducts.length
+      ? `El catálogo se tomó de la hoja "${chosenSheet}" con ${chosenProducts.size} productos. Otras hojas del archivo traen ${missingProducts.length} productos que esta no incluye (${sample}${missingProducts.length > 3 ? ", entre otros" : ""}). Confirma que sea la hoja correcta: el universo del pronóstico depende de esta elección.`
+      : "",
+  };
+}
+
+function parseStockSheet(sheet) {
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
   let headerIndex = -1;
   let productCol = 0;
   let stockCol = 1;
@@ -2764,8 +2808,17 @@ function buildProductValidationSummary(dailyRows, forecastRows) {
     .sort((a, b) => a.producto.localeCompare(b.producto, "es"));
 }
 
-function buildValidationAlerts(productSummary, homologationRows, historicalVentas, selectedMonth) {
+function buildValidationAlerts(productSummary, homologationRows, historicalVentas, selectedMonth, stockSheetNotice = null) {
   const alerts = [];
+
+  if (stockSheetNotice?.missingTotal) {
+    alerts.push({
+      tipo: "Catálogo",
+      producto: stockSheetNotice.chosenSheet,
+      detalle: stockSheetNotice.message,
+      severidad: "Alta",
+    });
+  }
 
   for (const row of homologationRows.filter((item) => item.status === "Pendiente")) {
     alerts.push({
@@ -3716,6 +3769,7 @@ function AccessScreen({ needsSetup, loading, error, onSubmit }) {
 
 function Dashboard({ session, onLogout }) {
   const [stockRows, setStockRows] = useState([]);
+  const [stockSheetNotice, setStockSheetNotice] = useState(null);
   const [ventas, setVentas] = useState([]);
   const [ventasValidacion, setVentasValidacion] = useState([]);
   const [bajas, setBajas] = useState([]);
@@ -4108,6 +4162,17 @@ function Dashboard({ session, onLogout }) {
     const wb = await readWorkbook(file);
     setter(parser(wb));
     setFiles((f) => ({ ...f, [key]: file.name }));
+    setHasUnsavedChanges(true);
+  }
+
+  async function handleStockFile(file) {
+    if (!file) return;
+    const workbook = await readWorkbook(file);
+    setStockRows(parseStock(workbook));
+    const notice = assessStockSheetSelection(workbook);
+    setStockSheetNotice(notice.missingTotal ? notice : null);
+    if (notice.missingTotal) setToast({ tone: "warning", message: notice.message });
+    setFiles((f) => ({ ...f, stock: file.name }));
     setHasUnsavedChanges(true);
   }
 
@@ -4872,9 +4937,10 @@ function Dashboard({ session, onLogout }) {
         productValidationSummary,
         homologationRows,
         historicalVentas,
-        selectedMonth
+        selectedMonth,
+        stockSheetNotice
       ),
-    [productValidationSummary, homologationRows, historicalVentas, selectedMonth]
+    [productValidationSummary, homologationRows, historicalVentas, selectedMonth, stockSheetNotice]
   );
   const hasSalesValidation = salesValidationSummary.diasConReal > 0;
 
@@ -5814,7 +5880,7 @@ function Dashboard({ session, onLogout }) {
             title="Stock fijo"
             description="Productos oficiales, stock objetivo y orden."
             required
-            onFile={(file) => handleFile(file, parseStock, "stock", setStockRows)}
+            onFile={handleStockFile}
             fileName={files.stock}
           />
           <UploadBox
@@ -6579,6 +6645,7 @@ function App() {
 
 export {
   assessForecastFreezeReadiness,
+  assessStockSheetSelection,
   buildMonthlyCloseSummary,
   buildOperationalForecastScenario,
   buildSalesMonthCoverage,
