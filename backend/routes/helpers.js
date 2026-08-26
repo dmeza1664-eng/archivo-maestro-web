@@ -110,6 +110,17 @@ function paginationFromQuery(query, defaultLimit = 4000, maxLimit = 10000) {
   return { cursor, limit: Math.min(requestedLimit, maxLimit) };
 }
 
+// TiDB rechaza los marcadores dentro de LIMIT en sentencias preparadas y
+// responde "Incorrect arguments to LIMIT". El valor se interpola, y por eso
+// aqui solo se acepta un entero acotado: nada que venga del cliente sin validar
+// puede llegar a la consulta.
+function limitClause(limit, maxLimit = 10001) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > maxLimit) {
+    throw httpError(400, 'El límite de sincronización no es válido');
+  }
+  return `LIMIT ${limit}`;
+}
+
 const MAX_IMPORT_BATCH_ROWS = 1500;
 
 function parseImportMeta(body, rowCount) {
@@ -209,6 +220,7 @@ module.exports = {
   extractRows,
   firstValue,
   httpError,
+  limitClause,
   mesFromDate,
   monthRange,
   paginationFromQuery,

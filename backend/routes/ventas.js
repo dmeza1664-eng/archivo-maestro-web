@@ -5,6 +5,7 @@ const {
   ensureProduct,
   extractRows,
   firstValue,
+  limitClause,
   monthRange,
   paginationFromQuery,
   parseImportMeta,
@@ -237,8 +238,8 @@ router.get('/sync', async (req, res, next) => {
         INNER JOIN productos p ON p.id = v.producto_id
         WHERE v.id > ?
         ORDER BY v.id
-        LIMIT ?`,
-      [cursor, limit + 1]
+        ${limitClause(limit + 1)}`,
+      [cursor]
     );
     const hasMore = rows.length > limit;
     const visibleRows = hasMore ? rows.slice(0, limit) : rows;

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/parser-test.cjs && node backend/auth-security-test.js"
+    "test": "node scripts/parser-test.cjs && node backend/auth-security-test.js && node backend/helpers-test.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",

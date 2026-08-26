@@ -5,6 +5,7 @@ const {
   ensureProduct,
   extractRows,
   firstValue,
+  limitClause,
   monthRange,
   paginationFromQuery,
   parseImportMeta,
@@ -226,14 +227,13 @@ function createOperationalRouter(config) {
     try {
       let where = '';
       let params = [];
-      let limitClause = '';
+      let limitSql = '';
       let pagination = null;
       if (syncAll) {
         pagination = paginationFromQuery(req.query);
         where = 'WHERE t.id > ?';
         params = [pagination.cursor];
-        limitClause = 'LIMIT ?';
-        params.push(pagination.limit + 1);
+        limitSql = limitClause(pagination.limit + 1);
       } else {
         const { start, next: nextMonth } = monthRange(req.query.mes);
         where = 'WHERE t.fecha >= ? AND t.fecha < ?';
@@ -248,7 +248,7 @@ function createOperationalRouter(config) {
          INNER JOIN productos p ON p.id = t.producto_id
          ${where}
          ORDER BY ${syncAll ? 't.id' : 't.fecha, p.codigo'}
-         ${limitClause}`,
+         ${limitSql}`,
         params
       );
       if (!syncAll) return res.json({ ok: true, rows });
