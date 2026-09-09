@@ -167,12 +167,26 @@ async function saveHomologacionIfPresent(connection, row, productoId) {
   );
 }
 
+function getProduccionSugerida(productoNombre, value) {
+  const normalized = String(productoNombre || '')
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const isCake = /\b(GDE|GRANDE|MED|MEDIANO|CH|CHICO)\b/.test(normalized);
+  const numericValue = Number(value) || 0;
+  if (!isCake) return Math.max(0, Math.ceil(numericValue));
+  if (numericValue < 8) return 0;
+  return 10 + Math.floor((numericValue - 8) / 5) * 5;
+}
+
 module.exports = {
   addMonths,
   daysInMonth,
   ensureProduct,
   extractRows,
   firstValue,
+  getProduccionSugerida,
   httpError,
   mesFromDate,
   monthRange,

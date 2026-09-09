@@ -1,5 +1,6 @@
 const express = require('express');
 const { query, transaction } = require('../db');
+const { listProduccion } = require('./lists');
 const {
   ensureProduct,
   extractRows,
@@ -51,6 +52,15 @@ router.post('/bulk', async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try {
     const { mes } = req.query;
+    if (!mes) {
+      const rows = await listProduccion();
+      return res.json({
+        ok: true,
+        mes: null,
+        rows: rows.map((row) => ({ ...row, fecha: row.fecha_iso || row.fecha })),
+      });
+    }
+
     const { start, next: nextMonth } = monthRange(mes);
 
     const rows = await query(

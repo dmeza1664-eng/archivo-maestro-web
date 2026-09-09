@@ -1,5 +1,6 @@
 const express = require('express');
 const { query, transaction } = require('../db');
+const { listStock } = require('./lists');
 const {
   ensureProduct,
   extractRows,
@@ -57,6 +58,10 @@ router.post('/bulk', async (req, res, next) => {
 router.get('/', async (req, res, next) => {
   try {
     const { mes } = req.query;
+    if (!mes) {
+      const rows = await listStock();
+      return res.json({ ok: true, mes: null, rows });
+    }
     validateMes(mes);
 
     const rows = await query(

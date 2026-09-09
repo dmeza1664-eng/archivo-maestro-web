@@ -6,6 +6,7 @@ const ventasRoutes = require('./routes/ventas');
 const stockRoutes = require('./routes/stock');
 const produccionRoutes = require('./routes/produccion');
 const pronosticoRoutes = require('./routes/pronostico');
+const workspaceRoutes = require('./routes/workspace');
 
 const app = express();
 const port = Number(process.env.PORT || 4000);
@@ -23,6 +24,7 @@ app.use('/api/ventas', ventasRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/produccion-real', produccionRoutes);
 app.use('/api/pronostico', pronosticoRoutes);
+app.use('/api/workspace', workspaceRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: `Ruta no encontrada: ${req.method} ${req.originalUrl}` });

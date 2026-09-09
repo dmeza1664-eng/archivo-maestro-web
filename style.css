@@ -183,10 +183,42 @@ label input,
   margin-bottom: 14px;
 }
 
+.persist-banner {
+  align-items: center;
+  background: #eef3f6;
+  border: 1px solid #d5dee6;
+  color: #3d4c5c;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+}
+
+.persist-banner.mysql {
+  background: #e8f6ef;
+  border-color: #b7e0c8;
+}
+
+.persist-banner.error {
+  background: #fff4e8;
+  border-color: #f0d2a8;
+}
+
+.ghost {
+  background: transparent;
+  border: 1px solid #c5d0da;
+  color: #183447;
+  cursor: pointer;
+  margin-left: auto;
+  padding: 6px 10px;
+}
+
 .executive-summary-kpis {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .forecast-concepts {

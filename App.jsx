@@ -15,6 +15,17 @@ import {
   Upload,
 } from "lucide-react";
 import "./style.css";
+import {
+  getProduccionSugerida,
+  getReglaOperativaLabel,
+  isSliceProduct,
+  mergeMonthlyFromDaily,
+  normalizeProduct,
+  norm,
+  weekendMultiplier,
+} from "./forecastCore.js";
+import { checkApiHealth, loadWorkspaceFromApi, mapApiWorkspace, saveWorkspaceToApi } from "./api.js";
+import { clearSession, loadSession, saveSession } from "./storage.js";
 
 const INVALID_PRODUCTS = new Set([
   "",
@@ -108,54 +119,6 @@ const WEEKDAY_ALIASES = [
   { names: ["SABADO", "SAB"], index: 6 },
   { names: ["DOMINGO", "DOM"], index: 0 },
 ];
-
-function norm(value) {
-  return String(value ?? "")
-    .trim()
-    .toUpperCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-}
-
-function normalizeProduct(value) {
-  const normalized = norm(value)
-    .replace(/[.,/\\_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const compact = normalized.replace(/[^A-Z0-9]/g, "");
-  if (compact === "PINAGDE" || compact === "PINAGRANDE") return "PINA GDE";
-  return normalized;
-}
-
-function isSliceProduct(value) {
-  const normalized = normalizeProduct(value);
-  return /\b(REBANADA|REBANADAS|REB|RBN)\b/.test(normalized);
-}
-
-function isOperationalCakeProduct(value) {
-  const normalized = normalizeProduct(value);
-  return /\b(GDE|GRANDE|MED|MEDIANO|CH|CHICO)\b/.test(normalized);
-}
-
-function getProduccionSugeridaPastel(value) {
-  const numericValue = Number(value) || 0;
-  if (numericValue < 8) return 0;
-  return 10 + Math.floor((numericValue - 8) / 5) * 5;
-}
-
-function getProduccionSugerida(producto, value) {
-  if (isOperationalCakeProduct(producto)) {
-    return getProduccionSugeridaPastel(value);
-  }
-  return Math.max(0, Math.ceil(Number(value) || 0));
-}
-
-function getReglaOperativaLabel(producto, value) {
-  if (!isOperationalCakeProduct(producto)) return "Redondeo normal";
-  const produccionSugerida = getProduccionSugeridaPastel(value);
-  if (produccionSugerida === 0) return "Menor a 8: no producir";
-  return `Mínimo 10 y múltiplos de 5: ${produccionSugerida}`;
-}
 
 const WEEKDAY_BY_NORM = new Map(
   WEEKDAYS.flatMap((day) => {
@@ -350,12 +313,6 @@ function defaultMonthValue() {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function addDays(date, days) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
 function datesForMonth(monthValue) {
   const [year, month] = String(monthValue || defaultMonthValue())
     .split("-")
@@ -397,16 +354,6 @@ function recordWeekday(record) {
   const parsedDate = parseDateCell(record.fecha);
   if (parsedDate) return parsedDate.getDay();
   return null;
-}
-
-function horizonWeekendFactor(days, weekendBoost) {
-  const today = new Date();
-  let factor = 0;
-  for (let i = 0; i < Math.max(1, days); i++) {
-    const day = addDays(today, i).getDay();
-    factor += [0, 6].includes(day) ? weekendBoost : 1;
-  }
-  return factor / Math.max(1, days);
 }
 
 async function readWorkbook(file) {
@@ -651,17 +598,6 @@ function parseProductionReal(workbook) {
   return records;
 }
 
-function aggregateProductionRows(records) {
-  const map = new Map();
-  for (const item of records) {
-    if (!isValidProduct(item.producto)) continue;
-    const product = normalizeProduct(item.producto);
-    if (isSliceProduct(product)) continue;
-    map.set(product, (map.get(product) || 0) + toNumber(item.cantidad));
-  }
-  return [...map.entries()].map(([producto, cantidad]) => ({ producto, cantidad }));
-}
-
 function aggregateDailyProductionRows(records) {
   const map = new Map();
   for (const item of records) {
@@ -705,12 +641,10 @@ function groupByProduct(records) {
   return map;
 }
 
-function calculateForecast({ stockRows, ventas, bajas, existencias, realProduction, days, weekendBoost }) {
+function calculateForecast({ stockRows, ventas, bajas, existencias }) {
   const ventasByProduct = groupByProduct(ventas);
   const bajasByProduct = groupByProduct(bajas);
   const existMap = new Map(existencias.map((e) => [e.producto, e]));
-  const realMap = new Map(aggregateProductionRows(realProduction).map((e) => [e.producto, e.cantidad]));
-  const horizonFactor = horizonWeekendFactor(days, weekendBoost);
 
   return stockRows.filter((s) => !isSliceProduct(s.producto)).map((s) => {
     const v = ventasByProduct.get(s.producto) || [];
@@ -722,28 +656,14 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
     const promedioReciente = recentValues.length ? recentValues.reduce((a, n) => a + n, 0) / recentValues.length : 0;
     const promedioHistorico = values.length ? values.reduce((a, n) => a + n, 0) / values.length : 0;
     const promedioDiario = promedioReciente * 0.65 + promedioHistorico * 0.35;
-    const pronosticoVenta = promedioDiario * days * horizonFactor;
 
     const bajasTotal = b.reduce((a, n) => a + n.cantidad, 0);
     const ventasTotal = v.reduce((a, n) => a + n.cantidad, 0);
     const tasaBajas = ventasTotal > 0 ? bajasTotal / ventasTotal : 0;
-    const bajasEsperadas = pronosticoVenta * tasaBajas;
-    const colchonOperativo = pronosticoVenta > 0 ? (pronosticoVenta >= 300 ? 15 : 10) : 0;
-    const baseConColchon = pronosticoVenta + colchonOperativo;
-    const produccionSugerida = getProduccionSugerida(s.producto, baseConColchon);
 
     const ex = existMap.get(s.producto) || { totalSuc: 0, cf: 0, sumaSucCf: 0 };
     const sumaSucCf = ex.sumaSucCf || ex.totalSuc + ex.cf;
     const inventarioObjetivo = s.stock;
-    const baseProduccionRecomendada = Math.max(0, inventarioObjetivo + produccionSugerida - sumaSucCf);
-    const produccionRecomendada = getProduccionSugerida(s.producto, baseProduccionRecomendada);
-    const hasRealData = realMap.has(s.producto);
-    const produccionReal = hasRealData ? realMap.get(s.producto) : 0;
-    const diferenciaReal = produccionReal - produccionSugerida;
-    const precision =
-      hasRealData && produccionReal > 0
-        ? (1 - Math.abs(produccionSugerida - produccionReal) / produccionReal) * 100
-        : null;
 
     const confianza =
       promedioHistorico > 0
@@ -751,14 +671,6 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
         : values.length > 0
           ? 50
           : 0;
-
-    let estatus = "Sin dato real";
-    if (!hasRealData) estatus = "Sin dato real";
-    else if (produccionSugerida === 0 && produccionReal === 0) estatus = "No producir";
-    else if (produccionReal < produccionSugerida) estatus = "Riesgo faltante";
-    else if (produccionReal > produccionSugerida) estatus = "Sobreproduccion";
-    else if (precision !== null && precision < 80) estatus = "Revisar";
-    else estatus = "Dentro de rango";
 
     return {
       producto: s.producto,
@@ -773,26 +685,26 @@ function calculateForecast({ stockRows, ventas, bajas, existencias, realProducti
       promedioViernes: Number(productWeekdayAverages.get(5) || 0),
       promedioSabado: Number(productWeekdayAverages.get(6) || 0),
       promedioDomingo: Number(productWeekdayAverages.get(0) || 0),
-      demandaPronosticada: pronosticoVenta,
-      pronosticoVenta,
+      demandaPronosticada: 0,
+      pronosticoVenta: 0,
       tasaBajas,
-      bajasEsperadas,
-      colchonOperativo,
-      baseConColchon,
-      reglaOperativa: getReglaOperativaLabel(s.producto, baseConColchon),
-      produccionSugerida,
+      bajasEsperadas: 0,
+      colchonOperativo: 0,
+      baseConColchon: 0,
+      reglaOperativa: getReglaOperativaLabel(s.producto, 0),
+      produccionSugerida: 0,
       inventarioObjetivo,
-      baseProduccionRecomendada,
+      baseProduccionRecomendada: 0,
       totalSuc: ex.totalSuc || 0,
       cf: ex.cf || 0,
       sumaSucCf,
-      produccionRecomendada,
-      produccionReal,
-      hasRealData,
-      diferenciaReal,
-      precision,
+      produccionRecomendada: 0,
+      produccionReal: 0,
+      hasRealData: false,
+      diferenciaReal: 0,
+      precision: null,
       confianza,
-      estatus,
+      estatus: "Sin dato real",
     };
   });
 }
@@ -815,7 +727,7 @@ function calculateProductWeekdayAverages(records) {
   return averages;
 }
 
-function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedMonth, dailyBufferPct }) {
+function calculateDailyForecast({ monthlyRows, realProduction, selectedMonth, dailyBufferPct, weekendBoost }) {
   const realDailyMap = aggregateDailyProductionRows(realProduction);
   const monthDates = datesForMonth(selectedMonth);
   const productRows = monthlyRows.filter((row) => isValidProduct(row.producto) && !isSliceProduct(row.producto));
@@ -826,7 +738,7 @@ function calculateDailyForecast({ monthlyRows, ventas, realProduction, selectedM
       const key = dateKey(date);
       const weekday = date.getDay();
       const dayName = weekdayLabel(weekday);
-      const pronosticoVentaDia = getWeekdayAverage(productRow, dayName);
+      const pronosticoVentaDia = getWeekdayAverage(productRow, dayName) * weekendMultiplier(weekday, weekendBoost);
       const colchonDiario = pronosticoVentaDia * (dailyBufferPct / 100);
       const baseConColchonDia = pronosticoVentaDia + colchonDiario;
       const produccionSugeridaDia = getProduccionSugerida(product, baseConColchonDia);
@@ -989,8 +901,7 @@ function App() {
   const [realProduction, setRealProduction] = useState([]);
   const [files, setFiles] = useState({});
   const [query, setQuery] = useState("");
-  const [weekendBoost, setWeekendBoost] = useState(1.15);
-  const [days, setDays] = useState(30);
+  const [weekendBoost, setWeekendBoost] = useState(1);
   const [showMissingReal, setShowMissingReal] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(defaultMonthValue());
   const [selectedMonthTouched, setSelectedMonthTouched] = useState(false);
@@ -1001,6 +912,9 @@ function App() {
   const [onlyDailyShortage, setOnlyDailyShortage] = useState(false);
   const [onlyDailyOverproduction, setOnlyDailyOverproduction] = useState(false);
   const [validationProduct, setValidationProduct] = useState("");
+  const [hydrated, setHydrated] = useState(false);
+  const [persistStatus, setPersistStatus] = useState("local");
+  const [persistMessage, setPersistMessage] = useState("Los archivos se guardan en este navegador.");
 
   async function handleFile(file, parser, key, setter) {
     if (!file) return;
@@ -1016,44 +930,110 @@ function App() {
     setFiles((f) => ({ ...f, real: file.name }));
   }
 
+  function applySession(session, source) {
+    if (!session) return;
+    setStockRows(session.stockRows || []);
+    setVentas(session.ventas || []);
+    setBajas(session.bajas || []);
+    setExistencias(session.existencias || []);
+    setRealProduction(session.realProduction || []);
+    setFiles(session.files || {});
+    if (session.selectedMonth) setSelectedMonth(session.selectedMonth);
+    if (session.selectedMonthTouched) setSelectedMonthTouched(true);
+    if (session.dailyBufferPct !== undefined) setDailyBufferPct(Number(session.dailyBufferPct) || 0);
+    if (session.weekendBoost !== undefined) setWeekendBoost(Number(session.weekendBoost) || 1);
+    if (session.showMissingReal !== undefined) setShowMissingReal(Boolean(session.showMissingReal));
+    setPersistStatus(source);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    async function hydrate() {
+      const local = loadSession();
+      if (local && (local.stockRows?.length || local.ventas?.length)) {
+        applySession(local, "local");
+        setPersistMessage("Sesión restaurada de este navegador.");
+      }
+      const healthy = await checkApiHealth();
+      if (!cancelled && healthy) {
+        try {
+          const remote = await loadWorkspaceFromApi();
+          const mapped = mapApiWorkspace(remote);
+          if (mapped.stockRows.length || mapped.ventas.length || mapped.realProduction.length) {
+            applySession(
+              {
+                ...(local || {}),
+                ...mapped,
+                files: {
+                  ...(local?.files || {}),
+                  stock: mapped.stockRows.length ? local?.files?.stock || "MySQL" : local?.files?.stock,
+                  ventas: mapped.ventas.length ? local?.files?.ventas || "MySQL" : local?.files?.ventas,
+                  real: mapped.realProduction.length ? local?.files?.real || "MySQL" : local?.files?.real,
+                },
+              },
+              "mysql"
+            );
+            setPersistMessage("Datos cargados desde MySQL.");
+          } else {
+            setPersistStatus(local ? "local" : "mysql");
+            setPersistMessage(local ? "MySQL listo. Aún no hay datos remotos." : "API MySQL conectada.");
+          }
+        } catch {
+          if (!cancelled) {
+            setPersistStatus(local ? "local" : "error");
+            setPersistMessage("No se pudo leer MySQL. Se usa el navegador.");
+          }
+        }
+      }
+      if (!cancelled) setHydrated(true);
+    }
+    hydrate();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (selectedMonthTouched || !ventas.length) return;
     const detectedMonth = detectDominantMonth(ventas);
     if (detectedMonth) setSelectedMonth(detectedMonth);
   }, [ventas, selectedMonthTouched]);
 
-  const forecast = useMemo(
+  const productStats = useMemo(
     () =>
       calculateForecast({
         stockRows,
         ventas,
         bajas,
         existencias,
+      }),
+    [stockRows, ventas, bajas, existencias]
+  );
+
+  const dailyRows = useMemo(
+    () =>
+      calculateDailyForecast({
+        monthlyRows: productStats,
         realProduction,
-        days,
+        selectedMonth,
+        dailyBufferPct,
         weekendBoost,
       }),
-    [stockRows, ventas, bajas, existencias, realProduction, days, weekendBoost]
+    [productStats, realProduction, selectedMonth, dailyBufferPct, weekendBoost]
+  );
+
+  const forecast = useMemo(
+    () => mergeMonthlyFromDaily(productStats, dailyRows),
+    [productStats, dailyRows]
   );
 
   const comparableForecast = showMissingReal ? forecast : forecast.filter((r) => r.hasRealData);
   const filtered = comparableForecast.filter((r) => r.producto.includes(norm(query)));
 
-  const dailyRows = useMemo(
-    () =>
-      calculateDailyForecast({
-        monthlyRows: forecast,
-        ventas,
-        realProduction,
-        selectedMonth,
-        dailyBufferPct,
-      }),
-    [forecast, ventas, realProduction, selectedMonth, dailyBufferPct]
-  );
-
+  const productSearch = dailyProductQuery || query;
   const filteredDailyRows = dailyRows.filter((row) => {
     if (dailyDateFilter && row.fecha !== dailyDateFilter) return false;
-    if (dailyProductQuery && !row.producto.includes(norm(dailyProductQuery))) return false;
+    if (productSearch && !row.producto.includes(norm(productSearch))) return false;
     if (dailyWeekdayFilter !== "" && row.weekday !== Number(dailyWeekdayFilter)) return false;
     if (onlyDailyShortage && row.estatus !== "Riesgo faltante") return false;
     if (onlyDailyOverproduction && row.estatus !== "Sobreproduccion") return false;
@@ -1061,6 +1041,64 @@ function App() {
   });
 
   const dailySummary = useMemo(() => summarizeDailyMonth(dailyRows), [dailyRows]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    saveSession({
+      stockRows,
+      ventas,
+      bajas,
+      existencias,
+      realProduction,
+      files,
+      selectedMonth,
+      selectedMonthTouched,
+      dailyBufferPct,
+      weekendBoost,
+      showMissingReal,
+    });
+  }, [
+    hydrated,
+    stockRows,
+    ventas,
+    bajas,
+    existencias,
+    realProduction,
+    files,
+    selectedMonth,
+    selectedMonthTouched,
+    dailyBufferPct,
+    weekendBoost,
+    showMissingReal,
+  ]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (!stockRows.length && !ventas.length && !realProduction.length) return;
+    const timer = setTimeout(async () => {
+      const healthy = await checkApiHealth();
+      if (!healthy) {
+        setPersistStatus((current) => (current === "mysql" ? "local" : current));
+        setPersistMessage("Guardado en este navegador. MySQL no está conectado.");
+        return;
+      }
+      try {
+        await saveWorkspaceToApi({
+          stockRows,
+          ventas,
+          realProduction,
+          dailyRows,
+          selectedMonth,
+        });
+        setPersistStatus("mysql");
+        setPersistMessage("Guardado en MySQL y en este navegador.");
+      } catch (error) {
+        setPersistStatus("local");
+        setPersistMessage(`Guardado en el navegador. MySQL: ${error.message}`);
+      }
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [hydrated, stockRows, ventas, realProduction, dailyRows, selectedMonth]);
 
   const validationProducts = useMemo(
     () => [...forecast].sort((a, b) => a.producto.localeCompare(b.producto, "es")),
@@ -1183,17 +1221,18 @@ function App() {
         </div>
 
         <div className="formula">
-          <strong>Modelo operativo</strong>
-          <span>Producción sugerida = pronóstico de venta + colchón operativo, ajustado a la regla operativa de mínimo 10 piezas y múltiplos de 5.</span>
-          <span>Colchón: 15 piezas si el pronóstico es 300 o más; 10 piezas si es menor.</span>
-          <span>Pasteles: producción sugerida mínima de 10 piezas y múltiplos de 5; si es menor a 8, no producir.</span>
-          <span>Recomendación = inventario objetivo + pronóstico con colchón - existencias.</span>
+          <strong>Modelo operativo único</strong>
+          <span>Pronóstico diario = promedio histórico del mismo día de semana, con factor extra de fin de semana si lo activas.</span>
+          <span>Producción sugerida = pronóstico de venta + colchón %, ajustado a mínimo 10 y múltiplos de 5.</span>
+          <span>Pasteles: si la base es menor a 8, no producir.</span>
+          <span>El mensual es la suma de esos días. Recomendación = inventario objetivo + producción sugerida del mes - existencias.</span>
         </div>
 
         <div className="sidebar-status">
-          <span>{files.stock ? "Stock cargado" : "Falta stock fijo"}</span>
-          <span>{files.ventas ? "Ventas cargadas" : "Faltan ventas"}</span>
-          <span>{files.real ? "Producción real cargada" : "Real opcional"}</span>
+          <span>{files.stock || stockRows.length ? "Stock cargado" : "Falta stock fijo"}</span>
+          <span>{files.ventas || ventas.length ? "Ventas cargadas" : "Faltan ventas"}</span>
+          <span>{files.real || realProduction.length ? "Producción real cargada" : "Real opcional"}</span>
+          <span>{persistStatus === "mysql" ? "Guardado en MySQL" : "Guardado en el navegador"}</span>
         </div>
       </aside>
 
@@ -1208,6 +1247,30 @@ function App() {
             <Download size={18} /> Exportar resumen Excel
           </button>
         </header>
+
+        <p className={`persist-banner ${persistStatus}`}>
+          <Database size={16} />
+          <span>{persistMessage}</span>
+          {(stockRows.length > 0 || ventas.length > 0) && (
+            <button
+              className="ghost"
+              type="button"
+              onClick={() => {
+                clearSession();
+                setStockRows([]);
+                setVentas([]);
+                setBajas([]);
+                setExistencias([]);
+                setRealProduction([]);
+                setFiles({});
+                setPersistMessage("Sesión local borrada. Vuelve a cargar archivos o MySQL.");
+                setPersistStatus("local");
+              }}
+            >
+              Borrar sesión local
+            </button>
+          )}
+        </p>
 
         <section className="executive-summary-section">
           <div className="section-heading">
@@ -1240,15 +1303,35 @@ function App() {
             />
             <KpiCard
               icon={Target}
-              label="Mes analizado"
-              value={selectedMonth || "Sin mes"}
-              caption={`Colchón operativo: ${dailyBufferPct}%`}
+              label="Confianza del modelo"
+              value={forecast.length ? formatPercent(summary.confianza, 0) : "Sin dato"}
+              caption="Estabilidad de venta reciente vs histórica"
+              tone={summary.confianza >= 80 ? "ok" : summary.confianza >= 50 ? "warn" : ""}
+            />
+            <KpiCard
+              icon={Database}
+              label="Precisión vs real"
+              value={
+                dailySummary.produccionRealMensual > 0
+                  ? formatPercent(dailySummary.precision, 0)
+                  : "Sin real"
+              }
+              caption={selectedMonth ? `Mes ${selectedMonth}` : "Carga producción real"}
+              tone={
+                dailySummary.produccionRealMensual <= 0
+                  ? ""
+                  : dailySummary.precision >= 80
+                    ? "ok"
+                    : dailySummary.precision >= 60
+                      ? "warn"
+                      : "danger"
+              }
             />
           </section>
 
           <div className="forecast-concepts" role="note">
-            <p><strong>Pronóstico de venta:</strong> cantidad estimada que se espera vender.</p>
-            <p><strong>Producción sugerida:</strong> cantidad recomendada a producir después de aplicar colchón operativo y regla de múltiplos de 5.</p>
+            <p><strong>Pronóstico de venta:</strong> promedio del mismo día de semana, sumado en el mes.</p>
+            <p><strong>Producción sugerida:</strong> ese pronóstico más colchón %, con la regla de pasteles. El KPI mensual es la suma diaria, no un segundo modelo.</p>
           </div>
         </section>
 
@@ -1261,6 +1344,7 @@ function App() {
             <div className="loaded-context">
               <span>Mes: {selectedMonth || "Sin mes"}</span>
               <span>Colchón: {dailyBufferPct}%</span>
+              <span>Fin de semana: {weekendBoost}</span>
             </div>
           </div>
           <div className="file-status-grid">
@@ -1347,10 +1431,6 @@ function App() {
             <input placeholder="Buscar producto..." value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
           <label>
-            Horizonte mensual
-            <input min="1" type="number" value={days} onChange={(e) => setDays(Math.max(1, Number(e.target.value)))} />
-          </label>
-          <label>
             Factor fin semana
             <input
               min="1"
@@ -1366,7 +1446,7 @@ function App() {
               checked={showMissingReal}
               onChange={(e) => setShowMissingReal(e.target.checked)}
             />
-            Mostrar productos sin dato real
+            Incluir productos sin dato real en el Excel
           </label>
         </section>
 
@@ -1375,7 +1455,7 @@ function App() {
             <div>
               <span className="eyebrow">Planeación por día</span>
               <h3>Producción diaria sugerida</h3>
-              <p>Promedia la venta por día de semana, incluyendo días sin venta, y asigna el pronóstico a cada fecha del mes seleccionado.</p>
+              <p>Un solo modelo: promedio por día de semana, colchón % y regla operativa. El resumen mensual suma estas filas.</p>
               <strong className="row-counter">{formatNumber(dailyRows.length)} filas diarias generadas</strong>
             </div>
             <button className="primary" onClick={() => exportDailyToExcel(filteredDailyRows, dailySummary)} disabled={!filteredDailyRows.length}>
@@ -1496,10 +1576,11 @@ function App() {
           </div>
           <div className="notes-list">
             <p>El pronóstico usa el promedio histórico por día de semana.</p>
-            <p>La producción sugerida aplica el colchón operativo.</p>
+            <p>La producción sugerida aplica el colchón % y luego la regla operativa.</p>
             <p>Para pasteles GDE, MED y CH, la producción se ajusta a mínimo 10 y múltiplos de 5.</p>
             <p>Si el cálculo es menor a 8, se sugiere no producir.</p>
-            <p>La vista Validación de cálculos permite auditar cada producto.</p>
+            <p>Confianza mide si la venta reciente se parece a la histórica. Precisión compara contra producción real del mes.</p>
+            <p>Los archivos quedan guardados en el navegador y, si hay API, también en MySQL.</p>
           </div>
         </section>
 
