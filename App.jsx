@@ -1922,11 +1922,13 @@ function assessForecastFreezeReadiness({
         });
       }
       if (!previousCoverage.hasDaily) {
-        blockers.push({
+        warnings.push({
           code: "previous-missing-daily",
-          message: previousCoverage.hasPartialDaily
-            ? `El detalle diario de ${previousLabel} está incompleto (${previousCoverage.dailyDays} de ${previousCoverage.daysInMonth} días).`
-            : `Falta el detalle diario de ${previousLabel}. El cierre solo no conserva la forma por día de semana.`,
+          message: previousCoverage.hasClose
+            ? `El cierre de ${previousLabel} ya está cargado. Ese Excel es solo el total del mes, no días. El pronóstico sí se calcula (reparte el total). Si tienes el archivo diario (una hoja por día, como MARZO VENTAS), cárgalo para conservar sábado y domingo.`
+            : previousCoverage.hasPartialDaily
+              ? `El detalle diario de ${previousLabel} está incompleto (${previousCoverage.dailyDays} de ${previousCoverage.daysInMonth} días). El pronóstico sigue calculándose.`
+              : `Falta el detalle diario de ${previousLabel}. El pronóstico puede seguir, pero no habrá forma por día de semana.`,
         });
       }
     }
@@ -3832,7 +3834,11 @@ function FreezeReadinessStrip({ readiness, selectedMonth }) {
       value: readiness.previousMonth.hasDaily
         ? "OK"
         : `${readiness.previousMonth.dailyDays}/${readiness.previousMonth.daysInMonth || 0}`,
-      tone: readiness.previousMonth.hasDaily ? "ok" : "blocked",
+      tone: readiness.previousMonth.hasDaily
+        ? "ok"
+        : readiness.previousMonth.hasClose
+          ? "warn"
+          : "blocked",
     },
     {
       key: "target",

@@ -289,7 +289,12 @@ async function main() {
     coverageRows: buildSalesMonthCoverage([closeRowForMonth("2026-07")]),
     databaseSync: completeSync,
   });
-  assert(julyCloseOnly.blockers.some((item) => item.code === "previous-missing-daily"), "julio solo cierre bloquea por falta de diario");
+  assert(julyCloseOnly.canFreeze, "un cierre mensual debe permitir congelar aunque no haya diario");
+  assert(
+    julyCloseOnly.warnings.some((item) => item.code === "previous-missing-daily"),
+    "julio solo cierre avisa que no hay forma por día de semana"
+  );
+  assert(!julyCloseOnly.blockers.some((item) => item.code === "previous-missing-daily"), "el cierre solo no debe bloquear el mes");
 
   const incompleteSync = assessForecastFreezeReadiness({
     selectedMonth: "2026-08",
