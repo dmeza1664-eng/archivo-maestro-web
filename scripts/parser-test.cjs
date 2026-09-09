@@ -58,6 +58,8 @@ async function main() {
     assessForecastFreezeReadiness,
     assessStockSheetSelection,
     buildSalesMonthCoverage,
+    buildForecastHealth,
+    calculateForecast,
     countCapturedProductStatuses,
   } = await loadAppFunctions();
 
@@ -305,6 +307,61 @@ async function main() {
   });
   assert(missingStatus.canFreeze && missingStatus.warnings.some((item) => item.code === "missing-status"), "falta de estatus avisa pero no bloquea");
   assert(countCapturedProductStatuses({ "PAN DE MUERTO": { status: "ESTACIONAL" }, OTRO: {} }) === 1, "estatus capturado cuenta solo valores válidos");
+
+  function monthClose(monthKey, product, quantity) {
+    const [year, month] = monthKey.split("-").map(Number);
+    return {
+      fecha: new Date(year, month - 1, 1),
+      producto: product,
+      cantidad: quantity,
+      monthlyTotal: true,
+      monthDays: new Date(year, month, 0).getDate(),
+    };
+  }
+
+  const healthStock = [
+    { producto: "PINA GDE", stock: 20, orden: 1 },
+    { producto: "FRUTAS GDE", stock: 20, orden: 2 },
+  ];
+  const healthVentas = [
+    monthClose("2026-05", "PINA GDE", 300),
+    monthClose("2026-05", "FRUTAS GDE", 500),
+    monthClose("2026-06", "PINA GDE", 300),
+    monthClose("2026-06", "FRUTAS GDE", 500),
+    monthClose("2026-07", "PINA GDE", 310),
+    monthClose("2026-07", "FRUTAS GDE", 520),
+  ];
+
+  const missingStock = buildForecastHealth({ ventas: healthVentas, selectedMonth: "2026-08" });
+  assert(missingStock.checks.some((item) => item.code === "missing-stock"), "sin stock el control debe marcar error");
+  assert(!missingStock.ready, "sin stock no está listo");
+
+  const missingSales = buildForecastHealth({ stockRows: healthStock, selectedMonth: "2026-08" });
+  assert(missingSales.checks.some((item) => item.code === "missing-sales"), "sin ventas el control debe marcar error");
+
+  const health = buildForecastHealth({
+    stockRows: healthStock,
+    ventas: healthVentas,
+    selectedMonth: "2026-08",
+    dailyBufferPct: 10,
+  });
+  assert(health.currentTotal > 0, "con stock y cierres el pronóstico de agosto no puede ser cero");
+  assert(health.backtests.length >= 1, "debe comparar al menos un mes oculto contra su venta real");
+  assert(health.backtests.every((row) => row.wape !== null), "cada mes oculto debe tener WAPE");
+  assert(health.checks.some((item) => item.code === "missing-year-ago"), "sin 2025 debe avisar que no hay estacionalidad");
+  assert(health.checks.some((item) => item.code === "forecast-ready"), "con total > 0 el control marca el modelo activo");
+
+  const juneOnlyForecast = calculateForecast({
+    stockRows: healthStock,
+    historicalVentas: healthVentas.filter((row) => monthKey(row) === "2026-06"),
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 10,
+  });
+  assert(juneOnlyForecast[0].pronosticoVenta > 0, "un solo cierre mensual debe producir pronóstico");
+  assert(juneOnlyForecast[0].metodoPronostico !== "Sin histórico", "un cierre de junio no debe etiquetarse como sin histórico");
 
   console.log("parser-test ok");
 }

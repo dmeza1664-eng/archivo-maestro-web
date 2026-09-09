@@ -1974,6 +1974,155 @@ function computeAnnualGrowthFactor(monthlyData, targetMonth, lookbackMonths = 1)
   return clamp(ratios.length === 1 ? ratios[0] : median(ratios), 0.8, 1.2);
 }
 
+function summarizeForecastAccuracy(rows) {
+  const actual = rows.reduce((sum, row) => sum + row.actual, 0);
+  const forecast = rows.reduce((sum, row) => sum + row.forecast, 0);
+  const absoluteError = rows.reduce((sum, row) => sum + Math.abs(row.actual - row.forecast), 0);
+  return {
+    products: rows.length,
+    actual,
+    forecast,
+    wape: actual > 0 ? (absoluteError / actual) * 100 : null,
+    mae: rows.length ? absoluteError / rows.length : null,
+    inside15: rows.filter((row) => Math.abs(row.actual - row.forecast) <= 15).length,
+  };
+}
+
+function forecastAccuracyTone(wape) {
+  if (!Number.isFinite(wape)) return "muted";
+  if (wape <= 12) return "ok";
+  if (wape <= 18) return "warn";
+  return "blocked";
+}
+
+function buildForecastHealth({
+  stockRows = [],
+  ventas = [],
+  selectedMonth = "",
+  dailyBufferPct = 10,
+  currentForecastRows = null,
+} = {}) {
+  const catalog = stockRows.filter((row) => !isSliceProduct(row.producto) && !isPromotionalProduct(row.producto));
+  const months = [...new Set(ventas.map((row) => monthKeyFromRecord(row)).filter(Boolean))].sort();
+  const coverage = buildSalesMonthCoverage(ventas);
+  const omitted = coverage.filter((row) => row.status === "partial-daily");
+  const checks = [];
+
+  if (!catalog.length) {
+    checks.push({
+      code: "missing-stock",
+      level: "error",
+      message: "Carga el stock ideal. Sin catálogo no se puede asegurar el pronóstico de planta.",
+    });
+  }
+  if (!ventas.length) {
+    checks.push({
+      code: "missing-sales",
+      level: "error",
+      message: "Carga ventas históricas. Sin ellas el pronóstico queda en cero.",
+    });
+  }
+
+  const priorYear = sameMonthPreviousYear(selectedMonth);
+  const hasPriorYear = Boolean(priorYear) && months.includes(priorYear);
+  if (catalog.length && ventas.length && priorYear && !hasPriorYear) {
+    checks.push({
+      code: "missing-year-ago",
+      level: "warning",
+      message: `No hay ventas de ${displayMonthLabel(priorYear)}. Sin el mismo mes del año anterior no se usa estacionalidad.`,
+    });
+  }
+
+  if (omitted.length) {
+    checks.push({
+      code: "incomplete-months",
+      level: "warning",
+      message: `Meses omitidos por cobertura diaria menor a 70%: ${omitted.map((row) => row.monthKey).join(", ")}.`,
+    });
+  }
+
+  const closedMonths = months.filter((month) => selectedMonth && month < selectedMonth);
+  const backtests = [];
+  if (catalog.length) {
+    for (const hideMonth of closedMonths.slice(-3)) {
+      const historical = filterVentasBeforeMonth(ventas, hideMonth);
+      if (!historical.length) continue;
+      const forecastRows = calculateForecast({
+        stockRows: catalog,
+        historicalVentas: historical,
+        bajas: [],
+        existencias: [],
+        realProduction: [],
+        selectedMonth: hideMonth,
+        dailyBufferPct,
+      });
+      const actualMap = new Map();
+      for (const row of ventas) {
+        if (monthKeyFromRecord(row) !== hideMonth) continue;
+        const product = normalizeProduct(row.producto);
+        actualMap.set(product, (actualMap.get(product) || 0) + toNumber(row.cantidad));
+      }
+      backtests.push({
+        month: hideMonth,
+        historyMonths: [...new Set(historical.map((row) => monthKeyFromRecord(row)).filter(Boolean))].sort(),
+        ...summarizeForecastAccuracy(
+          forecastRows.map((row) => ({
+            producto: row.producto,
+            forecast: toNumber(row.pronosticoVenta),
+            actual: actualMap.get(normalizeProduct(row.producto)) || 0,
+          }))
+        ),
+      });
+    }
+  }
+
+  const currentTotal = Array.isArray(currentForecastRows)
+    ? currentForecastRows.reduce((sum, row) => sum + toNumber(row.pronosticoVenta), 0)
+    : catalog.length && selectedMonth && filterVentasBeforeMonth(ventas, selectedMonth).length
+      ? calculateForecast({
+          stockRows: catalog,
+          historicalVentas: filterVentasBeforeMonth(ventas, selectedMonth),
+          bajas: [],
+          existencias: [],
+          realProduction: [],
+          selectedMonth,
+          dailyBufferPct,
+        }).reduce((sum, row) => sum + toNumber(row.pronosticoVenta), 0)
+      : 0;
+
+  if (catalog.length && ventas.length && selectedMonth && currentTotal <= 0) {
+    checks.push({
+      code: "zero-forecast",
+      level: "error",
+      message: `Hay datos cargados pero el pronóstico de ${displayMonthLabel(selectedMonth)} quedó en cero.`,
+    });
+  } else if (currentTotal > 0) {
+    checks.push({
+      code: "forecast-ready",
+      level: "ok",
+      message: `Pronóstico ${displayMonthLabel(selectedMonth)}: modelo activo sobre ${catalog.length} productos del stock.`,
+    });
+  }
+
+  const latestBacktest = backtests.at(-1) || null;
+  const ready = currentTotal > 0 && catalog.length > 0;
+  const healthy = ready && (latestBacktest == null || (latestBacktest.wape !== null && latestBacktest.wape <= 18));
+
+  return {
+    ready,
+    healthy,
+    catalogCount: catalog.length,
+    months,
+    hasPriorYear,
+    currentTotal,
+    backtests,
+    latestBacktest,
+    wapeTone: forecastAccuracyTone(latestBacktest?.wape ?? null),
+    checks,
+    omittedMonths: omitted.map((row) => row.monthKey),
+  };
+}
+
 function forecastTuningOptions(modelVersion = "") {
   const version = String(modelVersion || "");
   if (version === "csG1S50") return { growthLookback: 1, seasonalSplit: 0.5 };
@@ -2200,10 +2349,13 @@ function calculateForecastModelLegacy(records, selectedMonth, useLatestAvailable
   }
 
   const targetCandidates = buildForecastCandidates(monthlyData, selectedMonth, forecastOptions);
-  const selected = targetCandidates.get(selectedMethod) ||
-    targetCandidates.get("Promedio 3 meses por día") ||
-    targetCandidates.values().next().value ||
-    { averages: uniformWeekdayAverages(0), total: 0, sourceMonths: [] };
+  const fallbackMethod = [...targetCandidates.keys()].find((method) => method !== "Sin histórico") || selectedMethod;
+  const resolvedMethod = targetCandidates.has(selectedMethod) ? selectedMethod : fallbackMethod;
+  const selected = targetCandidates.get(resolvedMethod) || {
+    averages: uniformWeekdayAverages(0),
+    total: 0,
+    sourceMonths: [],
+  };
   const previousPrediction = backtestCandidates.get(selectedMethod)?.total || 0;
   const calibration = backtestActual > 0 && previousPrediction > 0
     ? clamp(backtestActual / previousPrediction, 0.85, 1.15)
@@ -2214,7 +2366,7 @@ function calculateForecastModelLegacy(records, selectedMonth, useLatestAvailable
     averages,
     trend: calibration,
     recentMonths: selected.sourceMonths,
-    method: selectedMethod,
+    method: resolvedMethod,
     backtestMonth,
     backtestActual,
     backtestForecast: previousPrediction,
@@ -3707,6 +3859,58 @@ function FreezeReadinessStrip({ readiness, selectedMonth }) {
   );
 }
 
+function ForecastHealthStrip({ health, selectedMonth }) {
+  if (!selectedMonth) return null;
+  const latest = health.latestBacktest;
+  const chips = [
+    {
+      key: "stock",
+      label: "Stock / catálogo",
+      value: health.catalogCount ? String(health.catalogCount) : "No",
+      tone: health.catalogCount ? "ok" : "blocked",
+    },
+    {
+      key: "months",
+      label: "Meses de venta",
+      value: health.months.length ? String(health.months.length) : "No",
+      tone: health.months.length ? "ok" : "blocked",
+    },
+    {
+      key: "wape",
+      label: latest ? `WAPE ${shortMonthLabel(latest.month)}` : "WAPE de control",
+      value: latest?.wape == null ? "Sin cierre" : `${latest.wape.toFixed(1)}%`,
+      tone: health.wapeTone === "muted" ? (health.months.length ? "warn" : "blocked") : health.wapeTone,
+    },
+    {
+      key: "forecast",
+      label: `Pronóstico ${shortMonthLabel(selectedMonth)}`,
+      value: health.currentTotal > 0 ? formatNumber(health.currentTotal, 0) : "Cero",
+      tone: health.currentTotal > 0 ? "ok" : "blocked",
+    },
+  ];
+  const alert =
+    health.checks.find((item) => item.level === "error") ||
+    health.checks.find((item) => item.level === "warning") ||
+    health.checks.find((item) => item.level === "ok");
+  return (
+    <section className={`freeze-strip forecast-health-strip ${health.healthy ? "success" : "warning"}`}>
+      <div className="freeze-strip-stats">
+        {chips.map((chip) => (
+          <div key={chip.key} className={`freeze-strip-stat ${chip.tone}`}>
+            <strong>{chip.value}</strong>
+            <span>{chip.label}</span>
+          </div>
+        ))}
+      </div>
+      {alert && (
+        <p className={`freeze-strip-alert ${alert.level === "error" ? "blocked" : alert.level === "ok" ? "ok" : "warn"}`}>
+          {alert.message}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function AccessScreen({ needsSetup, loading, error, onSubmit }) {
   const [nombre, setNombre] = useState("");
   const [usuario, setUsuario] = useState("");
@@ -4641,6 +4845,17 @@ function Dashboard({ session, onLogout }) {
       forecast.length,
     ]
   );
+  const forecastHealth = useMemo(
+    () =>
+      buildForecastHealth({
+        stockRows,
+        ventas: effectiveVentas,
+        selectedMonth,
+        dailyBufferPct,
+        currentForecastRows: forecast,
+      }),
+    [stockRows, effectiveVentas, selectedMonth, dailyBufferPct, forecast]
+  );
   const monthlyReviewSourceRows = useMemo(
     () => monthlyReviewSource?.contenido?.rows?.length ? monthlyReviewSource.contenido.rows : operationalScenario,
     [monthlyReviewSource, operationalScenario]
@@ -5078,6 +5293,7 @@ function Dashboard({ session, onLogout }) {
             </button>
           </div>
           <FreezeReadinessStrip readiness={freezeReadiness} selectedMonth={selectedMonth} />
+          <ForecastHealthStrip health={forecastHealth} selectedMonth={selectedMonth} />
         </header>
 
         {toast && (
@@ -6646,6 +6862,7 @@ function App() {
 export {
   assessForecastFreezeReadiness,
   assessStockSheetSelection,
+  buildForecastHealth,
   buildMonthlyCloseSummary,
   buildOperationalForecastScenario,
   buildSalesMonthCoverage,
