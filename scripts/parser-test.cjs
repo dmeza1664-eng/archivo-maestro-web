@@ -60,6 +60,7 @@ async function main() {
     buildSalesMonthCoverage,
     buildForecastHealth,
     calculateForecast,
+    getProduccionSugerida,
     countCapturedProductStatuses,
   } = await loadAppFunctions();
 
@@ -367,6 +368,14 @@ async function main() {
   });
   assert(juneOnlyForecast[0].pronosticoVenta > 0, "un solo cierre mensual debe producir pronóstico");
   assert(juneOnlyForecast[0].metodoPronostico !== "Sin histórico", "un cierre de junio no debe etiquetarse como sin histórico");
+
+  assert(getProduccionSugerida("PINA GDE", 7.9) === 0, "menos de 8 no se produce");
+  assert(getProduccionSugerida("PINA GDE", 8) === 10, "de 8 a 12 se hace lote 10");
+  assert(getProduccionSugerida("DURAZNO GDE", 12.9) === 10, "12.9 se hace 10");
+  assert(getProduccionSugerida("MOKA GDE", 13) === 15, "13 se hace 15");
+  assert(getProduccionSugerida("FRUTAS GDE", 17.9) === 15, "17.9 se hace 15");
+  assert(getProduccionSugerida("MOKA GDE", 18) === 20, "18 se hace 20");
+  assert(getProduccionSugerida("GELATINA IND FRESA", 12.1) === 13, "lo que no es pastel se redondea hacia arriba");
 
   console.log("parser-test ok");
 }

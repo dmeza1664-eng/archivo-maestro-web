@@ -781,6 +781,13 @@ function allocateIntegerTotal(weights, total) {
   return floors;
 }
 
+function allocateDailyProduction(product, productionWeights, monthlySuggested) {
+  if (isOperationalCakeProduct(product)) {
+    return productionWeights.map((weight) => getProduccionSugerida(product, weight));
+  }
+  return allocateIntegerTotal(productionWeights, monthlySuggested);
+}
+
 function monthKeyFromDate(date) {
   const d = parseDateCell(date);
   if (!d) return "";
@@ -2564,7 +2571,7 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
         .reduce((sum, candidate) => sum + candidate.baseConColchonDia, 0);
       return row.baseConColchonDia + sundayDemand;
     });
-    const allocated = allocateIntegerTotal(productionWeights, productRow.produccionSugerida);
+    const allocated = allocateDailyProduction(product, productionWeights, productRow.produccionSugerida);
 
     return demandByDate.map((row, index) => {
       const produccionSugeridaDia = allocated[index];
@@ -2593,7 +2600,7 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
         else estatusVenta = "Dentro de rango";
       }
 
-      let reglaOperativa = getReglaOperativaLabel(product, row.baseConColchonDia);
+      let reglaOperativa = getReglaOperativaLabel(product, productionWeights[index]);
       if (row.weekday === 0) reglaOperativa = "Domingo: no producir; demanda al sábado";
       else if (receivedSunday) reglaOperativa = `${reglaOperativa} · incluye demanda del domingo`;
 
@@ -5400,7 +5407,7 @@ function Dashboard({ session, onLogout }) {
 
           <div className="forecast-concepts" role="note">
             <p><strong>Pronóstico de venta:</strong> cantidad estimada que se espera vender.</p>
-            <p><strong>Producción sugerida:</strong> cantidad recomendada a producir después de aplicar margen de seguridad y regla de múltiplos de 5.</p>
+            <p><strong>Producción sugerida:</strong> piezas a fabricar ese día. En pasteles GDE, MED y CH es 0 o 10, 15, 20… (un 13 se hace 15).</p>
             <p><strong>Escenario operativo +{OPERATIONAL_MARGIN_PCT}%:</strong> {formatNumber(operationalScenarioTotal, 0)} piezas; se conserva separado del pronóstico estadístico.</p>
           </div>
         </section>
@@ -6513,10 +6520,9 @@ function Dashboard({ session, onLogout }) {
           </div>
           <div className="notes-list">
             <p>El pronóstico elige el método con menor error en el mes anterior y aplica una calibración limitada.</p>
-            <p>La producción sugerida mensual se reparte en seis días: domingo queda en cero y su demanda pasa al sábado.</p>
+            <p>El pronóstico de venta se reparte por día de semana. El domingo no se produce y su demanda pasa al sábado.</p>
             <p>Las existencias solo se descuentan si la fecha de corte cae entre el mes anterior y el mes planificado.</p>
-            <p>Para pasteles GDE, MED y CH, la producción se ajusta a mínimo 10 y múltiplos de 5.</p>
-            <p>Si el cálculo es menor a 8, se sugiere no producir.</p>
+            <p>Para pasteles GDE, MED y CH, cada día de planta (lunes a sábado) se produce 0 o un lote de 10, 15, 20… Un 13 se hace 15; menos de 8 no se produce. El domingo queda en cero y su demanda pasa al sábado, que también sale en lote.</p>
             <p>La vista Validación de cálculos permite auditar cada producto.</p>
           </div>
         </section>
@@ -6876,6 +6882,7 @@ export {
   buildSalesMonthCoverage,
   buildWeeklyProgress,
   calculateForecast,
+  getProduccionSugerida,
   consolidateOperationalRowsForUpload,
   consolidateSalesRowsForUpload,
   countCapturedProductStatuses,
