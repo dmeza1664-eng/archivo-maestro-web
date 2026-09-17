@@ -3300,6 +3300,11 @@ tbody tr:hover {
   color: #b7c99a;
 }
 
+.forecast-health-errors {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .user-admin-section {
   background: var(--input);
   border: 1px solid var(--border);
