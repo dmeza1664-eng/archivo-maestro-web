@@ -1123,6 +1123,39 @@ function sourceRankForMonth(fileName, monthKey) {
   return 0;
 }
 
+function sourceKindForMonth(rows, monthKey) {
+  let daily = false;
+  let close = false;
+  for (const row of rows || []) {
+    if (recordMonthKey(row) !== monthKey) continue;
+    if (row.monthlyTotal) close = true;
+    else daily = true;
+  }
+  if (daily && close) return "both";
+  if (daily) return "daily";
+  if (close) return "close";
+  return "empty";
+}
+
+function pickPreferredSourceName(candidates, monthKey, names) {
+  return [...candidates].sort((left, right) => {
+    const rankDiff = sourceRankForMonth(right, monthKey) - sourceRankForMonth(left, monthKey);
+    return rankDiff || names.indexOf(right) - names.indexOf(left);
+  })[0];
+}
+
+function describeSourceDecision(decision) {
+  const month = displayMonthLabel(decision.month);
+  if (decision.strategy === "keep-daily-and-close") {
+    const dailyKept = (decision.kept || []).filter((name) => name !== decision.winner);
+    const dailyText = dailyKept.length ? ` y se conservó el diario de ${dailyKept.join(", ")}` : "";
+    const omittedText = decision.omitted?.length ? ` Se omitió ${decision.omitted.join(", ")}.` : "";
+    return `${month}: se usó el cierre de ${decision.winner}${dailyText}.${omittedText}`;
+  }
+  const omittedText = decision.omitted?.length ? `; se omitió de ${decision.omitted.join(", ")}` : "";
+  return `${month}: se usó ${decision.winner}${omittedText}.`;
+}
+
 function displayMonthLabel(monthKey) {
   const [year, month] = String(monthKey || "").split("-").map(Number);
   if (!year || !month) return monthKey || "";
@@ -1137,6 +1170,9 @@ function shortMonthLabel(monthKey) {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
+// Regla: si un mes trae Excel diario y cierre dedicado, NO son excluyentes.
+// El cierre gana el total (monthlyTotal); el diario se conserva para la forma
+// (día de semana e impulso GDE de 2ª quincena). Un override sí es exclusivo.
 function resolveCanonicalMonthSources(entries, overrides = {}) {
   const names = entries.map((entry) => entry.name);
   const byName = new Map(entries.map((entry) => [entry.name, { name: entry.name, rows: [...(entry.rows || [])] }]));
@@ -1152,18 +1188,53 @@ function resolveCanonicalMonthSources(entries, overrides = {}) {
     const candidates = names.filter((name) => byName.get(name).rows.some((row) => recordMonthKey(row) === month));
     if (candidates.length < 2) continue;
     const override = overrides[month];
-    const winner = candidates.includes(override)
-      ? override
-      : [...candidates].sort((left, right) => {
-          const rankDiff = sourceRankForMonth(right, month) - sourceRankForMonth(left, month);
-          return rankDiff || names.indexOf(right) - names.indexOf(left);
-        })[0];
-    const omitted = candidates.filter((name) => name !== winner);
-    for (const name of omitted) {
-      const entry = byName.get(name);
-      entry.rows = entry.rows.filter((row) => recordMonthKey(row) !== month);
+    const kinds = Object.fromEntries(candidates.map((name) => [name, sourceKindForMonth(byName.get(name).rows, month)]));
+
+    const applyExclusive = (winner, strategy) => {
+      const omitted = candidates.filter((name) => name !== winner);
+      for (const name of omitted) {
+        const entry = byName.get(name);
+        entry.rows = entry.rows.filter((row) => recordMonthKey(row) !== month);
+      }
+      decisions.push({ month, winner, omitted, strategy, kept: [winner], kinds });
+    };
+
+    if (candidates.includes(override)) {
+      applyExclusive(override, "override");
+      continue;
     }
-    decisions.push({ month, winner, omitted });
+
+    const dailySources = candidates.filter((name) => kinds[name] === "daily" || kinds[name] === "both");
+    const closeSources = candidates.filter((name) => kinds[name] === "close" || kinds[name] === "both");
+    if (dailySources.length && closeSources.length) {
+      const dailyKeep = pickPreferredSourceName(dailySources, month, names);
+      const closeKeep = pickPreferredSourceName(closeSources, month, names);
+      const keep = new Set([dailyKeep, closeKeep].filter(Boolean));
+      const omitted = [];
+      for (const name of candidates) {
+        if (keep.has(name)) continue;
+        const entry = byName.get(name);
+        entry.rows = entry.rows.filter((row) => recordMonthKey(row) !== month);
+        omitted.push(name);
+      }
+      if (dailyKeep && closeKeep && dailyKeep !== closeKeep) {
+        const dailyEntry = byName.get(dailyKeep);
+        dailyEntry.rows = dailyEntry.rows.filter((row) => recordMonthKey(row) !== month || !row.monthlyTotal);
+        const closeEntry = byName.get(closeKeep);
+        closeEntry.rows = closeEntry.rows.filter((row) => recordMonthKey(row) !== month || row.monthlyTotal);
+      }
+      decisions.push({
+        month,
+        winner: closeKeep,
+        omitted,
+        strategy: "keep-daily-and-close",
+        kept: [...keep],
+        kinds,
+      });
+      continue;
+    }
+
+    applyExclusive(pickPreferredSourceName(candidates, month, names), "same-kind-winner");
   }
   return { entries: names.map((name) => byName.get(name)), decisions };
 }
@@ -4748,9 +4819,7 @@ function Dashboard({ session, onLogout }) {
     setPendingSalesImport(excelRows.filter((row) => pendingNames.has(row.sourceFile)));
     setSalesImportRun(null);
     setSalesImportFiles((current) => [...new Set([...current, ...validFiles.map((file) => file.name)])]);
-    const decisionText = resolved.decisions
-      .map((decision) => `${displayMonthLabel(decision.month)}: se usó ${decision.winner}; se omitió de ${decision.omitted.join(", ")}.`)
-      .join(" ");
+    const decisionText = resolved.decisions.map((decision) => describeSourceDecision(decision)).join(" ");
     const parsedCount = parsedFiles.flat().length;
     setSalesImportStatus(
       parsedCount
@@ -6444,18 +6513,29 @@ function Dashboard({ session, onLogout }) {
 
         {salesSourceDecisions.length > 0 && (
           <section className="sales-conflict-bar">
-            <p>Hay más de un archivo para el mismo mes. Se usó el cierre específico; puedes cambiar la fuente canónica.</p>
-            {salesSourceDecisions.map((decision) => (
-              <div className="sales-conflict-row" key={decision.month}>
-                <strong>{displayMonthLabel(decision.month)}</strong>
-                <span>Usando {decision.winner}</span>
-                {decision.omitted.map((name) => (
-                  <button key={name} className="secondary" type="button" onClick={() => chooseSalesMonthSource(decision.month, name)}>
-                    Usar {name}
-                  </button>
-                ))}
-              </div>
-            ))}
+            <p>
+              {salesSourceDecisions.some((decision) => decision.strategy === "keep-daily-and-close")
+                ? "Si un mes trae cierre dedicado y Excel diario, se usan juntos: el cierre fija el total y el diario conserva la forma (sábado vs martes e impulso GDE)."
+                : "Hay más de un archivo para el mismo mes. Se usó el archivo específico; puedes cambiar la fuente canónica."}
+            </p>
+            {salesSourceDecisions.map((decision) => {
+              const dailyKept = (decision.kept || []).filter((name) => name !== decision.winner);
+              return (
+                <div className="sales-conflict-row" key={decision.month}>
+                  <strong>{displayMonthLabel(decision.month)}</strong>
+                  <span>
+                    {decision.strategy === "keep-daily-and-close"
+                      ? `Cierre ${decision.winner}${dailyKept.length ? ` + diario ${dailyKept.join(", ")}` : ""}`
+                      : `Usando ${decision.winner}`}
+                  </span>
+                  {(decision.omitted || []).map((name) => (
+                    <button key={name} className="secondary" type="button" onClick={() => chooseSalesMonthSource(decision.month, name)}>
+                      Usar {name}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
           </section>
         )}
 
@@ -7198,6 +7278,8 @@ export {
   parseSalesOrReturns,
   parseStock,
   resolveCanonicalMonthSources,
+  sourceKindForMonth,
+  describeSourceDecision,
   computeAnnualGrowthFactor,
   resolvePriorYearSeasonal,
   computeRecentMomentumFactor,

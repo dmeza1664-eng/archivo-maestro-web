@@ -54,6 +54,8 @@ async function main() {
     parseSalesOrReturns,
     parseStock,
     resolveCanonicalMonthSources,
+    sourceKindForMonth,
+    describeSourceDecision,
     computeAnnualGrowthFactor,
     resolvePriorYearSeasonal,
     computeRecentMomentumFactor,
@@ -76,28 +78,70 @@ async function main() {
     { fecha: "2026-06-04", producto: "BOLILLO", cantidad: 20 },
   ] };
   const juneClose = { name: "ventas junio.xlsx", rows: [
-    { fecha: "2026-06-04", producto: "BOLILLO", cantidad: 18 },
+    { fecha: "2026-06-01", producto: "BOLILLO", cantidad: 18, monthlyTotal: true, monthDays: 30 },
   ] };
+  assert(sourceKindForMonth(combined.rows, "2026-06") === "daily", "el combinado de junio es diario");
+  assert(sourceKindForMonth(juneClose.rows, "2026-06") === "close", "ventas junio.xlsx es cierre");
   const juneFirst = resolveCanonicalMonthSources([juneClose, combined]);
   const combinedAfterJuneFirst = juneFirst.entries.find((entry) => entry.name === combined.name);
   const juneAfterJuneFirst = juneFirst.entries.find((entry) => entry.name === juneClose.name);
-  assert(combinedAfterJuneFirst.rows.every((row) => monthKey(row) !== "2026-06"), "el cierre dedicado debe quitar junio del combinado aunque se cargue después");
-  assert(juneAfterJuneFirst.rows.length === 1, "el cierre dedicado de junio se conserva");
-  assert(juneFirst.decisions[0].winner === "ventas junio.xlsx", "el ganador debe ser el archivo de un solo mes");
+  assert(combinedAfterJuneFirst.rows.some((row) => monthKey(row) === "2026-06"), "el diario de junio se conserva junto al cierre aunque el cierre se cargue primero");
+  assert(combinedAfterJuneFirst.rows.some((row) => monthKey(row) === "2026-05"), "mayo del combinado no se toca");
+  assert(juneAfterJuneFirst.rows.length === 1 && juneAfterJuneFirst.rows[0].monthlyTotal, "el cierre dedicado de junio se conserva");
+  assert(juneFirst.decisions[0].winner === "ventas junio.xlsx", "el cierre dedicado gana el total del mes");
+  assert(juneFirst.decisions[0].strategy === "keep-daily-and-close", "diario y cierre del mismo mes son complementarios");
+  assert(juneFirst.decisions[0].kept.includes(combined.name), "el combinado diario queda en kept");
+  assert(!juneFirst.decisions[0].omitted.includes(combined.name), "no se omite el diario complementario");
+  assert(
+    /cierre de ventas junio/.test(describeSourceDecision(juneFirst.decisions[0])) &&
+      /diario de VENTAS DE MAYO Y JUNIO/.test(describeSourceDecision(juneFirst.decisions[0])),
+    "el mensaje debe nombrar cierre + diario"
+  );
 
   const marchClose = resolveCanonicalMonthSources([
     { name: "VENTAS FEBRERO Y MARZO.xlsx", rows: [
       { fecha: "2026-02-01", producto: "BOLILLO", cantidad: 5 },
       { fecha: "2026-03-01", producto: "BOLILLO", cantidad: 9 },
     ] },
-    { name: "cierre marzo.xlsx", rows: [{ fecha: "2026-03-01", producto: "BOLILLO", cantidad: 7 }] },
+    { name: "cierre marzo.xlsx", rows: [{ fecha: "2026-03-01", producto: "BOLILLO", cantidad: 7, monthlyTotal: true, monthDays: 31 }] },
   ]);
   assert(marchClose.decisions[0].month === "2026-03", "el conflicto genérico no es solo junio");
-  assert(marchClose.decisions[0].winner === "cierre marzo.xlsx", "marzo dedicado gana al combinado");
+  assert(marchClose.decisions[0].winner === "cierre marzo.xlsx", "marzo dedicado gana el total");
+  assert(marchClose.decisions[0].strategy === "keep-daily-and-close", "marzo diario + cierre también se conservan");
+  assert(
+    marchClose.entries.find((entry) => entry.name === "VENTAS FEBRERO Y MARZO.xlsx").rows.some((row) => monthKey(row) === "2026-03"),
+    "el diario de marzo no se tira"
+  );
+
+  const twoDailies = resolveCanonicalMonthSources([
+    { name: "VENTAS DE MAYO Y JUNIO.xlsx", rows: [
+      { fecha: "2026-05-03", producto: "BOLILLO", cantidad: 10 },
+      { fecha: "2026-06-04", producto: "BOLILLO", cantidad: 20 },
+    ] },
+    { name: "ventas junio angel.xlsx", rows: [
+      { fecha: "2026-06-05", producto: "BOLILLO", cantidad: 22 },
+    ] },
+  ]);
+  assert(twoDailies.decisions[0].strategy === "same-kind-winner", "dos diarios del mismo mes siguen siendo excluyentes");
+  assert(twoDailies.decisions[0].winner === "ventas junio angel.xlsx", "el diario dedicado gana al combinado");
+  assert(
+    twoDailies.entries.find((entry) => entry.name === "VENTAS DE MAYO Y JUNIO.xlsx").rows.every((row) => monthKey(row) !== "2026-06"),
+    "el diario redundante de junio sí se omite"
+  );
+
+  const twoCloses = resolveCanonicalMonthSources([
+    { name: "cierre junio extra.xlsx", rows: [{ fecha: "2026-06-01", producto: "BOLILLO", cantidad: 11, monthlyTotal: true, monthDays: 30 }] },
+    { name: "ventas junio.xlsx", rows: [{ fecha: "2026-06-01", producto: "BOLILLO", cantidad: 18, monthlyTotal: true, monthDays: 30 }] },
+  ]);
+  assert(twoCloses.decisions[0].strategy === "same-kind-winner", "dos cierres del mismo mes son excluyentes");
+  assert(twoCloses.decisions[0].winner === "ventas junio.xlsx", "el cierre con el mes en el nombre gana");
 
   const overridden = resolveCanonicalMonthSources([combined, juneClose], { "2026-06": combined.name });
   const combinedKept = overridden.entries.find((entry) => entry.name === combined.name);
+  const closeAfterOverride = overridden.entries.find((entry) => entry.name === juneClose.name);
   assert(combinedKept.rows.some((row) => monthKey(row) === "2026-06"), "el override debe conservar junio del combinado");
+  assert(closeAfterOverride.rows.every((row) => monthKey(row) !== "2026-06"), "el override exclusivo sí quita el cierre");
+  assert(overridden.decisions[0].strategy === "override", "el override queda marcado como exclusivo");
 
   const stockWorkbook = workbookFromSheets({
     "OTRA HOJA": [
@@ -482,6 +526,31 @@ async function main() {
   const tuesday = julyData.weekdays.get(2);
   assert(julyData.inheritedWeekdayShapeFrom === "2026-06", "el cierre de julio debe heredar la forma diaria de junio");
   assert(saturday.total / saturday.count > tuesday.total / tuesday.count, "el sábado heredado debe quedar por encima del martes");
+
+  const accelDaily = [];
+  for (let day = 1; day <= 30; day += 1) {
+    accelDaily.push({
+      fecha: new Date(2026, 5, day),
+      producto: "FRUTAS GDE",
+      cantidad: day <= 15 ? 223 / 15 : 296 / 15,
+    });
+  }
+  const accelClose = monthClose("2026-06", "FRUTAS GDE", 519);
+  const resolvedAccel = resolveCanonicalMonthSources([
+    { name: "VENTAS DE MAYO Y JUNIO 2026.xlsx", rows: accelDaily },
+    { name: "ventas junio.xlsx", rows: [accelClose] },
+  ]);
+  const resolvedAccelRows = resolvedAccel.entries.flatMap((entry) => entry.rows);
+  assert(resolvedAccel.decisions[0].strategy === "keep-daily-and-close", "junio acelerado debe quedar diario+cierre");
+  const accelMonthly = buildMonthlyForecastData(resolvedAccelRows);
+  const juneAccel = accelMonthly.get("2026-06");
+  assert(Math.abs(juneAccel.total - 519) < 1e-6, "el total de junio debe ser el del cierre, no la suma diaria");
+  assert(!juneAccel.filledFromMonthlyTotal, "con diario complementario junio no se rellena en uniforme");
+  const closeOnlyMonthly = buildMonthlyForecastData([accelClose]);
+  assert(closeOnlyMonthly.get("2026-06").filledFromMonthlyTotal, "cierre solo sí rellena días sintéticos");
+  assert(computeRecentMomentumFactor(closeOnlyMonthly, "2026-07") === 1, "sin diario el impulso de julio no corre");
+  const accelFactor = computeRecentMomentumFactor(accelMonthly, "2026-07", { momentumTrigger: 1.1 });
+  assert(accelFactor > 1.05, `diario+cierre debe disparar el impulso GDE de julio (factor ${accelFactor})`);
 
   assert(getProduccionSugerida("PINA GDE", 7.9) === 0, "menos de 8 no se produce");
   assert(getProduccionSugerida("PINA GDE", 8) === 10, "de 8 a 12 se hace lote 10");
