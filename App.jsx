@@ -467,6 +467,13 @@ function isPromotionalProduct(value) {
   return /\b(PROMO|PROMOCION|PROMOCIONAL)\b/.test(normalizeProduct(value));
 }
 
+// Etiquetas de precio en el nombre ($35, $45) marcan SKUs de venta irregular
+// o por evento; no se excluyen del catálogo, pero el pronóstico se vuelve más
+// conservador en applyCatalogOutlierCleanup.
+function isPriceTaggedProduct(value) {
+  return /\$\s*\d+/.test(norm(value));
+}
+
 function isOperationalCakeProduct(value) {
   const normalized = normalizeProduct(value);
   return /\b(GDE|GRANDE|MED|MEDIANO|CH|CHICO)\b/.test(normalized);
@@ -1738,7 +1745,12 @@ function calculateForecast({
     const product = normalizeProduct(s.producto);
     const v = fillCompleteZeroMonths(ventasByProduct.get(product) || ventasByProduct.get(s.producto) || [], completeHistoricalMonths);
     const b = bajasByProduct.get(product) || bajasByProduct.get(s.producto) || [];
-    const forecastModel = calculateForecastModelForVersion(v, selectedMonth, product, modelVersion);
+    const forecastModel = applyCatalogOutlierCleanup(
+      calculateForecastModelForVersion(v, selectedMonth, product, modelVersion),
+      v,
+      selectedMonth,
+      s.producto || product
+    );
     const weekdayRow = buildWeekdayRow(forecastModel.averages);
 
     let pronosticoVenta = 0;
@@ -2201,6 +2213,107 @@ function applyRecentMomentum(model, records, selectedMonth, options = {}) {
     averages: scaleForecastAverages(model.averages, factor),
     trend: (model.trend || 1) * factor,
     method: `${model.method || "Modelo"} · impulso reciente ${liftPct}%`,
+  };
+}
+
+// Limpieza de outliers de catálogo: no inventar volumen para SKUs dormidos,
+// amortiguar caídas hacia cero y evitar extrapolar picos de productos con
+// etiqueta de precio / venta intermitente (p. ej. PALETA GALLETA $35).
+// No toca reglas de lote de pasteles ni el selector estacional/GDE.
+function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
+  if (!model?.averages) return model;
+  const modelTotal = forecastTotalFromAverages(model.averages, selectedMonth);
+  if (!(modelTotal > 0.5)) return model;
+
+  const monthlyData = buildMonthlyForecastData(records || []);
+  const history = [...monthlyData.keys()].filter((month) => month < selectedMonth).sort();
+  if (!history.length) {
+    return {
+      ...model,
+      averages: scaleForecastAverages(model.averages, 0),
+      trend: 0,
+      method: `${model.method || "Modelo"} · limpieza catálogo: sin evidencia de venta`,
+      catalogCleanup: "sin evidencia de venta",
+    };
+  }
+
+  const recent3 = history.slice(-3).map((month) => monthlyData.get(month)?.total || 0);
+  const recent6 = history.slice(-6).map((month) => monthlyData.get(month)?.total || 0);
+  const last = recent3.at(-1) ?? 0;
+  const prev = recent3.length >= 2 ? recent3.at(-2) : null;
+  const mean6 = recent6.reduce((sum, value) => sum + value, 0) / Math.max(recent6.length, 1);
+  const variance6 =
+    recent6.reduce((sum, value) => sum + (value - mean6) ** 2, 0) / Math.max(recent6.length, 1);
+  const cv6 = mean6 > 0 ? Math.sqrt(variance6) / mean6 : 0;
+  const zeroRate6 = recent6.filter((value) => value <= 0.5).length / Math.max(recent6.length, 1);
+  const median6 = median(recent6);
+  const priceTagged = isPriceTaggedProduct(product);
+  const intermittent = zeroRate6 >= 0.4 || (cv6 >= 1.2 && mean6 < 350);
+  const nearZero = (value) => value <= 0.5;
+
+  let targetTotal = modelTotal;
+  let reason = "";
+
+  if (recent3.length >= 2 && nearZero(last) && nearZero(prev)) {
+    targetTotal = 0;
+    reason = "sin venta en 2 meses";
+  } else if (nearZero(last) && modelTotal > 10) {
+    const softCap = prev != null && prev > 0 ? Math.min(prev * 0.25, 25) : 0;
+    targetTotal = Math.min(modelTotal, softCap);
+    reason = "último mes en cero";
+  } else if (
+    prev != null &&
+    prev > 25 &&
+    last < prev * 0.45 &&
+    last <= 40 &&
+    modelTotal > Math.max(last * 1.4, 15)
+  ) {
+    targetTotal = Math.min(modelTotal, Math.max(last * 1.15, 0));
+    reason = "demanda colapsando";
+  } else if (
+    prev != null &&
+    prev > 80 &&
+    last < prev * 0.35 &&
+    modelTotal > Math.max(last * 1.25, 20)
+  ) {
+    // Pico tipo promo/evento (CAJITA FELIZ en abril) seguido de caída:
+    // no arrastrar el mes siguiente con el nivel estacional del año anterior.
+    targetTotal = Math.min(modelTotal, Math.max(last * 0.55, median6));
+    reason = "resguardo post-pico";
+  }
+
+  if ((priceTagged || intermittent) && targetTotal > 0.5) {
+    const prior = history.slice(-6, -1).map((month) => monthlyData.get(month)?.total || 0);
+    const priorPositive = prior.filter((value) => value > 0.5);
+    const priorMed = priorPositive.length ? median(priorPositive) : median(prior);
+    const isSpike =
+      priorMed > 0 &&
+      last > Math.max(priorMed * 2.4, priorMed + 60) &&
+      last > 80;
+    if (isSpike && modelTotal > Math.max(priorMed * 1.4, 30)) {
+      const spikeCap = Math.max(priorMed * 1.25, last * 0.35);
+      if (spikeCap < targetTotal) {
+        targetTotal = spikeCap;
+        reason = reason || "no extrapolar pico intermitente";
+      }
+    }
+    if (intermittent && median6 < targetTotal * 0.55) {
+      const intermittentCap = Math.max(median6, last * 0.4);
+      if (intermittentCap < targetTotal) {
+        targetTotal = intermittentCap;
+        reason = reason || "venta intermitente";
+      }
+    }
+  }
+
+  if (!(targetTotal < modelTotal * 0.98)) return model;
+  const factor = modelTotal > 0 ? Math.max(0, targetTotal / modelTotal) : 0;
+  return {
+    ...model,
+    averages: scaleForecastAverages(model.averages, factor),
+    trend: (model.trend || 1) * factor,
+    method: `${model.method || "Modelo"} · limpieza catálogo: ${reason || "resguardo"}`,
+    catalogCleanup: reason || "resguardo",
   };
 }
 
@@ -7283,6 +7396,9 @@ export {
   computeAnnualGrowthFactor,
   resolvePriorYearSeasonal,
   computeRecentMomentumFactor,
+  isPriceTaggedProduct,
+  isPromotionalProduct,
+  applyCatalogOutlierCleanup,
 };
 
 if (typeof document !== "undefined") {

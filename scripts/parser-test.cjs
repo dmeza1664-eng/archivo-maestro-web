@@ -59,6 +59,8 @@ async function main() {
     computeAnnualGrowthFactor,
     resolvePriorYearSeasonal,
     computeRecentMomentumFactor,
+    isPriceTaggedProduct,
+    applyCatalogOutlierCleanup,
     assessForecastFreezeReadiness,
     assessStockSheetSelection,
     buildSalesMonthCoverage,
@@ -559,6 +561,86 @@ async function main() {
   assert(getProduccionSugerida("FRUTAS GDE", 17.9) === 15, "17.9 se hace 15");
   assert(getProduccionSugerida("MOKA GDE", 18) === 20, "18 se hace 20");
   assert(getProduccionSugerida("GELATINA IND FRESA", 12.1) === 13, "lo que no es pastel se redondea hacia arriba");
+
+  assert(isPriceTaggedProduct("PALETA GALLETA $35"), "PALETA GALLETA $35 debe detectarse como precio etiquetado");
+  assert(isPriceTaggedProduct("JERICALLA UN CUARTO $45"), "JERICALLA $45 es precio etiquetado");
+  assert(!isPriceTaggedProduct("GELATINA IND FRESA"), "GELATINA IND FRESA no trae etiqueta de precio");
+
+  const paletaHistory = [
+    monthClose("2026-01", "PALETA GALLETA $35", 30),
+    monthClose("2026-02", "PALETA GALLETA $35", 184),
+    monthClose("2026-03", "PALETA GALLETA $35", 2),
+    monthClose("2026-04", "PALETA GALLETA $35", 0),
+    monthClose("2026-05", "PALETA GALLETA $35", 79),
+    monthClose("2026-06", "PALETA GALLETA $35", 296),
+  ];
+  const paletaRaw = calculateForecast({
+    stockRows: [{ producto: "PALETA GALLETA $35", stock: 10, orden: 1 }],
+    historicalVentas: paletaHistory,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 0,
+  });
+  assert(paletaRaw[0].pronosticoVenta < 180, `PALETA $35 no debe extrapolar el pico de junio (fc ${paletaRaw[0].pronosticoVenta.toFixed(1)})`);
+  assert(/limpieza catálogo/i.test(paletaRaw[0].metodoPronostico || ""), "PALETA $35 debe anotar limpieza de catálogo");
+
+  const cajitaHistory = [
+    monthClose("2025-04", "CAJITA FELIZ", 599),
+    monthClose("2026-01", "CAJITA FELIZ", 1),
+    monthClose("2026-02", "CAJITA FELIZ", 8),
+    monthClose("2026-03", "CAJITA FELIZ", 0),
+    monthClose("2026-04", "CAJITA FELIZ", 773),
+    monthClose("2026-05", "CAJITA FELIZ", 75),
+    monthClose("2026-06", "CAJITA FELIZ", 0),
+  ];
+  const cajitaJuly = calculateForecast({
+    stockRows: [{ producto: "CAJITA FELIZ", stock: 5, orden: 2 }],
+    historicalVentas: cajitaHistory,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 0,
+  });
+  assert(cajitaJuly[0].pronosticoVenta <= 5, `CAJITA FELIZ con junio en cero no debe inventar volumen (fc ${cajitaJuly[0].pronosticoVenta.toFixed(1)})`);
+
+  const dormantHistory = [
+    monthClose("2026-02", "RAMO FLORAL 12CM 3 CAPAS", 84),
+    monthClose("2026-03", "RAMO FLORAL 12CM 3 CAPAS", 0),
+    monthClose("2026-04", "RAMO FLORAL 12CM 3 CAPAS", 0),
+    monthClose("2026-05", "RAMO FLORAL 12CM 3 CAPAS", 0),
+    monthClose("2026-06", "RAMO FLORAL 12CM 3 CAPAS", 0),
+  ];
+  const ramoJuly = calculateForecast({
+    stockRows: [{ producto: "RAMO FLORAL 12CM 3 CAPAS", stock: 5, orden: 3 }],
+    historicalVentas: dormantHistory,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 0,
+  });
+  assert(ramoJuly[0].pronosticoVenta === 0, `RAMO dormido 2+ meses debe quedar en 0 (fc ${ramoJuly[0].pronosticoVenta})`);
+
+  const stableCake = calculateForecast({
+    stockRows: [{ producto: "FRUTAS GDE", stock: 40, orden: 4 }],
+    historicalVentas: [
+      monthClose("2025-07", "FRUTAS GDE", 510),
+      monthClose("2026-04", "FRUTAS GDE", 480),
+      monthClose("2026-05", "FRUTAS GDE", 500),
+      monthClose("2026-06", "FRUTAS GDE", 520),
+    ],
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 0,
+  });
+  assert(stableCake[0].pronosticoVenta > 450, `pasteles regulares no deben verse afectados por la limpieza (fc ${stableCake[0].pronosticoVenta.toFixed(1)})`);
+  assert(!/limpieza catálogo/i.test(stableCake[0].metodoPronostico || ""), "FRUTAS GDE no debe activar limpieza de catálogo");
+
 
   console.log("parser-test ok");
 }
