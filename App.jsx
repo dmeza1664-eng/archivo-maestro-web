@@ -2712,13 +2712,27 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
     const category = productCategory(product);
     const seasonalWeight = ["Otros", "Mini medianos"].includes(category) ? 0.5 : 0.75;
     if (category === "Pasteles grandes") {
+      const monthlyData = buildMonthlyForecastData(records);
+      const latest = previousMonthKey(selectedMonth);
+      const latestData = latest ? monthlyData.get(latest) : null;
+      const hasRecentDaily = Boolean(
+        latestData &&
+        !latestData.filledFromMonthlyTotal &&
+        (latestData.valuesByDate?.size || 0) >= 20 &&
+        latest &&
+        !String(latest).endsWith("-05")
+      );
       const gdeOptions = {
         ...options,
         dipRatio: 0.92,
-        dampenDecline: 0.4,
+        // Solo si el mes previo trae diario (junio 2026). Mayo (Madres) y un
+        // cierre solo (julio→agosto) no suavizan el recorte.
+        dampenDecline: hasRecentDaily && !priorYearLooksLikeSeasonalFade(monthlyData, selectedMonth)
+          ? 0.4
+          : undefined,
         momentumStrength: 0.4,
         momentumCap: 1.12,
-        momentumTrigger: 1.12,
+        momentumTrigger: 1.1,
       };
       const model = calculateForecastModelSeasonalAdaptive(
         records,

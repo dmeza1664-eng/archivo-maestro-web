@@ -257,6 +257,17 @@ async function main() {
   ]);
   const momentum = computeRecentMomentumFactor(momentumData, "2026-07");
   assert(momentum > 1.08 && momentum <= 1.12, `junio acelerado debe impulsar julio (factor ${momentum})`);
+  const mildAccel = new Map([
+    ["2025-06", { total: 274 }],
+    ["2025-07", { total: 274 }],
+    ["2025-08", { total: 322 }],
+    ["2026-06", monthWithHalves("2026-06", 142, 159)],
+  ]);
+  assert(computeRecentMomentumFactor(mildAccel, "2026-07") === 1, "1.12× justo no dispara el default");
+  assert(
+    computeRecentMomentumFactor(mildAccel, "2026-07", { momentumTrigger: 1.1 }) > 1,
+    "con umbral 1.10 el DUO de 1.12× sí impulsa"
+  );
   const maySource = new Map([
     ["2026-05", monthWithHalves("2026-05", 200, 400, 31)],
   ]);
@@ -268,10 +279,10 @@ async function main() {
     ["2026-06", monthWithHalves("2026-06", 89, 159)],
   ]);
   assert(computeRecentMomentumFactor(payFade, "2026-07") === 1, "PAY DE FRESA es baja de temporada: sin impulso");
-  const julyCloseOnly = new Map([
+  const julyCloseOnlyMonth = new Map([
     ["2026-07", { total: 580, valuesByDate: new Map([["2026-07-01", 18.7]]), filledFromMonthlyTotal: true, syntheticDays: 31 }],
   ]);
-  assert(computeRecentMomentumFactor(julyCloseOnly, "2026-08") === 1, "un cierre sin diario no impulsa agosto");
+  assert(computeRecentMomentumFactor(julyCloseOnlyMonth, "2026-08") === 1, "un cierre sin diario no impulsa agosto");
 
   function dailyRowsForMonth(monthKey, dayCount, quantity = 10) {
     const [year, month] = monthKey.split("-").map(Number);

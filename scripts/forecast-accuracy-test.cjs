@@ -150,7 +150,6 @@ async function main() {
         cantidad: half / 15,
       });
     }
-    rows.push(monthClose("2026-06", product, firstHalf + secondHalf));
     return rows;
   }
 
