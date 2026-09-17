@@ -1,6 +1,8 @@
+const fs = require("fs");
 const path = require("path");
 const Module = require("module");
 const esbuild = require("esbuild");
+const XLSX = require("xlsx");
 
 async function loadAppFunctions() {
   const built = await esbuild.build({
@@ -216,6 +218,114 @@ async function main() {
   const augustFrutas = pick(realAugust, "FRUTAS GDE");
   assert(augustFrutas.forecast < 600, `agosto FRUTAS no debe heredar el impulso de junio (fc ${augustFrutas.forecast.toFixed(1)})`);
 
+  // Misma fixture por la vía de la UI: cierre dedicado + diario combinado
+  // pasan por resolveCanonicalMonthSources. Antes el cierre tiraba el diario
+  // y el impulso de julio casi no corría.
+  const juneClosesForResolve = [
+    monthClose("2026-06", "FRUTAS GDE", 519),
+    monthClose("2026-06", "MOKA GDE", 617),
+    monthClose("2026-06", "M & M GDE", 256),
+    monthClose("2026-06", "PAY DE FRESA GDE", 254),
+  ];
+  const ventasForResolve = [...realishVentas, ...juneClosesForResolve];
+  const dailySource = {
+    name: "VENTAS DE MAYO Y JUNIO 2026.xlsx",
+    rows: ventasForResolve.filter((row) => !row.monthlyTotal),
+  };
+  const closeSources = [...new Set(
+    ventasForResolve.filter((row) => row.monthlyTotal).map((row) => {
+      const key = `${row.fecha.getFullYear()}-${String(row.fecha.getMonth() + 1).padStart(2, "0")}`;
+      return key;
+    })
+  )].map((key) => {
+    const [year, month] = key.split("-").map(Number);
+    const labels = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+    return {
+      name: `ventas ${labels[month - 1]} ${year}.xlsx`,
+      rows: ventasForResolve.filter((row) => {
+        if (!row.monthlyTotal) return false;
+        const rowKey = `${row.fecha.getFullYear()}-${String(row.fecha.getMonth() + 1).padStart(2, "0")}`;
+        return rowKey === key;
+      }),
+    };
+  });
+  const resolvedAppDefault = app.resolveCanonicalMonthSources([dailySource, ...closeSources]);
+  const juneDecision = resolvedAppDefault.decisions.find((decision) => decision.month === "2026-06");
+  assert(juneDecision?.strategy === "keep-daily-and-close", "resolveCanonical debe conservar diario+cierre de junio");
+  assert(juneDecision.kept.includes(dailySource.name), "el diario combinado de junio no se omite");
+  const resolvedVentas = resolvedAppDefault.entries.flatMap((entry) => entry.rows);
+  const resolvedJuly = evaluateMonth(app, realishStock, resolvedVentas, "2026-07");
+  const resolvedAugust = evaluateMonth(app, realishStock, resolvedVentas, "2026-08");
+  const resolvedFrutas = pick(resolvedJuly, "FRUTAS GDE");
+  const exclusiveJune = app.resolveCanonicalMonthSources([dailySource, ...closeSources], { "2026-06": "ventas junio 2026.xlsx" });
+  const exclusiveVentas = exclusiveJune.entries.flatMap((entry) => entry.rows);
+  const exclusiveJuly = evaluateMonth(app, realishStock, exclusiveVentas, "2026-07");
+  const exclusiveFrutas = pick(exclusiveJuly, "FRUTAS GDE");
+  assert(resolvedFrutas.forecast > exclusiveFrutas.forecast + 20, `con resolveCanonical el impulso debe subir FRUTAS vs cierre-solo (${resolvedFrutas.forecast.toFixed(1)} vs ${exclusiveFrutas.forecast.toFixed(1)})`);
+  assert(resolvedFrutas.absoluteError < exclusiveFrutas.absoluteError, "el error de FRUTAS GDE julio debe bajar al conservar el diario");
+  assert(Math.abs(resolvedJuly.wape - realJuly.wape) < 0.15, "el WAPE de julio por resolveCanonical debe empatar con diario+cierre directo");
+  assert(Math.abs(resolvedAugust.wape - realAugust.wape) < 0.15, "agosto no debe empeorar por conservar el diario de junio");
+
+  const uploadDir = process.env.WAPE_UPLOAD_DIR
+    || "/home/ubuntu/.cursor/projects/workspace/uploads";
+  const excelCandidates = {
+    stock: ["stock_ideal_849e.xlsx", "stock_ideal.xlsx"],
+    daily: ["ventas_mayo_junio_angel_8999.xlsx", "ventas_mayo_junio_angel.xlsx"],
+    juneClose: ["ventas_junio_4303.xlsx", "ventas_junio.xlsx"],
+    julyClose: ["ventas_julio_a94f.xlsx", "ventas_julio.xlsx"],
+  };
+  function findExcel(names) {
+    const dirs = [uploadDir, path.join(__dirname, "..", "wape-excel"), process.env.WAPE_EXCEL_DIR].filter(Boolean);
+    for (const dir of dirs) {
+      for (const name of names) {
+        const full = path.join(dir, name);
+        if (fs.existsSync(full)) return full;
+      }
+    }
+    return null;
+  }
+  const excelPaths = {
+    stock: findExcel(excelCandidates.stock),
+    daily: findExcel(excelCandidates.daily),
+    juneClose: findExcel(excelCandidates.juneClose),
+    julyClose: findExcel(excelCandidates.julyClose),
+  };
+  let plantExcel = null;
+  if (Object.values(excelPaths).every(Boolean)) {
+    const stockRowsPlant = app.parseStock(XLSX.readFile(excelPaths.stock, { cellDates: true }));
+    const dailyRows = app.parseSalesOrReturns(XLSX.readFile(excelPaths.daily, { cellDates: true }), "ventas", "VENTAS DE MAYO Y JUNIO 2026.xlsx");
+    const juneCloseRows = app.parseSalesOrReturns(XLSX.readFile(excelPaths.juneClose, { cellDates: true }), "ventas", "ventas junio.xlsx");
+    const julyCloseRows = app.parseSalesOrReturns(XLSX.readFile(excelPaths.julyClose, { cellDates: true }), "ventas", "ventas julio.xlsx");
+    assert(juneCloseRows.some((row) => row.monthlyTotal), "el Excel de junio dedicado debe parsearse como cierre");
+    assert(dailyRows.some((row) => !row.monthlyTotal && String(row.fecha).includes("2026-06") || (row.fecha instanceof Date && row.fecha.getMonth() === 5)), "el combinado debe traer diario de junio");
+    const plantResolved = app.resolveCanonicalMonthSources([
+      { name: "VENTAS DE MAYO Y JUNIO 2026.xlsx", rows: dailyRows },
+      { name: "ventas junio.xlsx", rows: juneCloseRows },
+      { name: "ventas julio.xlsx", rows: julyCloseRows },
+    ]);
+    const plantJune = plantResolved.decisions.find((decision) => decision.month === "2026-06");
+    assert(plantJune?.strategy === "keep-daily-and-close", "en los Excel de planta junio diario+cierre son complementarios");
+    const plantVentas = plantResolved.entries.flatMap((entry) => entry.rows);
+    const juneCoverage = app.buildSalesMonthCoverage(plantVentas).find((row) => row.monthKey === "2026-06");
+    assert(juneCoverage?.status === "complete", "junio plantilla debe quedar complete (diario + cierre)");
+    const plantJuly = evaluateMonth(app, stockRowsPlant, plantVentas, "2026-07");
+    const exclusivePlant = app.resolveCanonicalMonthSources([
+      { name: "VENTAS DE MAYO Y JUNIO 2026.xlsx", rows: dailyRows },
+      { name: "ventas junio.xlsx", rows: juneCloseRows },
+      { name: "ventas julio.xlsx", rows: julyCloseRows },
+    ], { "2026-06": "ventas junio.xlsx" });
+    const exclusivePlantJuly = evaluateMonth(app, stockRowsPlant, exclusivePlant.entries.flatMap((entry) => entry.rows), "2026-07");
+    const gdeAbs = (analysis) => analysis.rows.filter((row) => /GDE$/i.test(row.producto)).reduce((sum, row) => sum + row.absoluteError, 0);
+    assert(plantJuly.wape < exclusivePlantJuly.wape, `julio WAPE app-default debe mejorar vs cierre-solo (${plantJuly.wape.toFixed(2)} vs ${exclusivePlantJuly.wape.toFixed(2)})`);
+    assert(gdeAbs(plantJuly) < gdeAbs(exclusivePlantJuly) - 30, "el error absoluto GDE de julio debe bajar al conservar el diario de junio");
+    plantExcel = {
+      julyWape: Number(plantJuly.wape.toFixed(2)),
+      julyWapeCloseOnly: Number(exclusivePlantJuly.wape.toFixed(2)),
+      gdeAbs: Number(gdeAbs(plantJuly).toFixed(2)),
+      gdeAbsCloseOnly: Number(gdeAbs(exclusivePlantJuly).toFixed(2)),
+    };
+  }
+
   console.log("forecast-accuracy-test ok");
   console.log(
     JSON.stringify(
@@ -231,6 +341,14 @@ async function main() {
           moka: Number(realMoka.forecast.toFixed(1)),
           mm: Number(realMm.forecast.toFixed(1)),
         },
+        resolveCanonical: {
+          july: Number(resolvedJuly.wape.toFixed(2)),
+          julyCloseOnly: Number(exclusiveJuly.wape.toFixed(2)),
+          frutas: Number(resolvedFrutas.forecast.toFixed(1)),
+          frutasCloseOnly: Number(exclusiveFrutas.forecast.toFixed(1)),
+          august: Number(resolvedAugust.wape.toFixed(2)),
+        },
+        plantExcel,
       },
       null,
       2

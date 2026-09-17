@@ -345,6 +345,7 @@ async function main() {
       preferredStrategy: "keep complementary daily + monthly close",
       preferredDecisions: preferred.decisions,
       appDefaultDecisions: appDefault.decisions,
+      note: "Desde el fix de diario+cierre, resolveCanonicalMonthSources (app-default) también conserva el diario cuando hay cierre dedicado.",
     },
     coverage,
     dataGaps: { missingMonths },
