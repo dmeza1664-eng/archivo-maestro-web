@@ -1664,9 +1664,10 @@ function calculateForecast({
   const monthDates = datesForMonth(selectedMonth);
 
   return stockRows.filter((s) => !isSliceProduct(s.producto) && !isPromotionalProduct(s.producto)).map((s) => {
-    const v = fillCompleteZeroMonths(ventasByProduct.get(s.producto) || [], completeHistoricalMonths);
-    const b = bajasByProduct.get(s.producto) || [];
-    const forecastModel = calculateForecastModelForVersion(v, selectedMonth, s.producto, modelVersion);
+    const product = normalizeProduct(s.producto);
+    const v = fillCompleteZeroMonths(ventasByProduct.get(product) || ventasByProduct.get(s.producto) || [], completeHistoricalMonths);
+    const b = bajasByProduct.get(product) || bajasByProduct.get(s.producto) || [];
+    const forecastModel = calculateForecastModelForVersion(v, selectedMonth, product, modelVersion);
     const weekdayRow = buildWeekdayRow(forecastModel.averages);
 
     let pronosticoVenta = 0;
@@ -1690,13 +1691,13 @@ function calculateForecast({
     const baseConColchon = pronosticoVenta + colchonOperativo;
     const produccionSugerida = getProduccionSugerida(s.producto, baseConColchon);
 
-    const ex = existMap.get(s.producto) || { totalSuc: 0, cf: 0, sumaSucCf: 0 };
+    const ex = existMap.get(product) || existMap.get(s.producto) || { totalSuc: 0, cf: 0, sumaSucCf: 0 };
     const sumaSucCf = ex.sumaSucCf || ex.totalSuc + ex.cf;
     const inventarioObjetivo = s.stock;
     const produccionBalanceada = (inventarioObjetivo - sumaSucCf + produccionSugerida) / 2;
     const produccionRecomendada = Math.max(0, getProduccionSugerida(s.producto, produccionBalanceada));
-    const hasRealData = realMap.has(s.producto);
-    const produccionReal = hasRealData ? realMap.get(s.producto) : 0;
+    const hasRealData = realMap.has(product) || realMap.has(s.producto);
+    const produccionReal = hasRealData ? (realMap.get(product) ?? realMap.get(s.producto) ?? 0) : 0;
     const diferenciaReal = produccionReal - produccionSugerida;
     const precision =
       hasRealData && produccionReal > 0
@@ -1767,6 +1768,75 @@ function previousMonthKey(monthKey) {
   if (!year || !month) return "";
   const previous = new Date(year, month - 2, 1);
   return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function nextMonthKey(monthKey) {
+  const [year, month] = String(monthKey).split("-").map(Number);
+  if (!year || !month) return "";
+  const next = new Date(year, month, 1);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthTotalFromData(monthlyData, monthKey) {
+  return monthlyData.get(monthKey)?.total || 0;
+}
+
+// Julio 2025 cayó ~12% vs junio y julio 2026 subió. Copiar el mismo mes del
+// año anterior arrastra esa caída atípica. Si el mes análogo está claro por
+// debajo de sus vecinos, se usa el nivel de esos vecinos y se conserva la
+// forma semanal del mes original. Si el mes análogo no existe, se toma el
+// vecino más cercano del año anterior.
+function resolvePriorYearSeasonal(monthlyData, targetMonth) {
+  const priorYearMonth = sameMonthPreviousYear(targetMonth);
+  if (!priorYearMonth) return null;
+  const priorTotal = monthTotalFromData(monthlyData, priorYearMonth);
+  const neighborKeys = [
+    previousMonthKey(previousMonthKey(priorYearMonth)),
+    previousMonthKey(priorYearMonth),
+    nextMonthKey(priorYearMonth),
+    nextMonthKey(nextMonthKey(priorYearMonth)),
+  ].filter((key) => key && key < targetMonth);
+  const neighbors = neighborKeys
+    .map((key) => ({ key, total: monthTotalFromData(monthlyData, key) }))
+    .filter((row) => row.total > 0);
+  const neighborMedian = neighbors.length ? median(neighbors.map((row) => row.total)) : 0;
+  const previousOfPriorTotal = monthTotalFromData(monthlyData, previousMonthKey(priorYearMonth));
+  const isDip = priorTotal > 0 && neighbors.length >= 1 && (
+    (neighborMedian > 0 && priorTotal < neighborMedian * 0.9) ||
+    (previousOfPriorTotal > 0 && priorTotal < previousOfPriorTotal * 0.9)
+  );
+
+  if (priorTotal > 0 && !isDip) {
+    return {
+      monthKey: priorYearMonth,
+      levelFactor: 1,
+      sourceMonths: [priorYearMonth],
+      usedProxy: false,
+      usedDipCorrection: false,
+    };
+  }
+
+  if (isDip && neighborMedian > 0 && priorTotal > 0) {
+    return {
+      monthKey: priorYearMonth,
+      levelFactor: neighborMedian / priorTotal,
+      sourceMonths: [priorYearMonth, ...neighbors.map((row) => row.key)],
+      usedProxy: false,
+      usedDipCorrection: true,
+    };
+  }
+
+  const previousNeighbor = neighbors.find((row) => row.key === previousMonthKey(priorYearMonth));
+  const nextNeighbor = neighbors.find((row) => row.key === nextMonthKey(priorYearMonth));
+  const proxy = nextNeighbor || previousNeighbor || neighbors.at(-1);
+  if (!proxy) return null;
+  return {
+    monthKey: proxy.key,
+    levelFactor: 1,
+    sourceMonths: [proxy.key],
+    usedProxy: true,
+    usedDipCorrection: false,
+  };
 }
 
 function daysInMonthKey(monthKey) {
@@ -1980,7 +2050,10 @@ function computeAnnualGrowthFactor(monthlyData, targetMonth, lookbackMonths = 1)
     cursor = previousMonthKey(cursor);
   }
   if (!ratios.length) return 1;
-  return clamp(ratios.length === 1 ? ratios[0] : median(ratios), 0.8, 1.2);
+  const central = ratios.length === 1 ? ratios[0] : median(ratios);
+  const strongGrowthMonths = ratios.filter((ratio) => ratio >= 1.12).length;
+  const upper = strongGrowthMonths >= 2 ? 1.28 : 1.2;
+  return clamp(central, 0.8, upper);
 }
 
 function summarizeForecastAccuracy(rows) {
@@ -1994,6 +2067,44 @@ function summarizeForecastAccuracy(rows) {
     wape: actual > 0 ? (absoluteError / actual) * 100 : null,
     mae: rows.length ? absoluteError / rows.length : null,
     inside15: rows.filter((row) => Math.abs(row.actual - row.forecast) <= 15).length,
+  };
+}
+
+function analyzeForecastProductErrors(forecastRows, actualMap = new Map(), { topN = 20 } = {}) {
+  const rows = (forecastRows || []).map((row) => {
+    const product = normalizeProduct(row.producto || row.product || "");
+    const forecast = toNumber(row.pronosticoVenta ?? row.forecast);
+    const actual = toNumber(
+      actualMap.get(product) ??
+      actualMap.get(row.producto) ??
+      row.actual
+    );
+    const absoluteError = Math.abs(actual - forecast);
+    return {
+      producto: row.producto || product,
+      categoria: productCategory(row.producto || product),
+      metodo: row.metodoPronostico || row.method || "",
+      actual,
+      forecast,
+      error: actual - forecast,
+      absoluteError,
+      wape: actual > 0 ? (absoluteError / actual) * 100 : forecast > 0 ? 100 : 0,
+    };
+  });
+  const summary = summarizeForecastAccuracy(rows.map((row) => ({ actual: row.actual, forecast: row.forecast })));
+  const totalAbs = rows.reduce((sum, row) => sum + row.absoluteError, 0);
+  const totalActual = summary.actual;
+  const ranked = rows
+    .map((row) => ({
+      ...row,
+      errorShare: totalAbs > 0 ? row.absoluteError / totalAbs : 0,
+      volumeShare: totalActual > 0 ? row.actual / totalActual : 0,
+    }))
+    .sort((a, b) => b.absoluteError - a.absoluteError || a.producto.localeCompare(b.producto, "es"));
+  return {
+    ...summary,
+    topErrors: ranked.slice(0, topN),
+    rows: ranked,
   };
 }
 
@@ -2071,16 +2182,18 @@ function buildForecastHealth({
         const product = normalizeProduct(row.producto);
         actualMap.set(product, (actualMap.get(product) || 0) + toNumber(row.cantidad));
       }
+      const comparison = forecastRows.map((row) => ({
+        producto: row.producto,
+        metodoPronostico: row.metodoPronostico,
+        forecast: toNumber(row.pronosticoVenta),
+        actual: actualMap.get(normalizeProduct(row.producto)) || 0,
+      }));
+      const productErrors = analyzeForecastProductErrors(comparison, actualMap, { topN: 12 });
       backtests.push({
         month: hideMonth,
         historyMonths: [...new Set(historical.map((row) => monthKeyFromRecord(row)).filter(Boolean))].sort(),
-        ...summarizeForecastAccuracy(
-          forecastRows.map((row) => ({
-            producto: row.producto,
-            forecast: toNumber(row.pronosticoVenta),
-            actual: actualMap.get(normalizeProduct(row.producto)) || 0,
-          }))
-        ),
+        ...summarizeForecastAccuracy(comparison),
+        topErrors: productErrors.topErrors,
       });
     }
   }
@@ -2180,22 +2293,72 @@ function buildMonthlyForecastData(records) {
         for (let day = 1; day <= monthData.syntheticDays; day += 1) {
           monthData.valuesByDate.set(dateKey(new Date(year, month - 1, day)), dailyValue);
         }
+        monthData.filledFromMonthlyTotal = true;
       }
     } else {
       monthData.total = [...monthData.valuesByDate.values()].reduce((sum, value) => sum + value, 0);
     }
-    monthData.dailyRate = monthData.valuesByDate.size ? monthData.total / monthData.valuesByDate.size : 0;
-    monthData.weekdays = new Map();
-    for (const [key, value] of monthData.valuesByDate.entries()) {
-      const weekday = parseDateCell(`${key}T12:00:00`)?.getDay();
-      if (weekday === undefined) continue;
-      const bucket = monthData.weekdays.get(weekday) || { total: 0, count: 0 };
-      bucket.total += value;
-      bucket.count += 1;
-      monthData.weekdays.set(weekday, bucket);
-    }
+    rebuildMonthWeekdays(monthData);
   }
+
+  applyInheritedWeekdayShape(monthlyData);
   return monthlyData;
+}
+
+function rebuildMonthWeekdays(monthData) {
+  monthData.dailyRate = monthData.valuesByDate.size ? monthData.total / monthData.valuesByDate.size : 0;
+  monthData.weekdays = new Map();
+  for (const [key, value] of monthData.valuesByDate.entries()) {
+    const weekday = parseDateCell(`${key}T12:00:00`)?.getDay();
+    if (weekday === undefined) continue;
+    const bucket = monthData.weekdays.get(weekday) || { total: 0, count: 0 };
+    bucket.total += value;
+    bucket.count += 1;
+    monthData.weekdays.set(weekday, bucket);
+  }
+}
+
+function weekdayShapeStrength(monthData) {
+  const averages = [...(monthData.weekdays?.values() || [])]
+    .filter((bucket) => bucket.count)
+    .map((bucket) => bucket.total / bucket.count);
+  if (averages.length < 4) return 0;
+  const max = Math.max(...averages);
+  const min = Math.min(...averages.filter((value) => value > 0));
+  if (!(max > 0) || !Number.isFinite(min)) return 0;
+  return (max - min) / max;
+}
+
+function applyInheritedWeekdayShape(monthlyData) {
+  const donors = [...monthlyData.entries()]
+    .filter(([, data]) => !data.filledFromMonthlyTotal && weekdayShapeStrength(data) >= 0.08)
+    .map(([key]) => key)
+    .sort();
+  if (!donors.length) return;
+
+  for (const [monthKey, monthData] of monthlyData.entries()) {
+    if (!monthData.filledFromMonthlyTotal || !monthData.total || !monthData.syntheticDays) continue;
+    const donorKey = [...donors].reverse().find((key) => key < monthKey) || donors.find((key) => key > monthKey);
+    if (!donorKey) continue;
+    const donor = monthlyData.get(donorKey);
+    const donorWeekdayAvg = new Map();
+    for (const [weekday, bucket] of donor.weekdays.entries()) {
+      if (bucket.count) donorWeekdayAvg.set(weekday, bucket.total / bucket.count);
+    }
+    const donorMean = [...donorWeekdayAvg.values()].reduce((sum, value) => sum + value, 0) / Math.max(1, donorWeekdayAvg.size);
+    if (donorMean <= 0) continue;
+    const [year, month] = monthKey.split("-").map(Number);
+    const shaped = new Map();
+    for (let day = 1; day <= monthData.syntheticDays; day += 1) {
+      const date = new Date(year, month - 1, day);
+      shaped.set(dateKey(date), donorWeekdayAvg.get(date.getDay()) || donorMean);
+    }
+    const shapedTotal = [...shaped.values()].reduce((sum, value) => sum + value, 0);
+    const factor = shapedTotal > 0 ? monthData.total / shapedTotal : 0;
+    monthData.valuesByDate = new Map([...shaped.entries()].map(([key, value]) => [key, value * factor]));
+    monthData.inheritedWeekdayShapeFrom = donorKey;
+    rebuildMonthWeekdays(monthData);
+  }
 }
 
 function uniformWeekdayAverages(dailyValue) {
@@ -2310,17 +2473,17 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
     [latestMonth]
   );
 
-  const priorYearMonth = sameMonthPreviousYear(targetMonth);
-  if (monthlyData.has(priorYearMonth)) {
+  const seasonalRef = resolvePriorYearSeasonal(monthlyData, targetMonth);
+  if (seasonalRef) {
     const previousTargetMonth = previousMonthKey(targetMonth);
     const previousYearReference = sameMonthPreviousYear(previousTargetMonth);
     const growth = computeAnnualGrowthFactor(monthlyData, targetMonth, growthLookback);
-    const seasonalBase = weightedWeekdayAverages(monthlyData, [priorYearMonth], [1]);
-    const adjustedSeasonal = scaleForecastAverages(seasonalBase, growth);
+    const seasonalBase = weightedWeekdayAverages(monthlyData, [seasonalRef.monthKey], [1]);
+    const adjustedSeasonal = scaleForecastAverages(seasonalBase, growth * seasonalRef.levelFactor);
     addCandidate(
       "Mismo mes año anterior",
       adjustedSeasonal,
-      [priorYearMonth, previousTargetMonth, previousYearReference].filter(Boolean)
+      [...new Set([seasonalRef.monthKey, ...seasonalRef.sourceMonths, previousTargetMonth, previousYearReference].filter(Boolean))]
     );
     const recentWeights = recentMonths.length === 1 ? [1] : recentMonths.length === 2 ? [0.35, 0.65] : [0.2, 0.3, 0.5];
     const recentBase = weightedWeekdayAverages(monthlyData, recentMonths, recentWeights);
@@ -2328,10 +2491,19 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
     const recentTotal = forecastTotalFromAverages(recentBase, targetMonth);
     const referencesDiffer = Math.max(seasonalTotal, recentTotal) > 0 &&
       Math.abs(seasonalTotal - recentTotal) / Math.max(seasonalTotal, recentTotal) > seasonalSplit;
+    let seasonalShare = referencesDiffer ? 0.5 : 0.9;
+    // Si lo reciente ya corre por encima del año anterior, no arrastrar el
+    // pronóstico hacia una baja que este año no se está cumpliendo.
+    if (recentTotal > seasonalTotal && seasonalTotal > 0) {
+      const lift = (recentTotal - seasonalTotal) / recentTotal;
+      seasonalShare = referencesDiffer
+        ? clamp(0.5 - lift * 0.3, 0.35, 0.5)
+        : clamp(0.9 - lift, 0.45, 0.9);
+    }
     addCandidate(
       "Estacional-reciente",
-      blendForecastAverages(adjustedSeasonal, recentBase, referencesDiffer ? 0.5 : 0.9),
-      [...new Set([priorYearMonth, ...recentMonths])]
+      blendForecastAverages(adjustedSeasonal, recentBase, seasonalShare),
+      [...new Set([seasonalRef.monthKey, ...seasonalRef.sourceMonths, ...recentMonths])]
     );
   }
 
@@ -2390,14 +2562,19 @@ function calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, 
   if (useConservativeBacktest) return legacy;
   const candidates = buildForecastCandidates(buildMonthlyForecastData(records), selectedMonth, forecastOptions);
   const seasonal = candidates.get("Estacional-reciente") || candidates.get("Mismo mes año anterior");
-  const recent = candidates.get("Último mes por día");
+  const recent = candidates.get("Último mes por día") || candidates.get("Último total mensual");
   if (!seasonal || !recent || recent.total <= 0 || Math.abs(seasonal.total - recent.total) / recent.total < 0.08) {
     return legacy;
   }
+  let weight = seasonalWeight;
+  if (recent.total > seasonal.total) {
+    const lift = (recent.total - seasonal.total) / recent.total;
+    weight = clamp(seasonalWeight - lift, Math.min(0.25, seasonalWeight), seasonalWeight);
+  }
   return {
     ...legacy,
-    averages: blendForecastAverages(seasonal.averages, legacy.averages, seasonalWeight),
-    method: `Resguardo estacional ${Math.round(seasonalWeight * 100)}%`,
+    averages: blendForecastAverages(seasonal.averages, legacy.averages, weight),
+    method: `Resguardo estacional ${Math.round(weight * 100)}%`,
     recentMonths: [...new Set([...legacy.recentMonths, ...seasonal.sourceMonths])],
   };
 }
@@ -2405,12 +2582,12 @@ function calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, 
 // El peso estacional fijo falla cuando la forma del año anterior contradice la tendencia
 // reciente. Aqui se elige por producto probando varios pesos contra los ultimos meses,
 // usando solo informacion anterior a cada mes de validacion.
-function calculateForecastModelSeasonalAdaptive(records, selectedMonth, candidateWeights = [0, 0.25, 0.5, 0.75, 1]) {
+function calculateForecastModelSeasonalAdaptive(records, selectedMonth, candidateWeights = [0, 0.25, 0.5, 0.75, 1], forecastOptions = {}) {
   const monthlyData = buildMonthlyForecastData(records);
   const historicalMonths = [...monthlyData.keys()].filter((month) => month < selectedMonth).sort();
   const validationMonths = historicalMonths.slice(-3);
   const fallbackWeight = ["Otros", "Mini medianos"].includes(productCategory(records[0]?.producto || "")) ? 0.5 : 0.75;
-  if (validationMonths.length < 2) return calculateForecastModelSeasonal(records, selectedMonth, fallbackWeight);
+  if (validationMonths.length < 2) return calculateForecastModelSeasonal(records, selectedMonth, fallbackWeight, forecastOptions);
 
   const scores = new Map(candidateWeights.map((weight) => [weight, { error: 0, scale: 0 }]));
   validationMonths.forEach((validationMonth, index) => {
@@ -2422,7 +2599,7 @@ function calculateForecastModelSeasonalAdaptive(records, selectedMonth, candidat
     if (!priorRecords.length) return;
     const recencyWeight = 1 + index * 0.5;
     for (const candidateWeight of candidateWeights) {
-      const model = calculateForecastModelSeasonal(priorRecords, validationMonth, candidateWeight);
+      const model = calculateForecastModelSeasonal(priorRecords, validationMonth, candidateWeight, forecastOptions);
       const total = forecastTotalFromAverages(model.averages, validationMonth);
       const score = scores.get(candidateWeight);
       score.error += Math.abs(actual - total) * recencyWeight;
@@ -2441,7 +2618,12 @@ function calculateForecastModelSeasonalAdaptive(records, selectedMonth, candidat
     }
   }
 
-  const model = calculateForecastModelSeasonal(records, selectedMonth, bestWeight);
+  const fallbackScore = scores.get(fallbackWeight)?.scale
+    ? scores.get(fallbackWeight).error / scores.get(fallbackWeight).scale
+    : Infinity;
+  if (!(bestScore < fallbackScore * 0.96)) bestWeight = fallbackWeight;
+
+  const model = calculateForecastModelSeasonal(records, selectedMonth, bestWeight, forecastOptions);
   return { ...model, method: `Estacional adaptativo ${Math.round(bestWeight * 100)}%` };
 }
 
@@ -2449,8 +2631,13 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
   const version = String(modelVersion || FORECAST_MODEL_VERSION);
   if (version === "seasonalAdaptive") return calculateForecastModelSeasonalAdaptive(records, selectedMonth);
   if (version === "categorySeasonal" || version.startsWith("csG")) {
-    const seasonalWeight = ["Otros", "Mini medianos"].includes(productCategory(product)) ? 0.5 : 0.75;
-    return calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, forecastTuningOptions(version));
+    const options = forecastTuningOptions(version);
+    const category = productCategory(product);
+    const seasonalWeight = ["Otros", "Mini medianos"].includes(category) ? 0.5 : 0.75;
+    if (category === "Pasteles grandes") {
+      return calculateForecastModelSeasonalAdaptive(records, selectedMonth, [0.25, 0.5, 0.75], options);
+    }
+    return calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, options);
   }
   if (version.startsWith("seasonal")) {
     return calculateForecastModelSeasonal(records, selectedMonth, Number(version.replace("seasonal", "")) / 100);
@@ -3907,6 +4094,7 @@ function ForecastHealthStrip({ health, selectedMonth }) {
     health.checks.find((item) => item.level === "error") ||
     health.checks.find((item) => item.level === "warning") ||
     health.checks.find((item) => item.level === "ok");
+  const topErrors = (latest?.topErrors || []).slice(0, 5);
   return (
     <section className={`freeze-strip forecast-health-strip ${health.healthy ? "success" : "warning"}`}>
       <div className="freeze-strip-stats">
@@ -3920,6 +4108,12 @@ function ForecastHealthStrip({ health, selectedMonth }) {
       {alert && (
         <p className={`freeze-strip-alert ${alert.level === "error" ? "blocked" : alert.level === "ok" ? "ok" : "warn"}`}>
           {alert.message}
+        </p>
+      )}
+      {topErrors.length > 0 && (
+        <p className="freeze-strip-alert warn forecast-health-errors">
+          Más error absoluto en {shortMonthLabel(latest.month)}:{" "}
+          {topErrors.map((row) => `${row.producto} (${row.error > 0 ? "+" : ""}${Math.round(row.error)})`).join(" · ")}
         </p>
       )}
     </section>
@@ -6876,12 +7070,14 @@ function App() {
 export {
   assessForecastFreezeReadiness,
   assessStockSheetSelection,
+  analyzeForecastProductErrors,
   buildForecastHealth,
   buildMonthlyCloseSummary,
   buildOperationalForecastScenario,
   buildSalesMonthCoverage,
   buildWeeklyProgress,
   calculateForecast,
+  buildMonthlyForecastData,
   getProduccionSugerida,
   consolidateOperationalRowsForUpload,
   consolidateSalesRowsForUpload,

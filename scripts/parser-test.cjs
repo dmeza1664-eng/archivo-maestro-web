@@ -59,7 +59,9 @@ async function main() {
     assessStockSheetSelection,
     buildSalesMonthCoverage,
     buildForecastHealth,
+    analyzeForecastProductErrors,
     calculateForecast,
+    buildMonthlyForecastData,
     getProduccionSugerida,
     countCapturedProductStatuses,
   } = await loadAppFunctions();
@@ -209,6 +211,15 @@ async function main() {
   ]);
   assert(Math.abs(computeAnnualGrowthFactor(growthData, "2026-06", 1) - 0.9) < 1e-9, "un mes de crecimiento usa solo el mes previo");
   assert(Math.abs(computeAnnualGrowthFactor(growthData, "2026-06", 3) - 1.1) < 1e-9, "tres meses usan la mediana anual");
+  const strongGrowth = new Map([
+    ["2025-03", { total: 100 }],
+    ["2025-04", { total: 100 }],
+    ["2025-05", { total: 100 }],
+    ["2026-03", { total: 140 }],
+    ["2026-04", { total: 130 }],
+    ["2026-05", { total: 90 }],
+  ]);
+  assert(Math.abs(computeAnnualGrowthFactor(strongGrowth, "2026-06", 3) - 1.28) < 1e-9, "dos meses fuertes permiten un tope de 1.28");
 
   function dailyRowsForMonth(monthKey, dayCount, quantity = 10) {
     const [year, month] = monthKey.split("-").map(Number);
@@ -354,6 +365,7 @@ async function main() {
   assert(health.currentTotal > 0, "con stock y cierres el pronóstico de agosto no puede ser cero");
   assert(health.backtests.length >= 1, "debe comparar al menos un mes oculto contra su venta real");
   assert(health.backtests.every((row) => row.wape !== null), "cada mes oculto debe tener WAPE");
+  assert(health.backtests.every((row) => Array.isArray(row.topErrors)), "cada mes oculto debe listar productos con más error absoluto");
   assert(health.checks.some((item) => item.code === "missing-year-ago"), "sin 2025 debe avisar que no hay estacionalidad");
   assert(health.checks.some((item) => item.code === "forecast-ready"), "con total > 0 el control marca el modelo activo");
 
@@ -368,6 +380,45 @@ async function main() {
   });
   assert(juneOnlyForecast[0].pronosticoVenta > 0, "un solo cierre mensual debe producir pronóstico");
   assert(juneOnlyForecast[0].metodoPronostico !== "Sin histórico", "un cierre de junio no debe etiquetarse como sin histórico");
+
+  const cheesecakeForecast = calculateForecast({
+    stockRows: [{ producto: "CHEESECAKE GDE", stock: 20, orden: 1 }],
+    historicalVentas: [monthClose("2026-06", "CHEESECAKE GDE", 180)],
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 10,
+  });
+  assert(cheesecakeForecast[0].pronosticoVenta > 0, "CHEESECAKE del catálogo debe empatar con las ventas homologadas a CHESSECAKE");
+
+  const rankedErrors = analyzeForecastProductErrors([
+    { producto: "FRUTAS GDE", forecast: 400, actual: 520 },
+    { producto: "GELATINA IND FRESA", forecast: 200, actual: 205 },
+    { producto: "GALLETA NUEZ", forecast: 90, actual: 88 },
+  ]);
+  assert(rankedErrors.topErrors[0].producto === "FRUTAS GDE", "el análisis debe poner primero al producto con más error absoluto");
+  assert(rankedErrors.topErrors[0].errorShare > 0.8, "FRUTAS GDE debe concentrar la mayor parte del error absoluto");
+  assert(rankedErrors.wape > 10, "el WAPE del ejemplo de FRUTAS debe quedar por encima de 10");
+
+  const juneDaily = [];
+  const [juneYear, juneMonth] = [2026, 6];
+  for (let day = 1; day <= 30; day += 1) {
+    const fecha = new Date(juneYear, juneMonth - 1, day);
+    const weekday = fecha.getDay();
+    juneDaily.push({
+      fecha,
+      producto: "PINA GDE",
+      cantidad: weekday === 6 ? 24 : weekday === 2 ? 8 : 12,
+    });
+  }
+  const julyCloseRows = monthClose("2026-07", "PINA GDE", 400);
+  const monthlyData = buildMonthlyForecastData([...juneDaily, julyCloseRows]);
+  const julyData = monthlyData.get("2026-07");
+  const saturday = julyData.weekdays.get(6);
+  const tuesday = julyData.weekdays.get(2);
+  assert(julyData.inheritedWeekdayShapeFrom === "2026-06", "el cierre de julio debe heredar la forma diaria de junio");
+  assert(saturday.total / saturday.count > tuesday.total / tuesday.count, "el sábado heredado debe quedar por encima del martes");
 
   assert(getProduccionSugerida("PINA GDE", 7.9) === 0, "menos de 8 no se produce");
   assert(getProduccionSugerida("PINA GDE", 8) === 10, "de 8 a 12 se hace lote 10");
