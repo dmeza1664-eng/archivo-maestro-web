@@ -3268,6 +3268,10 @@ tbody tr:hover {
   color: var(--green);
 }
 
+.freeze-strip-stat.warn strong {
+  color: #e0c36b;
+}
+
 .freeze-strip-stat.blocked strong {
   color: var(--danger);
 }
@@ -3288,6 +3292,12 @@ tbody tr:hover {
   border-color: rgba(213, 104, 104, 0.22);
   border-left-color: var(--danger);
   color: var(--danger);
+}
+
+.freeze-strip-alert.ok {
+  border-color: rgba(138, 169, 107, 0.22);
+  border-left-color: #8aa96b;
+  color: #b7c99a;
 }
 
 .user-admin-section {
