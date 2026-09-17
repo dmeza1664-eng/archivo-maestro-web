@@ -137,6 +137,86 @@ async function main() {
   assert(frutas.forecast > 480, "sin julio 2025 debe usar meses vecinos, no dejar FRUTAS en la caída de 440");
   assert(frutas.absoluteError < 40, "el proxy estacional no debe disparar el error de FRUTAS");
 
+  // Magnitudes reales de julio 2026: mayo pico (Día de las Madres), junio YoY
+  // plano, julio 2025 con caída suave (~8.5%), junio diario acelerando, y
+  // julio 2026 saltó (FRUTAS 519→580, MOKA 617→697). PAY baja en julio.
+  function juneDaily(product, firstHalf, secondHalf) {
+    const rows = [];
+    for (let day = 1; day <= 30; day += 1) {
+      const half = day <= 15 ? firstHalf : secondHalf;
+      rows.push({
+        fecha: new Date(2026, 5, day),
+        producto: product,
+        cantidad: half / 15,
+      });
+    }
+    rows.push(monthClose("2026-06", product, firstHalf + secondHalf));
+    return rows;
+  }
+
+  const realishStock = [
+    { producto: "FRUTAS GDE", stock: 40, orden: 1 },
+    { producto: "MOKA GDE", stock: 40, orden: 2 },
+    { producto: "M & M GDE", stock: 20, orden: 3 },
+    { producto: "PAY DE FRESA GDE", stock: 20, orden: 4 },
+    { producto: "FRUTAS MED", stock: 30, orden: 5 },
+  ];
+  const realishSeries = {
+    "FRUTAS GDE": {
+      "2025-03": 524, "2025-04": 500, "2025-05": 658, "2025-06": 519, "2025-07": 475, "2025-08": 524, "2025-09": 492, "2025-10": 512,
+      "2026-05": 660, "2026-07": 580, "2026-08": 541,
+    },
+    "MOKA GDE": {
+      "2025-03": 605, "2025-04": 605, "2025-05": 755, "2025-06": 624, "2025-07": 612, "2025-08": 639, "2025-09": 604, "2025-10": 652,
+      "2026-05": 720, "2026-07": 697, "2026-08": 619,
+    },
+    "M & M GDE": {
+      "2025-03": 302, "2025-04": 302, "2025-05": 320, "2025-06": 284, "2025-07": 308, "2025-08": 324, "2025-09": 298, "2025-10": 317,
+      "2026-05": 263, "2026-07": 324, "2026-08": 304,
+    },
+    "PAY DE FRESA GDE": {
+      "2025-03": 200, "2025-04": 175, "2025-05": 308, "2025-06": 264, "2025-07": 199, "2025-08": 222, "2025-09": 168, "2025-10": 194,
+      "2026-05": 285, "2026-07": 212, "2026-08": 181,
+    },
+    "FRUTAS MED": {
+      "2025-03": 530, "2025-04": 510, "2025-05": 640, "2025-06": 520, "2025-07": 500, "2025-08": 530, "2025-09": 510, "2025-10": 520,
+      "2026-05": 642, "2026-06": 522, "2026-07": 530, "2026-08": 528,
+    },
+  };
+  const realishVentas = [];
+  for (const [product, months] of Object.entries(realishSeries)) {
+    for (const [month, qty] of Object.entries(months)) {
+      realishVentas.push(monthClose(month, product, qty));
+    }
+  }
+  realishVentas.push(...juneDaily("FRUTAS GDE", 223, 296));
+  realishVentas.push(...juneDaily("MOKA GDE", 276, 341));
+  realishVentas.push(...juneDaily("M & M GDE", 115, 141));
+  realishVentas.push(...juneDaily("PAY DE FRESA GDE", 89, 165));
+
+  const realJune = evaluateMonth(app, realishStock, realishVentas, "2026-06");
+  const realJuly = evaluateMonth(app, realishStock, realishVentas, "2026-07");
+  const realAugust = evaluateMonth(app, realishStock, realishVentas, "2026-08");
+  const pick = (analysis, name) => analysis.rows.find((row) => row.producto === name);
+
+  assert(realJune.wape < 8, `junio real-like no debe romperse (WAPE ${realJune.wape.toFixed(2)}%)`);
+  assert(realAugust.wape < 12, `agosto real-like no debe dispararse (WAPE ${realAugust.wape.toFixed(2)}%)`);
+
+  const realFrutas = pick(realJuly, "FRUTAS GDE");
+  const realMoka = pick(realJuly, "MOKA GDE");
+  const realMm = pick(realJuly, "M & M GDE");
+  const realPay = pick(realJuly, "PAY DE FRESA GDE");
+  const realMed = pick(realJuly, "FRUTAS MED");
+  assert(realFrutas.absoluteError < 40, `FRUTAS GDE julio debe bajar del faltante ~70 (abs ${realFrutas.absoluteError.toFixed(1)})`);
+  assert(realFrutas.forecast > 540, `FRUTAS GDE debe subir de ~510 por el impulso de junio (fc ${realFrutas.forecast.toFixed(1)})`);
+  assert(realMoka.absoluteError < 40, `MOKA GDE julio debe bajar del faltante ~66 (abs ${realMoka.absoluteError.toFixed(1)})`);
+  assert(realMm.absoluteError < 40, `M & M GDE no debe recortar el julio 2025 de 308 (abs ${realMm.absoluteError.toFixed(1)})`);
+  assert(realPay.forecast < 270, `PAY DE FRESA no debe recibir el impulso (fc ${realPay.forecast.toFixed(1)})`);
+  assert(realMed.absoluteError < 45, `FRUTAS MED no es GDE: el cambio no debe dispararlo (abs ${realMed.absoluteError.toFixed(1)})`);
+
+  const augustFrutas = pick(realAugust, "FRUTAS GDE");
+  assert(augustFrutas.forecast < 600, `agosto FRUTAS no debe heredar el impulso de junio (fc ${augustFrutas.forecast.toFixed(1)})`);
+
   console.log("forecast-accuracy-test ok");
   console.log(
     JSON.stringify(
@@ -144,6 +224,14 @@ async function main() {
         june: { wape: Number(june.wape.toFixed(2)), inside15: june.inside15, top: june.topErrors[0].producto },
         july: { wape: Number(july.wape.toFixed(2)), inside15: july.inside15, top: july.topErrors[0].producto },
         august: { wape: Number(august.wape.toFixed(2)), inside15: august.inside15, top: august.topErrors[0].producto },
+        realish: {
+          june: Number(realJune.wape.toFixed(2)),
+          july: Number(realJuly.wape.toFixed(2)),
+          august: Number(realAugust.wape.toFixed(2)),
+          frutas: Number(realFrutas.forecast.toFixed(1)),
+          moka: Number(realMoka.forecast.toFixed(1)),
+          mm: Number(realMm.forecast.toFixed(1)),
+        },
       },
       null,
       2

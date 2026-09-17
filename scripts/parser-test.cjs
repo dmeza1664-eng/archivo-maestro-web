@@ -55,6 +55,8 @@ async function main() {
     parseStock,
     resolveCanonicalMonthSources,
     computeAnnualGrowthFactor,
+    resolvePriorYearSeasonal,
+    computeRecentMomentumFactor,
     assessForecastFreezeReadiness,
     assessStockSheetSelection,
     buildSalesMonthCoverage,
@@ -220,6 +222,56 @@ async function main() {
     ["2026-05", { total: 90 }],
   ]);
   assert(Math.abs(computeAnnualGrowthFactor(strongGrowth, "2026-06", 3) - 1.28) < 1e-9, "dos meses fuertes permiten un tope de 1.28");
+  assert(
+    Math.abs(computeAnnualGrowthFactor(growthData, "2026-06", 1, { dampenDecline: 0.4 }) - 0.96) < 1e-9,
+    "el recorte YoY de GDE se amortigua: 0.90 → 0.96"
+  );
+
+  const frutasDip = new Map([
+    ["2025-05", { total: 658 }],
+    ["2025-06", { total: 519 }],
+    ["2025-07", { total: 475 }],
+    ["2025-08", { total: 524 }],
+    ["2025-09", { total: 492 }],
+  ]);
+  const frutasRef = resolvePriorYearSeasonal(frutasDip, "2026-07");
+  assert(!frutasRef.usedDipCorrection, "sin dipRatio suave, FRUTAS 8.5% no corrige");
+  const frutasSoft = resolvePriorYearSeasonal(frutasDip, "2026-07", { dipRatio: 0.92 });
+  assert(frutasSoft.usedDipCorrection, "con umbral 8% FRUTAS sí corrige la caída de 475");
+  assert(frutasSoft.levelFactor > 1.08, "la corrección debe subir al nivel de los vecinos (~522)");
+
+  function monthWithHalves(monthKey, firstHalf, secondHalf, days = 30) {
+    const [year, month] = monthKey.split("-").map(Number);
+    const valuesByDate = new Map();
+    for (let day = 1; day <= days; day += 1) {
+      const key = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      valuesByDate.set(key, day <= 15 ? firstHalf / 15 : secondHalf / (days - 15));
+    }
+    return { total: firstHalf + secondHalf, valuesByDate, filledFromMonthlyTotal: false };
+  }
+  const momentumData = new Map([
+    ["2025-06", { total: 519 }],
+    ["2025-07", { total: 475 }],
+    ["2025-08", { total: 524 }],
+    ["2026-06", monthWithHalves("2026-06", 223, 291)],
+  ]);
+  const momentum = computeRecentMomentumFactor(momentumData, "2026-07");
+  assert(momentum > 1.08 && momentum <= 1.12, `junio acelerado debe impulsar julio (factor ${momentum})`);
+  const maySource = new Map([
+    ["2026-05", monthWithHalves("2026-05", 200, 400, 31)],
+  ]);
+  assert(computeRecentMomentumFactor(maySource, "2026-06") === 1, "mayo (Día de las Madres) no impulsa junio");
+  const payFade = new Map([
+    ["2025-06", { total: 264 }],
+    ["2025-07", { total: 199 }],
+    ["2025-08", { total: 222 }],
+    ["2026-06", monthWithHalves("2026-06", 89, 159)],
+  ]);
+  assert(computeRecentMomentumFactor(payFade, "2026-07") === 1, "PAY DE FRESA es baja de temporada: sin impulso");
+  const julyCloseOnly = new Map([
+    ["2026-07", { total: 580, valuesByDate: new Map([["2026-07-01", 18.7]]), filledFromMonthlyTotal: true, syntheticDays: 31 }],
+  ]);
+  assert(computeRecentMomentumFactor(julyCloseOnly, "2026-08") === 1, "un cierre sin diario no impulsa agosto");
 
   function dailyRowsForMonth(monthKey, dayCount, quantity = 10) {
     const [year, month] = monthKey.split("-").map(Number);

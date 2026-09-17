@@ -1781,14 +1781,16 @@ function monthTotalFromData(monthlyData, monthKey) {
   return monthlyData.get(monthKey)?.total || 0;
 }
 
-// Julio 2025 cayó ~12% vs junio y julio 2026 subió. Copiar el mismo mes del
+// Julio 2025 cayó vs sus vecinos y julio 2026 subió. Copiar el mismo mes del
 // año anterior arrastra esa caída atípica. Si el mes análogo está claro por
 // debajo de sus vecinos, se usa el nivel de esos vecinos y se conserva la
 // forma semanal del mes original. Si el mes análogo no existe, se toma el
 // vecino más cercano del año anterior.
-function resolvePriorYearSeasonal(monthlyData, targetMonth) {
+// Pasteles grandes: umbral 8% (FRUTAS 2025 cayó ~8.5% y no disparaba el 10%).
+function resolvePriorYearSeasonal(monthlyData, targetMonth, options = {}) {
   const priorYearMonth = sameMonthPreviousYear(targetMonth);
   if (!priorYearMonth) return null;
+  const dipRatio = Number.isFinite(Number(options.dipRatio)) ? Number(options.dipRatio) : 0.9;
   const priorTotal = monthTotalFromData(monthlyData, priorYearMonth);
   const neighborKeys = [
     previousMonthKey(previousMonthKey(priorYearMonth)),
@@ -1802,8 +1804,8 @@ function resolvePriorYearSeasonal(monthlyData, targetMonth) {
   const neighborMedian = neighbors.length ? median(neighbors.map((row) => row.total)) : 0;
   const previousOfPriorTotal = monthTotalFromData(monthlyData, previousMonthKey(priorYearMonth));
   const isDip = priorTotal > 0 && neighbors.length >= 1 && (
-    (neighborMedian > 0 && priorTotal < neighborMedian * 0.9) ||
-    (previousOfPriorTotal > 0 && priorTotal < previousOfPriorTotal * 0.9)
+    (neighborMedian > 0 && priorTotal < neighborMedian * dipRatio) ||
+    (previousOfPriorTotal > 0 && priorTotal < previousOfPriorTotal * dipRatio)
   );
 
   if (priorTotal > 0 && !isDip) {
@@ -2038,7 +2040,7 @@ function sameMonthPreviousYear(monthKey) {
   return year && month ? `${year - 1}-${String(month).padStart(2, "0")}` : "";
 }
 
-function computeAnnualGrowthFactor(monthlyData, targetMonth, lookbackMonths = 1) {
+function computeAnnualGrowthFactor(monthlyData, targetMonth, lookbackMonths = 1, options = {}) {
   const ratios = [];
   let cursor = previousMonthKey(targetMonth);
   const limit = Math.max(1, Number(lookbackMonths) || 1);
@@ -2053,7 +2055,82 @@ function computeAnnualGrowthFactor(monthlyData, targetMonth, lookbackMonths = 1)
   const central = ratios.length === 1 ? ratios[0] : median(ratios);
   const strongGrowthMonths = ratios.filter((ratio) => ratio >= 1.12).length;
   const upper = strongGrowthMonths >= 2 ? 1.28 : 1.2;
-  return clamp(central, 0.8, upper);
+  let growth = clamp(central, 0.8, upper);
+  // Pasteles GDE: un mayo/junio flojo no debe recortar el julio estacional
+  // (M & M 2026: YoY 0.86 sobre un julio 2025 sano de 308).
+  const keepDecline = Number(options.dampenDecline);
+  if (Number.isFinite(keepDecline) && keepDecline >= 0 && keepDecline < 1 && growth < 1) {
+    growth = 1 - (1 - growth) * keepDecline;
+  }
+  return growth;
+}
+
+function monthHalfTotals(monthData) {
+  let first = 0;
+  let second = 0;
+  let firstDays = 0;
+  let secondDays = 0;
+  for (const [key, value] of monthData?.valuesByDate || []) {
+    const day = parseDateCell(`${key}T12:00:00`)?.getDate();
+    if (!day) continue;
+    const qty = Number(value) || 0;
+    if (day <= 15) {
+      first += qty;
+      firstDays += 1;
+    } else {
+      second += qty;
+      secondDays += 1;
+    }
+  }
+  return { first, second, firstDays, secondDays };
+}
+
+// Si el mismo mes del año anterior bajó y el siguiente siguió abajo, es baja
+// de temporada (PAY DE FRESA), no un hueco atípico. No se le aplica impulso.
+function priorYearLooksLikeSeasonalFade(monthlyData, targetMonth) {
+  const prior = sameMonthPreviousYear(targetMonth);
+  if (!prior) return false;
+  const priorTotal = monthTotalFromData(monthlyData, prior);
+  const prevTotal = monthTotalFromData(monthlyData, previousMonthKey(prior));
+  const nextTotal = monthTotalFromData(monthlyData, nextMonthKey(prior));
+  if (priorTotal <= 0 || prevTotal <= 0) return false;
+  return priorTotal < prevTotal * 0.85 && nextTotal > 0 && nextTotal < prevTotal * 0.9;
+}
+
+// Impulso por SKU: si el último mes completo con diario ya corre más fuerte
+// en la segunda quincena que en la primera, el mes siguiente suele subir.
+// Junio 2026 GDE: segunda/primera ~1.12–1.34 y julio quedó corto. Agosto no
+// tiene diario, así que no se mueve. Mayo (Día de las Madres) no se usa.
+function computeRecentMomentumFactor(monthlyData, targetMonth, options = {}) {
+  const latest = previousMonthKey(targetMonth);
+  if (!latest) return 1;
+  if (String(latest).endsWith("-05")) return 1;
+  const monthData = monthlyData.get(latest);
+  if (!monthData || monthData.filledFromMonthlyTotal) return 1;
+  if ((monthData.valuesByDate?.size || 0) < 20) return 1;
+  const { first, second, firstDays, secondDays } = monthHalfTotals(monthData);
+  const minHalf = Number(options.minHalfTotal) || 20;
+  if (firstDays < 8 || secondDays < 8 || first < minHalf || second < minHalf) return 1;
+  const ratio = second / first;
+  const trigger = Number(options.momentumTrigger) || 1.12;
+  if (!(ratio >= trigger)) return 1;
+  if (priorYearLooksLikeSeasonalFade(monthlyData, targetMonth)) return 1;
+  const strength = Number.isFinite(Number(options.momentumStrength)) ? Number(options.momentumStrength) : 0.4;
+  const cap = Number.isFinite(Number(options.momentumCap)) ? Number(options.momentumCap) : 1.12;
+  return clamp(1 + (ratio - 1) * strength, 1, cap);
+}
+
+function applyRecentMomentum(model, records, selectedMonth, options = {}) {
+  const monthlyData = buildMonthlyForecastData(records);
+  const factor = computeRecentMomentumFactor(monthlyData, selectedMonth, options);
+  if (!(factor > 1.001) || !model?.averages) return model;
+  const liftPct = Math.round((factor - 1) * 100);
+  return {
+    ...model,
+    averages: scaleForecastAverages(model.averages, factor),
+    trend: (model.trend || 1) * factor,
+    method: `${model.method || "Modelo"} · impulso reciente ${liftPct}%`,
+  };
 }
 
 function summarizeForecastAccuracy(rows) {
@@ -2473,11 +2550,11 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
     [latestMonth]
   );
 
-  const seasonalRef = resolvePriorYearSeasonal(monthlyData, targetMonth);
+  const seasonalRef = resolvePriorYearSeasonal(monthlyData, targetMonth, forecastOptions);
   if (seasonalRef) {
     const previousTargetMonth = previousMonthKey(targetMonth);
     const previousYearReference = sameMonthPreviousYear(previousTargetMonth);
-    const growth = computeAnnualGrowthFactor(monthlyData, targetMonth, growthLookback);
+    const growth = computeAnnualGrowthFactor(monthlyData, targetMonth, growthLookback, forecastOptions);
     const seasonalBase = weightedWeekdayAverages(monthlyData, [seasonalRef.monthKey], [1]);
     const adjustedSeasonal = scaleForecastAverages(seasonalBase, growth * seasonalRef.levelFactor);
     addCandidate(
@@ -2635,7 +2712,21 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
     const category = productCategory(product);
     const seasonalWeight = ["Otros", "Mini medianos"].includes(category) ? 0.5 : 0.75;
     if (category === "Pasteles grandes") {
-      return calculateForecastModelSeasonalAdaptive(records, selectedMonth, [0.25, 0.5, 0.75], options);
+      const gdeOptions = {
+        ...options,
+        dipRatio: 0.92,
+        dampenDecline: 0.4,
+        momentumStrength: 0.4,
+        momentumCap: 1.12,
+        momentumTrigger: 1.12,
+      };
+      const model = calculateForecastModelSeasonalAdaptive(
+        records,
+        selectedMonth,
+        [0.25, 0.5, 0.75],
+        gdeOptions
+      );
+      return applyRecentMomentum(model, records, selectedMonth, gdeOptions);
     }
     return calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, options);
   }
@@ -7094,6 +7185,8 @@ export {
   parseStock,
   resolveCanonicalMonthSources,
   computeAnnualGrowthFactor,
+  resolvePriorYearSeasonal,
+  computeRecentMomentumFactor,
 };
 
 if (typeof document !== "undefined") {

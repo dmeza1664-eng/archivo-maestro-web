@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/parser-test.cjs && node scripts/forecast-accuracy-test.cjs && node backend/auth-security-test.js && node backend/helpers-test.js"
+    "test": "node scripts/parser-test.cjs && node scripts/forecast-accuracy-test.cjs && node backend/auth-security-test.js && node backend/helpers-test.js",
+    "test:wape": "node scripts/run-real-wape.cjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
