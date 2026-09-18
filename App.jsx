@@ -4336,7 +4336,7 @@ function AccessScreen({ needsSetup, loading, error, onSubmit }) {
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               autoComplete={needsSetup ? "new-password" : "current-password"}
-              minLength={needsSetup ? 10 : undefined}
+              minLength={needsSetup ? 4 : undefined}
               required
             />
           </label>
@@ -5709,7 +5709,7 @@ function Dashboard({ session, onLogout }) {
                 </label>
                 <label>
                   Contraseña inicial
-                  <input type="password" minLength="10" value={userForm.password} onChange={(event) => setUserForm((value) => ({ ...value, password: event.target.value }))} required />
+                  <input type="password" minLength="4" value={userForm.password} onChange={(event) => setUserForm((value) => ({ ...value, password: event.target.value }))} required />
                 </label>
                 <label>
                   Rol
