@@ -67,7 +67,10 @@ async function main() {
     buildForecastHealth,
     analyzeForecastProductErrors,
     calculateForecast,
+    calculateDailyForecast,
     buildMonthlyForecastData,
+    normalizeActivePromo,
+    applyPromoUpliftToQuantity,
     getProduccionSugerida,
     countCapturedProductStatuses,
   } = await loadAppFunctions();
@@ -641,6 +644,100 @@ async function main() {
   assert(stableCake[0].pronosticoVenta > 450, `pasteles regulares no deben verse afectados por la limpieza (fc ${stableCake[0].pronosticoVenta.toFixed(1)})`);
   assert(!/limpieza catálogo/i.test(stableCake[0].metodoPronostico || ""), "FRUTAS GDE no debe activar limpieza de catálogo");
 
+  const paletaPromo = normalizeActivePromo({
+    producto: "PALETA GALLETA $35",
+    startDate: "2026-07-01",
+    durationPreset: "hasta_desactivar",
+    multiplier: 1.3,
+    extraPiecesPerDay: 0,
+    active: true,
+  });
+  const paletaWithPromo = calculateForecast({
+    stockRows: [{ producto: "PALETA GALLETA $35", stock: 10, orden: 1 }],
+    historicalVentas: paletaHistory,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 0,
+    activePromos: [paletaPromo],
+  });
+  assert(paletaWithPromo[0].pronosticoVenta > paletaRaw[0].pronosticoVenta + 20, "promo activa no debe apagar el pico de PALETA");
+  assert(/promo activa/i.test(paletaWithPromo[0].metodoPronostico || ""), "el método debe anotar que se omitió la limpieza");
+
+  const paletaPromoTimesTwo = calculateForecast({
+    stockRows: [{ producto: "PALETA GALLETA $35", stock: 10, orden: 1 }],
+    historicalVentas: paletaHistory,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 0,
+    activePromos: [{ ...paletaPromo, multiplier: 2 }],
+  });
+  assert(
+    Math.abs(paletaPromoTimesTwo[0].pronosticoVenta - paletaWithPromo[0].pronosticoVenta) < 0.01,
+    "el multiplicador no debe reescribir el pronóstico base / WAPE"
+  );
+
+  assert(applyPromoUpliftToQuantity("GELATINA IND FRESA", 10, paletaPromo) === 13, "×1.3 sobre 10 piezas debe sugerir 13");
+  assert(applyPromoUpliftToQuantity("FRUTAS GDE", 10, { multiplier: 1.3, extraPiecesPerDay: 0 }) === 15, "pastel 10×1.3=13 se hace lote 15");
+  assert(applyPromoUpliftToQuantity("GELATINA IND FRESA", 10, { multiplier: 1, extraPiecesPerDay: 8 }) === 18, "piezas extra se suman al día de planta");
+
+  const gelatinaRows = calculateForecast({
+    stockRows: [{ producto: "GELATINA IND FRESA", stock: 20, orden: 1 }],
+    historicalVentas: [
+      monthClose("2026-04", "GELATINA IND FRESA", 210),
+      monthClose("2026-05", "GELATINA IND FRESA", 220),
+      monthClose("2026-06", "GELATINA IND FRESA", 230),
+    ],
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 0,
+  });
+  const gelatinaDailyBase = calculateDailyForecast({
+    monthlyRows: gelatinaRows,
+    ventasReales: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 0,
+  });
+  const gelatinaPromo = normalizeActivePromo({
+    producto: "GELATINA IND FRESA",
+    startDate: "2026-07-01",
+    durationPreset: "3dias",
+    multiplier: 2,
+    extraPiecesPerDay: 5,
+    active: true,
+  });
+  const gelatinaDailyPromo = calculateDailyForecast({
+    monthlyRows: gelatinaRows,
+    ventasReales: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 0,
+    activePromos: [gelatinaPromo],
+  });
+  const july1Base = gelatinaDailyBase.find((row) => row.fecha === "2026-07-01");
+  const july1Promo = gelatinaDailyPromo.find((row) => row.fecha === "2026-07-01");
+  const july4Promo = gelatinaDailyPromo.find((row) => row.fecha === "2026-07-04");
+  assert(july1Promo.produccionSugeridaDia === july1Base.produccionSugeridaDia * 2 + 5, "el 1 de julio debe aplicar ×2 + 5");
+  assert(july1Promo.promoActiva, "el día cubierto debe marcarse como promo");
+  assert(july4Promo.produccionSugeridaDia === gelatinaDailyBase.find((row) => row.fecha === "2026-07-04").produccionSugeridaDia, "fuera de la vigencia no hay impulso");
+  const gelatinaDailyOff = calculateDailyForecast({
+    monthlyRows: gelatinaRows,
+    ventasReales: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 0,
+    activePromos: [{ ...gelatinaPromo, active: false }],
+  });
+  assert(
+    gelatinaDailyOff.find((row) => row.fecha === "2026-07-01").produccionSugeridaDia === july1Base.produccionSugeridaDia,
+    "desactivar la promo quita el impulso de planta"
+  );
 
   console.log("parser-test ok");
 }
