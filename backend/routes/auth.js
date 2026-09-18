@@ -37,8 +37,8 @@ function validateCredentials(usuario, password) {
     error.status = 400;
     throw error;
   }
-  if (String(password || '').length < 10) {
-    const error = new Error('La contraseña debe tener al menos 10 caracteres');
+  if (String(password || '').length < 4) {
+    const error = new Error('La contraseña debe tener al menos 4 caracteres');
     error.status = 400;
     throw error;
   }
@@ -174,3 +174,4 @@ router.post('/users', requireAuth, requireRole('admin'), async (req, res, next) 
 });
 
 module.exports = router;
+module.exports.validateCredentials = validateCredentials;

@@ -1,4 +1,9 @@
+process.env.DB_HOST = process.env.DB_HOST || '127.0.0.1';
+process.env.DB_USER = process.env.DB_USER || 'test';
+process.env.DB_NAME = process.env.DB_NAME || 'test';
+
 const { createMemoryRateLimiter, createPersistLoginRateLimit, recordLoginFailure } = require('./rateLimit');
+const { validateCredentials } = require('./routes/auth');
 
 function mockReq(ip = '203.0.113.10') {
   return { headers: {}, ip, socket: { remoteAddress: ip } };
@@ -40,6 +45,21 @@ async function main() {
   if (inserts[0][0] !== '203.0.113.10' || !String(inserts[0][1]).includes('operador')) {
     throw new Error('el fallo de login debe quedar en bitácora por IP');
   }
+
+  const shortPassword = (() => {
+    try {
+      validateCredentials('admin', '123');
+      return null;
+    } catch (error) {
+      return error;
+    }
+  })();
+  if (!shortPassword || shortPassword.status !== 400 || !String(shortPassword.message).includes('4 caracteres')) {
+    throw new Error('una contraseña de 3 caracteres debe rechazarse');
+  }
+
+  validateCredentials('admin', '1210');
+  validateCredentials('admin', '12345');
 
   console.log('auth-security-test ok');
 }
