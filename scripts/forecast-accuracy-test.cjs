@@ -326,6 +326,52 @@ async function main() {
     };
   }
 
+  // Limpieza de outliers de catálogo: intermitentes con $ y dormidos.
+  const outlierStock = [
+    { producto: "PALETA GALLETA $35", stock: 20, orden: 1 },
+    { producto: "BOLLOS C 4", stock: 40, orden: 2 },
+    { producto: "CAJITA FELIZ", stock: 10, orden: 3 },
+    { producto: "FRUTAS GDE", stock: 50, orden: 4 },
+  ];
+  const outlierVentas = [];
+  const pushClose = (monthKey, product, qty) => {
+    const [year, month] = monthKey.split("-").map(Number);
+    outlierVentas.push({
+      fecha: new Date(year, month - 1, 1),
+      producto: product,
+      cantidad: qty,
+      monthlyTotal: true,
+      monthDays: new Date(year, month, 0).getDate(),
+    });
+  };
+  for (const [month, qty] of [
+    ["2026-01", 30], ["2026-02", 184], ["2026-03", 2], ["2026-04", 0], ["2026-05", 79], ["2026-06", 296], ["2026-07", 35],
+  ]) pushClose(month, "PALETA GALLETA $35", qty);
+  for (const [month, qty] of [
+    ["2026-02", 369], ["2026-03", 0], ["2026-04", 0], ["2026-05", 364], ["2026-06", 214], ["2026-07", 28], ["2026-08", 0],
+  ]) pushClose(month, "BOLLOS C 4", qty);
+  for (const [month, qty] of [
+    ["2025-04", 599], ["2026-04", 773], ["2026-05", 75], ["2026-06", 0], ["2026-07", 0], ["2026-08", 0],
+  ]) pushClose(month, "CAJITA FELIZ", qty);
+  for (const [month, qty] of [
+    ["2025-07", 510], ["2025-08", 495], ["2025-09", 480], ["2025-10", 470],
+    ["2025-11", 455], ["2026-01", 490], ["2026-02", 505], ["2026-03", 260],
+    ["2026-04", 480], ["2026-05", 500], ["2026-06", 520], ["2026-07", 580], ["2026-08", 540],
+  ]) pushClose(month, "FRUTAS GDE", qty);
+
+  const outlierJuly = evaluateMonth(app, outlierStock, outlierVentas, "2026-07");
+  const outlierAugust = evaluateMonth(app, outlierStock, outlierVentas, "2026-08");
+  const paletaJuly = outlierJuly.rows.find((row) => row.producto === "PALETA GALLETA $35");
+  const cajitaJuly = outlierJuly.rows.find((row) => row.producto === "CAJITA FELIZ");
+  const bollosAugust = outlierAugust.rows.find((row) => row.producto === "BOLLOS C 4");
+  const frutasJuly = outlierJuly.rows.find((row) => row.producto === "FRUTAS GDE");
+  assert(paletaJuly.forecast < 200, `julio PALETA $35 debe bajar del overshoot ~422 (fc ${paletaJuly.forecast.toFixed(1)})`);
+  assert(cajitaJuly.forecast <= 5, `julio CAJITA FELIZ no debe inventar venta con junio en 0 (fc ${cajitaJuly.forecast.toFixed(1)})`);
+  assert(bollosAugust.forecast < 80, `agosto BOLLOS C 4 debe amortiguar la caída a cero (fc ${bollosAugust.forecast.toFixed(1)})`);
+  assert(frutasJuly.forecast > 450, `FRUTAS GDE no debe apagarse por la limpieza (fc ${frutasJuly.forecast.toFixed(1)})`);
+  assert(frutasJuly.absoluteError < 100, `FRUTAS GDE debe seguir razonable (abs ${frutasJuly.absoluteError.toFixed(1)})`);
+
+
   console.log("forecast-accuracy-test ok");
   console.log(
     JSON.stringify(
@@ -349,6 +395,11 @@ async function main() {
           august: Number(resolvedAugust.wape.toFixed(2)),
         },
         plantExcel,
+        catalogCleanup: {
+          paletaJuly: Number(paletaJuly.forecast.toFixed(1)),
+          cajitaJuly: Number(cajitaJuly.forecast.toFixed(1)),
+          bollosAugust: Number(bollosAugust.forecast.toFixed(1)),
+        },
       },
       null,
       2
