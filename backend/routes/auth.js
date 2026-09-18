@@ -17,6 +17,7 @@ const {
   verifyPassword,
   writeAudit,
 } = require('../auth');
+const { validateCredentials } = require('../credentials');
 
 const router = express.Router();
 const loginRateLimitMessage = 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.';
@@ -30,19 +31,6 @@ const persistLoginRateLimit = createPersistLoginRateLimit(query, {
   maxAttempts: 8,
   message: loginRateLimitMessage,
 });
-
-function validateCredentials(usuario, password) {
-  if (!/^[A-Za-z0-9._-]{3,80}$/.test(usuario || '')) {
-    const error = new Error('El usuario debe tener al menos 3 caracteres y usar letras, números, punto, guion o guion bajo');
-    error.status = 400;
-    throw error;
-  }
-  if (String(password || '').length < 4) {
-    const error = new Error('La contraseña debe tener al menos 4 caracteres');
-    error.status = 400;
-    throw error;
-  }
-}
 
 router.get('/status', async (_req, res, next) => {
   try {
@@ -174,4 +162,3 @@ router.post('/users', requireAuth, requireRole('admin'), async (req, res, next) 
 });
 
 module.exports = router;
-module.exports.validateCredentials = validateCredentials;
