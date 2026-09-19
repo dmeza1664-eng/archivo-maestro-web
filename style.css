@@ -1387,6 +1387,10 @@ select:focus-visible {
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
+.primary-file-status-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .file-status-item {
   background: var(--surface-raised);
   border: 1px solid var(--border);
@@ -3784,7 +3788,8 @@ tbody tr:hover {
   }
 
   .required-uploads,
-  .optional-uploads {
+  .optional-uploads,
+  .primary-file-status-grid {
     grid-template-columns: 1fr;
   }
 

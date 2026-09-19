@@ -6078,12 +6078,13 @@ function Dashboard({ session, onLogout }) {
   const shouldShowHomologation = homologationRows.length > 0;
 
   const loadedFileItems = [
-    { label: "Ventas históricas", loaded: Boolean(files.ventas || ventas.length) },
-    { label: "Stock fijo", loaded: Boolean(files.stock || stockRows.length) },
+    { label: "Ventas históricas", loaded: Boolean(files.ventas || ventas.length), primary: true },
+    { label: "Stock fijo", loaded: Boolean(files.stock || stockRows.length), primary: true },
     { label: "Producción real", loaded: Boolean(files.real || realProduction.length) },
     { label: "Bajas/devoluciones", loaded: Boolean(files.bajas || bajas.length) },
     { label: "Existencias", loaded: Boolean(files.existencias || existencias.length), detail: existencias.length ? (inventoryCutoff.cutoff ? displayDate(inventoryCutoff.cutoff) : "Sin fecha de corte") : "" },
   ];
+  const primaryFileItems = loadedFileItems.filter((item) => item.primary);
   const listedActivePromos = activePromos
     .filter((promo) => isPromoListedAsActive(promo))
     .sort((a, b) => a.producto.localeCompare(b.producto, "es") || a.startDate.localeCompare(b.startDate));
@@ -6860,8 +6861,8 @@ function Dashboard({ session, onLogout }) {
               <span>Margen: {dailyBufferPct}%</span>
             </div>
           </div>
-          <div className="file-status-grid">
-            {loadedFileItems.map((item) => (
+          <div className="file-status-grid primary-file-status-grid">
+            {primaryFileItems.map((item) => (
               <div className="file-status-item" key={item.label}>
                 <span className={`status-dot ${item.loaded ? "loaded" : ""}`} />
                 <strong>{item.label}</strong>
@@ -7832,6 +7833,11 @@ function App() {
       try {
         const me = await apiRequest("/api/auth/me", { token: session?.token });
         if (!active) return;
+        if (!me?.user) {
+          const invalid = new Error("Sesión inválida");
+          invalid.status = 401;
+          throw invalid;
+        }
         const nextSession = { token: session?.token || "", user: me.user };
         setSession(nextSession);
         writeStoredSession(nextSession);
