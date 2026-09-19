@@ -371,6 +371,67 @@ async function main() {
   assert(frutasJuly.forecast > 450, `FRUTAS GDE no debe apagarse por la limpieza (fc ${frutasJuly.forecast.toFixed(1)})`);
   assert(frutasJuly.absoluteError < 100, `FRUTAS GDE debe seguir razonable (abs ${frutasJuly.absoluteError.toFixed(1)})`);
 
+  const paletaPromo = app.normalizeActivePromo({
+    producto: "PALETA GALLETA $35",
+    startDate: "2026-07-01",
+    durationPreset: "hasta_desactivar",
+    multiplier: 1.3,
+    extraPiecesPerDay: 0,
+    active: true,
+  });
+  const paletaPromoJuly = app.calculateForecast({
+    stockRows: outlierStock,
+    historicalVentas: app.filterVentasBeforeMonth(outlierVentas, "2026-07"),
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 10,
+    activePromos: [paletaPromo],
+  });
+  const paletaPromoRow = paletaPromoJuly.find((row) => row.producto === "PALETA GALLETA $35");
+  const frutasPromoRow = paletaPromoJuly.find((row) => row.producto === "FRUTAS GDE");
+  assert(paletaPromoRow.pronosticoVenta > paletaJuly.forecast + 30, "con promo activa PALETA no debe quedar amortiguada");
+  assert(Math.abs(frutasPromoRow.pronosticoVenta - frutasJuly.forecast) < 1, "la promo de PALETA no debe mover el WAPE/base de FRUTAS");
+  assert(paletaJuly.forecast < 200, "sin promo el WAPE/base de PALETA sigue usando la limpieza");
+
+  const paletaDailyBase = app.calculateDailyForecast({
+    monthlyRows: app.calculateForecast({
+      stockRows: outlierStock,
+      historicalVentas: app.filterVentasBeforeMonth(outlierVentas, "2026-07"),
+      bajas: [],
+      existencias: [],
+      realProduction: [],
+      selectedMonth: "2026-07",
+      dailyBufferPct: 10,
+    }),
+    ventasReales: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 10,
+  });
+  const paletaDailyPromo = app.calculateDailyForecast({
+    monthlyRows: paletaPromoJuly,
+    ventasReales: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 10,
+    activePromos: [paletaPromo],
+  });
+  const paletaDayBase = paletaDailyBase.find((row) => row.producto === "PALETA GALLETA $35" && row.weekday === 3);
+  const paletaDayPromo = paletaDailyPromo.find((row) => row.producto === "PALETA GALLETA $35" && row.weekday === 3);
+  assert(paletaDayPromo.produccionSugeridaDia > paletaDayBase.produccionSugeridaDia, "la planta debe subir el miércoles con promo ×1.3");
+  const deactivatedDaily = app.calculateDailyForecast({
+    monthlyRows: paletaPromoJuly,
+    ventasReales: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 10,
+    activePromos: [{ ...paletaPromo, active: false }],
+  });
+  const deactivatedDay = deactivatedDaily.find((row) => row.producto === "PALETA GALLETA $35" && row.weekday === 3);
+  assert(deactivatedDay.produccionSugeridaDia < paletaDayPromo.produccionSugeridaDia, "desactivar quita el multiplicador diario");
+  assert(!deactivatedDay.promoActiva, "desactivar no debe marcar el día como promo");
 
   console.log("forecast-accuracy-test ok");
   console.log(
@@ -399,6 +460,11 @@ async function main() {
           paletaJuly: Number(paletaJuly.forecast.toFixed(1)),
           cajitaJuly: Number(cajitaJuly.forecast.toFixed(1)),
           bollosAugust: Number(bollosAugust.forecast.toFixed(1)),
+        },
+        promoActiva: {
+          paletaJuly: Number(paletaPromoRow.pronosticoVenta.toFixed(1)),
+          paletaPlantWed: paletaDayPromo.produccionSugeridaDia,
+          paletaPlantWedBase: paletaDayBase.produccionSugeridaDia,
         },
       },
       null,

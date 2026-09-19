@@ -3305,6 +3305,120 @@ tbody tr:hover {
   font-size: 11px;
 }
 
+.promo-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  margin-bottom: 22px;
+  overflow: hidden;
+}
+
+.promo-section .section-heading {
+  box-shadow: none;
+}
+
+.promo-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+  padding: 0 16px 16px;
+}
+
+.promo-form {
+  align-content: start;
+  background: rgba(163, 144, 126, 0.035);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 14px;
+}
+
+.promo-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.promo-form input,
+.promo-form select {
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  min-height: 40px;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.promo-note-field,
+.promo-form-actions,
+.promo-form-error,
+.promo-form-hint {
+  grid-column: 1 / -1;
+}
+
+.promo-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.promo-form-error {
+  color: #9b2c2c;
+}
+
+.promo-form-hint {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.promo-list {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.promo-list-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(160px, 1fr) auto auto;
+  padding: 12px 14px;
+}
+
+.promo-list-row:last-child {
+  border-bottom: 0;
+}
+
+.promo-list-row div {
+  display: grid;
+  gap: 2px;
+}
+
+.promo-list-row strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.promo-list-row span,
+.promo-list-row small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.promo-list-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.promo-day-pill {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
 .user-admin-section {
   background: var(--input);
   border: 1px solid var(--border);
@@ -3404,8 +3518,21 @@ tbody tr:hover {
     padding-left: 26px;
   }
 
+  .promo-grid,
   .user-admin-grid {
     grid-template-columns: 1fr;
+  }
+
+  .promo-form {
+    grid-template-columns: 1fr;
+  }
+
+  .promo-list-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .promo-list-actions {
+    grid-column: 1 / -1;
   }
 
   .user-list-row {

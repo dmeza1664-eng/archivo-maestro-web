@@ -18,6 +18,7 @@ import {
   TrendingUp,
   Upload,
   UserRound,
+  Megaphone,
 } from "lucide-react";
 import "./style.css";
 
@@ -507,6 +508,181 @@ const WEEKDAY_BY_NORM = new Map(
 );
 
 const PRODUCT_ALIAS_STORAGE_KEY = "archivoMaestroProductAliases";
+const ACTIVE_PROMOS_STORAGE_KEY = "archivoMaestroActivePromos";
+const PROMO_DURATION_PRESETS = [
+  { value: "hoy", label: "Hoy" },
+  { value: "3dias", label: "3 días" },
+  { value: "hasta_desactivar", label: "Hasta desactivar" },
+];
+
+function todayKey(now = new Date()) {
+  return dateKey(now);
+}
+
+function createPromoId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `promo-${crypto.randomUUID()}`;
+  }
+  return `promo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function resolvePromoEndDate(promo) {
+  const start = dateKey(promo?.startDate);
+  const preset = String(promo?.durationPreset || "hasta_desactivar");
+  if (!start) return dateKey(promo?.endDate) || "";
+  if (preset === "hoy") return start;
+  if (preset === "3dias") {
+    const startDate = parseDateCell(start);
+    return startDate ? dateKey(addDays(startDate, 2)) : "";
+  }
+  if (preset === "hasta_desactivar") return "";
+  return dateKey(promo?.endDate) || "";
+}
+
+function normalizeActivePromo(raw, { today = todayKey() } = {}) {
+  if (!raw || typeof raw !== "object") return null;
+  const producto = normalizeProduct(raw.producto || raw.product || "");
+  if (!producto) return null;
+  const startDate = dateKey(raw.startDate || raw.inicio || today) || today;
+  const durationPreset = PROMO_DURATION_PRESETS.some((item) => item.value === raw.durationPreset)
+    ? raw.durationPreset
+    : raw.endDate || raw.fin
+      ? "rango"
+      : "hasta_desactivar";
+  const endDate = resolvePromoEndDate({
+    startDate,
+    durationPreset,
+    endDate: raw.endDate || raw.fin || "",
+  });
+  const multiplierRaw = Number(raw.multiplier ?? raw.multiplicador ?? 1);
+  const multiplier = Number.isFinite(multiplierRaw) && multiplierRaw > 0 ? multiplierRaw : 1;
+  const extraRaw = Number(raw.extraPiecesPerDay ?? raw.piezasExtraDia ?? 0);
+  const extraPiecesPerDay = Number.isFinite(extraRaw) ? Math.max(0, extraRaw) : 0;
+  return {
+    id: String(raw.id || createPromoId()),
+    producto,
+    startDate,
+    endDate,
+    durationPreset: durationPreset === "rango" ? "rango" : durationPreset,
+    multiplier,
+    extraPiecesPerDay,
+    note: String(raw.note || raw.nota || "").trim(),
+    active: raw.active !== false,
+    createdAt: raw.createdAt || new Date().toISOString(),
+    updatedAt: raw.updatedAt || raw.createdAt || new Date().toISOString(),
+    deactivatedAt: raw.active === false ? raw.deactivatedAt || new Date().toISOString() : null,
+  };
+}
+
+function sanitizeActivePromos(value, options = {}) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value
+    .map((item) => normalizeActivePromo(item, options))
+    .filter((promo) => {
+      if (!promo || seen.has(promo.id)) return false;
+      seen.add(promo.id);
+      return true;
+    });
+}
+
+function loadStoredActivePromos() {
+  try {
+    return sanitizeActivePromos(JSON.parse(localStorage.getItem(ACTIVE_PROMOS_STORAGE_KEY) || "[]"));
+  } catch {
+    return [];
+  }
+}
+
+function productsMatch(left, right) {
+  return Boolean(left) && normalizeProduct(left) === normalizeProduct(right);
+}
+
+function promoOverlapsMonth(promo, selectedMonth) {
+  if (!promo?.active || !/^\d{4}-(0[1-9]|1[0-2])$/.test(String(selectedMonth || ""))) return false;
+  const start = dateKey(promo.startDate);
+  const end = resolvePromoEndDate(promo);
+  const monthStart = `${selectedMonth}-01`;
+  const [year, month] = selectedMonth.split("-").map(Number);
+  const monthEnd = dateKey(new Date(year, month, 0));
+  if (start && start > monthEnd) return false;
+  if (end && end < monthStart) return false;
+  return true;
+}
+
+function isPromoActiveOnDate(promo, date) {
+  if (!promo?.active) return false;
+  const key = dateKey(date);
+  if (!key) return false;
+  const start = dateKey(promo.startDate);
+  const end = resolvePromoEndDate(promo);
+  if (start && key < start) return false;
+  if (end && key > end) return false;
+  return true;
+}
+
+function findActivePromoForProduct(promos, product, date) {
+  const matches = (promos || []).filter(
+    (promo) => productsMatch(promo.producto, product) && isPromoActiveOnDate(promo, date)
+  );
+  return matches.at(-1) || null;
+}
+
+function findActivePromoForProductInMonth(promos, product, selectedMonth) {
+  const matches = (promos || []).filter(
+    (promo) => productsMatch(promo.producto, product) && promoOverlapsMonth(promo, selectedMonth)
+  );
+  return matches.at(-1) || null;
+}
+
+function isPromoListedAsActive(promo, today = todayKey()) {
+  if (!promo?.active) return false;
+  const end = resolvePromoEndDate(promo);
+  return !end || end >= today;
+}
+
+function formatPromoUpliftLabel(promo) {
+  if (!promo) return "";
+  const parts = [];
+  if (Number(promo.multiplier) > 0 && Number(promo.multiplier) !== 1) {
+    parts.push(`×${Number(promo.multiplier).toLocaleString("es-MX", { maximumFractionDigits: 2 })}`);
+  }
+  if (Number(promo.extraPiecesPerDay) > 0) {
+    parts.push(`+${Number(promo.extraPiecesPerDay)} pzas/día`);
+  }
+  if (!parts.length) parts.push("sin apagar pronóstico");
+  return parts.join(" · ");
+}
+
+function formatPromoWindowLabel(promo) {
+  if (!promo) return "";
+  const start = displayDate(promo.startDate);
+  const end = resolvePromoEndDate(promo);
+  if (!end) return `${start} → hasta desactivar`;
+  if (end === dateKey(promo.startDate)) return start;
+  return `${start} → ${displayDate(end)}`;
+}
+
+function applyPromoUpliftToQuantity(product, baseQuantity, promo) {
+  const base = Math.max(0, Number(baseQuantity) || 0);
+  if (!promo) return getProduccionSugerida(product, base);
+  const multiplier = Number(promo.multiplier);
+  const safeMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  const extra = Math.max(0, Number(promo.extraPiecesPerDay) || 0);
+  return getProduccionSugerida(product, base * safeMultiplier + extra);
+}
+
+function emptyPromoForm(today = todayKey()) {
+  return {
+    id: "",
+    producto: "",
+    startDate: today,
+    durationPreset: "hoy",
+    multiplier: 1.3,
+    extraPiecesPerDay: 0,
+    note: "",
+  };
+}
 
 function weekdayIndexFromText(value) {
   const normalized = norm(value);
@@ -1730,6 +1906,7 @@ function calculateForecast({
   selectedMonth,
   dailyBufferPct,
   modelVersion = FORECAST_MODEL_VERSION,
+  activePromos = [],
 }) {
   const usableHistoricalVentas = filterIncompleteHistoricalMonths(historicalVentas);
   const completeHistoricalMonths = [...new Set(
@@ -1745,12 +1922,20 @@ function calculateForecast({
     const product = normalizeProduct(s.producto);
     const v = fillCompleteZeroMonths(ventasByProduct.get(product) || ventasByProduct.get(s.producto) || [], completeHistoricalMonths);
     const b = bajasByProduct.get(product) || bajasByProduct.get(s.producto) || [];
-    const forecastModel = applyCatalogOutlierCleanup(
-      calculateForecastModelForVersion(v, selectedMonth, product, modelVersion),
-      v,
-      selectedMonth,
-      s.producto || product
-    );
+    const activePromo = findActivePromoForProductInMonth(activePromos, s.producto || product, selectedMonth);
+    const rawForecastModel = calculateForecastModelForVersion(v, selectedMonth, product, modelVersion);
+    const forecastModel = activePromo
+      ? {
+          ...rawForecastModel,
+          method: `${rawForecastModel.method || "Modelo"} · promo activa: sin limpieza de catálogo`,
+          catalogCleanup: "omitida por promo activa",
+        }
+      : applyCatalogOutlierCleanup(
+          rawForecastModel,
+          v,
+          selectedMonth,
+          s.producto || product
+        );
     const weekdayRow = buildWeekdayRow(forecastModel.averages);
 
     let pronosticoVenta = 0;
@@ -1828,6 +2013,9 @@ function calculateForecast({
       tendenciaAplicada: forecastModel.trend,
       mesesUsados: forecastModel.recentMonths.join(", "),
       metodoPronostico: forecastModel.method,
+      catalogCleanup: forecastModel.catalogCleanup || "",
+      promoActiva: Boolean(activePromo),
+      promoEtiqueta: formatPromoUpliftLabel(activePromo),
       mesValidacionModelo: forecastModel.backtestMonth,
       realValidacionModelo: forecastModel.backtestActual,
       pronosticoValidacionModelo: forecastModel.backtestForecast,
@@ -3020,7 +3208,7 @@ function calculateForecastModel(records, selectedMonth) {
   };
 }
 
-function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, selectedMonth, dailyBufferPct }) {
+function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, selectedMonth, dailyBufferPct, activePromos = [] }) {
   const realDailyMap = aggregateDailyProductionRows(realProduction);
   const salesDailyMap = aggregateDailySalesRows(ventasReales);
   const monthDates = datesForMonth(selectedMonth);
@@ -3050,7 +3238,10 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
     const allocated = allocateDailyProduction(product, productionWeights, productRow.produccionSugerida);
 
     return demandByDate.map((row, index) => {
-      const produccionSugeridaDia = allocated[index];
+      const promo = findActivePromoForProduct(activePromos, product, row.date);
+      const produccionSugeridaDia = promo && row.weekday !== 0
+        ? applyPromoUpliftToQuantity(product, allocated[index], promo)
+        : allocated[index];
       const realKey = `${product}|${row.key}`;
       const hasRealData = realDailyMap.has(realKey);
       const produccionRealDia = hasRealData ? realDailyMap.get(realKey) : null;
@@ -3092,6 +3283,8 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
         baseConColchonDia: row.baseConColchonDia,
         reglaOperativa,
         produccionSugeridaDia,
+        promoActiva: Boolean(promo && row.weekday !== 0),
+        promoEtiqueta: promo && row.weekday !== 0 ? formatPromoUpliftLabel(promo) : "",
         produccionDestino: sundayMoved ? productionTarget : row.key,
         produccionRealDia,
         hasRealData,
@@ -3935,6 +4128,7 @@ function exportDailyToExcel(rows, summary) {
     "Base con margen de seguridad": Number((row.baseConColchonDia || 0).toFixed(2)),
     "Regla operativa": row.reglaOperativa,
     "Produccion sugerida dia": row.produccionSugeridaDia,
+    "Promo activa": row.promoActiva ? row.promoEtiqueta || "Sí" : "",
     "Produccion destino": row.produccionDestino || row.fecha,
     "Produccion real dia": row.produccionRealDia ?? "",
     "Diferencia piezas": row.diferenciaPiezas ?? "",
@@ -4500,6 +4694,9 @@ function Dashboard({ session, onLogout }) {
   const [onlySalesMismatch, setOnlySalesMismatch] = useState(false);
   const [validationProduct, setValidationProduct] = useState("");
   const [productAliases, setProductAliases] = useState(loadStoredProductAliases);
+  const [activePromos, setActivePromos] = useState(loadStoredActivePromos);
+  const [promoForm, setPromoForm] = useState(() => emptyPromoForm());
+  const [promoFormError, setPromoFormError] = useState("");
   const [cloudStatus, setCloudStatus] = useState("Buscando respaldo...");
   const [databaseSync, setDatabaseSync] = useState(null);
   const [cloudSaving, setCloudSaving] = useState(false);
@@ -4678,6 +4875,9 @@ function Dashboard({ session, onLogout }) {
       setMonthlyClosePeriod(String(data.monthlyClosePeriod || ""));
       setFiles(data.files && typeof data.files === "object" ? data.files : {});
       setProductAliases(data.productAliases && typeof data.productAliases === "object" ? data.productAliases : {});
+      if (Array.isArray(data.activePromos)) {
+        setActivePromos(sanitizeActivePromos(data.activePromos));
+      }
       if (data.selectedMonth) setSelectedMonth(data.selectedMonth);
       if (Number.isFinite(Number(data.dailyBufferPct))) setDailyBufferPct(Number(data.dailyBufferPct));
       setLastBackup(snapshot);
@@ -4793,6 +4993,7 @@ function Dashboard({ session, onLogout }) {
         monthlyClosePeriod,
         files,
         productAliases,
+        activePromos,
       };
       const payloadBytes = new TextEncoder().encode(JSON.stringify(contenido)).byteLength;
       if (payloadBytes > MAX_SNAPSHOT_BYTES) {
@@ -5152,6 +5353,100 @@ function Dashboard({ session, onLogout }) {
     });
   }
 
+  function resetPromoForm() {
+    setPromoForm(emptyPromoForm());
+    setPromoFormError("");
+  }
+
+  function submitPromo(event) {
+    event.preventDefault();
+    const catalogName = findOfficialProduct(promoForm.producto, officialProducts) || normalizeProduct(promoForm.producto);
+    if (!catalogName) {
+      setPromoFormError("Elige un producto del catálogo o escribe un nombre reconocido.");
+      return;
+    }
+    const multiplier = Number(promoForm.multiplier);
+    const extraPiecesPerDay = Number(promoForm.extraPiecesPerDay);
+    if (!Number.isFinite(multiplier) || multiplier <= 0) {
+      setPromoFormError("El multiplicador debe ser mayor a 0. Usa 1 si solo quieres evitar que se apague el SKU.");
+      return;
+    }
+    if (!Number.isFinite(extraPiecesPerDay) || extraPiecesPerDay < 0) {
+      setPromoFormError("Las piezas extra por día no pueden ser negativas.");
+      return;
+    }
+    const startDate = dateKey(promoForm.startDate) || todayKey();
+    const nextPromo = normalizeActivePromo({
+      id: promoForm.id || createPromoId(),
+      producto: catalogName,
+      startDate,
+      durationPreset: promoForm.durationPreset,
+      multiplier,
+      extraPiecesPerDay,
+      note: promoForm.note,
+      active: true,
+      createdAt: activePromos.find((promo) => promo.id === promoForm.id)?.createdAt,
+      updatedAt: new Date().toISOString(),
+    });
+    if (!nextPromo) {
+      setPromoFormError("No se pudo registrar la promo. Revisa el producto y las fechas.");
+      return;
+    }
+    setActivePromos((current) => {
+      const withoutSameProduct = current.map((promo) => {
+        if (promo.id === nextPromo.id) return nextPromo;
+        if (promo.active && productsMatch(promo.producto, nextPromo.producto)) {
+          return { ...promo, active: false, deactivatedAt: new Date().toISOString() };
+        }
+        return promo;
+      });
+      if (withoutSameProduct.some((promo) => promo.id === nextPromo.id)) return withoutSameProduct;
+      return [...withoutSameProduct, nextPromo];
+    });
+    setHasUnsavedChanges(true);
+    setToast({
+      tone: "success",
+      message: promoForm.id
+        ? `Promo de ${catalogName} actualizada.`
+        : `Promo activa registrada para ${catalogName}.`,
+    });
+    resetPromoForm();
+  }
+
+  function editPromo(promo) {
+    setPromoForm({
+      id: promo.id,
+      producto: promo.producto,
+      startDate: promo.startDate,
+      durationPreset: PROMO_DURATION_PRESETS.some((item) => item.value === promo.durationPreset)
+        ? promo.durationPreset
+        : promo.endDate
+          ? "3dias"
+          : "hasta_desactivar",
+      multiplier: promo.multiplier,
+      extraPiecesPerDay: promo.extraPiecesPerDay,
+      note: promo.note || "",
+    });
+    setPromoFormError("");
+  }
+
+  function deactivatePromo(promoId) {
+    const target = activePromos.find((promo) => promo.id === promoId);
+    setActivePromos((current) =>
+      current.map((promo) =>
+        promo.id === promoId
+          ? { ...promo, active: false, deactivatedAt: new Date().toISOString() }
+          : promo
+      )
+    );
+    if (promoForm.id === promoId) resetPromoForm();
+    setHasUnsavedChanges(true);
+    setToast({
+      tone: "success",
+      message: target ? `Promo de ${target.producto} desactivada.` : "Promo desactivada.",
+    });
+  }
+
   function saveProductAlias(alias, official) {
     const aliasKey = normalizeProduct(alias);
     const officialProduct = normalizeProduct(official);
@@ -5173,6 +5468,14 @@ function Dashboard({ session, onLogout }) {
       // Si el navegador bloquea localStorage, la app debe seguir funcionando.
     }
   }, [productAliases]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ACTIVE_PROMOS_STORAGE_KEY, JSON.stringify(activePromos));
+    } catch {
+      // Si el navegador bloquea localStorage, la app debe seguir funcionando.
+    }
+  }, [activePromos]);
 
   const officialProducts = useMemo(() => getOfficialProducts(stockRows), [stockRows]);
 
@@ -5296,6 +5599,7 @@ function Dashboard({ session, onLogout }) {
         realProduction: effectiveRealProduction,
         selectedMonth,
         dailyBufferPct,
+        activePromos,
       }),
     [
       stockRows,
@@ -5305,6 +5609,7 @@ function Dashboard({ session, onLogout }) {
       effectiveRealProduction,
       selectedMonth,
       dailyBufferPct,
+      activePromos,
     ]
   );
   const operationalScenario = useMemo(
@@ -5611,8 +5916,9 @@ function Dashboard({ session, onLogout }) {
         realProduction: effectiveRealProduction,
         selectedMonth,
         dailyBufferPct,
+        activePromos,
       }),
-    [forecast, ventasRealesMes, effectiveRealProduction, selectedMonth, dailyBufferPct]
+    [forecast, ventasRealesMes, effectiveRealProduction, selectedMonth, dailyBufferPct, activePromos]
   );
   const filteredDailyRows = dailyRows.filter((row) => {
     if (dailyDateFilter && row.fecha !== dailyDateFilter) return false;
@@ -5733,6 +6039,9 @@ function Dashboard({ session, onLogout }) {
     { label: "Bajas/devoluciones", loaded: Boolean(files.bajas || bajas.length) },
     { label: "Existencias", loaded: Boolean(files.existencias || existencias.length), detail: existencias.length ? (inventoryCutoff.cutoff ? displayDate(inventoryCutoff.cutoff) : "Sin fecha de corte") : "" },
   ];
+  const listedActivePromos = activePromos
+    .filter((promo) => isPromoListedAsActive(promo))
+    .sort((a, b) => a.producto.localeCompare(b.producto, "es") || a.startDate.localeCompare(b.startDate));
   const canSave = session.user.rol === "admin" || session.user.rol === "operador";
   const databaseSyncBlocked = !isDatabaseSyncComplete(databaseSync);
   const freezeBlockedReason = freezeReadiness.canFreeze
@@ -5890,6 +6199,7 @@ function Dashboard({ session, onLogout }) {
             <p><strong>Pronóstico de venta:</strong> cantidad estimada que se espera vender.</p>
             <p><strong>Producción sugerida:</strong> piezas a fabricar ese día. En pasteles GDE, MED y CH es 0 o 10, 15, 20… (un 13 se hace 15).</p>
             <p><strong>Escenario operativo +{OPERATIONAL_MARGIN_PCT}%:</strong> {formatNumber(operationalScenarioTotal, 0)} piezas; se conserva separado del pronóstico estadístico.</p>
+            <p><strong>Promo activa:</strong> overlay de planta para un empujón puntual. No cambia el WAPE histórico; sí sube la producción sugerida y evita que la limpieza de catálogo apague ese SKU.</p>
           </div>
         </section>
 
@@ -6858,6 +7168,125 @@ function Dashboard({ session, onLogout }) {
           </div>
         </details>
 
+        <section className="promo-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">Decisión de reunión</span>
+              <h3>Promo activa</h3>
+              <p>Registra un empujón puntual (mover inventario o impulsar un SKU unos días). No es un calendario anual: mientras esté activa, la planta no apaga ese producto y suma el impulso a la producción sugerida.</p>
+            </div>
+            <Megaphone size={24} />
+          </div>
+          <div className="promo-grid">
+            <form className="promo-form" onSubmit={submitPromo}>
+              <label>
+                Producto
+                <input
+                  list="promo-product-options"
+                  value={promoForm.producto}
+                  onChange={(event) => setPromoForm((current) => ({ ...current, producto: event.target.value }))}
+                  placeholder="Nombre del catálogo"
+                  required
+                  disabled={!canSave}
+                />
+                <datalist id="promo-product-options">
+                  {officialProducts.map((product) => (
+                    <option value={product} key={product} />
+                  ))}
+                </datalist>
+              </label>
+              <label>
+                Inicio
+                <input
+                  type="date"
+                  value={promoForm.startDate}
+                  onChange={(event) => setPromoForm((current) => ({ ...current, startDate: event.target.value }))}
+                  disabled={!canSave}
+                  required
+                />
+              </label>
+              <label>
+                Duración
+                <select
+                  value={promoForm.durationPreset}
+                  onChange={(event) => setPromoForm((current) => ({ ...current, durationPreset: event.target.value }))}
+                  disabled={!canSave}
+                >
+                  {PROMO_DURATION_PRESETS.map((preset) => (
+                    <option value={preset.value} key={preset.value}>{preset.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Multiplicar pronóstico
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={promoForm.multiplier}
+                  onChange={(event) => setPromoForm((current) => ({ ...current, multiplier: event.target.value }))}
+                  disabled={!canSave}
+                />
+              </label>
+              <label>
+                Piezas extra por día
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={promoForm.extraPiecesPerDay}
+                  onChange={(event) => setPromoForm((current) => ({ ...current, extraPiecesPerDay: event.target.value }))}
+                  disabled={!canSave}
+                />
+              </label>
+              <label className="promo-note-field">
+                Nota
+                <input
+                  value={promoForm.note}
+                  onChange={(event) => setPromoForm((current) => ({ ...current, note: event.target.value }))}
+                  placeholder="Ej. sobra masa, reunión de lunes"
+                  disabled={!canSave}
+                />
+              </label>
+              <div className="promo-form-actions">
+                <button className="primary" type="submit" disabled={!canSave}>
+                  <Megaphone size={17} /> {promoForm.id ? "Guardar cambios" : "Activar promo"}
+                </button>
+                {promoForm.id && (
+                  <button className="secondary" type="button" onClick={resetPromoForm}>Cancelar</button>
+                )}
+              </div>
+              {promoFormError && <small className="promo-form-error">{promoFormError}</small>}
+              <small className="promo-form-hint">
+                ×1.3 sube la sugerencia de planta 30%. Las piezas extra se suman cada día de planta (lunes a sábado). ×1 sin extras solo evita que la limpieza de catálogo apague el SKU.
+              </small>
+            </form>
+            <div className="promo-list">
+              {listedActivePromos.map((promo) => (
+                <div className="promo-list-row" key={promo.id}>
+                  <div>
+                    <strong>{promo.producto}</strong>
+                    <span>{formatPromoWindowLabel(promo)}</span>
+                    {promo.note && <small>{promo.note}</small>}
+                  </div>
+                  <span className="pill ok">{formatPromoUpliftLabel(promo)}</span>
+                  <div className="promo-list-actions">
+                    <button className="secondary" type="button" onClick={() => editPromo(promo)} disabled={!canSave}>
+                      Editar
+                    </button>
+                    <button className="secondary" type="button" onClick={() => deactivatePromo(promo.id)} disabled={!canSave}>
+                      Desactivar
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {!listedActivePromos.length && (
+                <div className="empty">No hay promos activas. Si deciden empujar un producto hoy, regístrenlo aquí para que planta no se quede corta.</div>
+              )}
+            </div>
+          </div>
+        </section>
+
         <section className="controls">
           <div className="search">
             <Search size={18} />
@@ -6980,7 +7409,12 @@ function Dashboard({ session, onLogout }) {
                   <tr key={`${row.fecha}-${row.producto}`}>
                     <td>{row.fecha}</td>
                     <td>{row.dia}</td>
-                    <td>{row.producto}</td>
+                    <td>
+                      {row.producto}
+                      {row.promoActiva && (
+                        <span className="pill ok promo-day-pill" title={row.promoEtiqueta}>Promo</span>
+                      )}
+                    </td>
                     <td>{row.promedioUsado.toFixed(2)}</td>
                     <td>{row.pronosticoVentaDia.toFixed(2)}</td>
                     <td>{row.colchonDiario.toFixed(2)}</td>
@@ -7015,6 +7449,7 @@ function Dashboard({ session, onLogout }) {
             <p>El pronóstico de venta se reparte por día de semana. El domingo no se produce y su demanda pasa al sábado.</p>
             <p>Las existencias solo se descuentan si la fecha de corte cae entre el mes anterior y el mes planificado.</p>
             <p>Para pasteles GDE, MED y CH, cada día de planta (lunes a sábado) se produce 0 o un lote de 10, 15, 20… Un 13 se hace 15; menos de 8 no se produce. El domingo queda en cero y su demanda pasa al sábado, que también sale en lote.</p>
+            <p>Una promo activa es un overlay de planta: no reescribe el WAPE histórico. Mientras dura, no se apaga el SKU por la limpieza de catálogo y la producción sugerida aplica el multiplicador y/o las piezas extra.</p>
             <p>La vista Validación de cálculos permite auditar cada producto.</p>
           </div>
         </section>
@@ -7246,7 +7681,10 @@ function Dashboard({ session, onLogout }) {
                           <td>{formatNumber(row.pronosticoVentaDia, 2)}</td>
                           <td>{formatNumber(row.colchonDiario, 2)}</td>
                           <td>{formatNumber(row.baseConColchonDia, 2)}</td>
-                          <td className="strong">{formatNumber(row.produccionSugeridaDia)}</td>
+                          <td className="strong">
+                            {formatNumber(row.produccionSugeridaDia)}
+                            {row.promoActiva ? ` · promo ${row.promoEtiqueta}` : ""}
+                          </td>
                           <td>{row.produccionRealDia === null ? "-" : formatNumber(row.produccionRealDia)}</td>
                           <td>{row.diferenciaPiezas === null ? "-" : formatNumber(row.diferenciaPiezas)}</td>
                         </tr>
@@ -7375,7 +7813,13 @@ export {
   buildSalesMonthCoverage,
   buildWeeklyProgress,
   calculateForecast,
+  calculateDailyForecast,
   buildMonthlyForecastData,
+  normalizeActivePromo,
+  sanitizeActivePromos,
+  isPromoActiveOnDate,
+  findActivePromoForProduct,
+  applyPromoUpliftToQuantity,
   getProduccionSugerida,
   consolidateOperationalRowsForUpload,
   consolidateSalesRowsForUpload,
