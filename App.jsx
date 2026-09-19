@@ -527,6 +527,13 @@ function defaultInventoryDate(selectedMonth, now = new Date()) {
   return today;
 }
 
+function isPlausibleIsoDate(value) {
+  const key = dateKey(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return false;
+  const year = Number(key.slice(0, 4));
+  return year >= 2000 && year <= 2100;
+}
+
 function createPromoId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `promo-${crypto.randomUUID()}`;
@@ -4990,7 +4997,7 @@ function Dashboard({ session, onLogout }) {
   const [selectedMonth, setSelectedMonth] = useState(defaultMonthValue());
   const [selectedMonthTouched, setSelectedMonthTouched] = useState(false);
   const [dailyBufferPct, setDailyBufferPct] = useState(10);
-  const [dailyDateFilter, setDailyDateFilter] = useState("");
+  const [dailyDateFilter, setDailyDateFilter] = useState(() => defaultInventoryDate(defaultMonthValue()));
   const [dailyProductQuery, setDailyProductQuery] = useState("");
   const [dailyWeekdayFilter, setDailyWeekdayFilter] = useState("");
   const [selectedWeekKey, setSelectedWeekKey] = useState("");
@@ -6308,7 +6315,8 @@ function Dashboard({ session, onLogout }) {
   });
 
   const dailySummary = useMemo(() => summarizeDailyMonth(dailyRows), [dailyRows]);
-  const inventoryDate = stockCaptureDate || dailyDateFilter || defaultInventoryDate(selectedMonth);
+  const inventoryDate = [stockCaptureDate, dailyDateFilter, defaultInventoryDate(selectedMonth)].find(isPlausibleIsoDate)
+    || defaultInventoryDate(selectedMonth);
   const knownSucursales = useMemo(
     () => collectSucursales({
       ventas: effectiveVentas,
@@ -6345,9 +6353,15 @@ function Dashboard({ session, onLogout }) {
   const inventoryDayPieces = stockRowsForDate.reduce((sum, row) => sum + row.cantidad, 0);
 
   useEffect(() => {
+    const next = defaultInventoryDate(selectedMonth);
     setStockCaptureDate((current) => {
-      if (current && selectedMonth && current.startsWith(selectedMonth)) return current;
-      return defaultInventoryDate(selectedMonth);
+      if (isPlausibleIsoDate(current) && selectedMonth && current.startsWith(selectedMonth)) return current;
+      return next;
+    });
+    setDailyDateFilter((current) => {
+      if (!current) return next;
+      if (isPlausibleIsoDate(current) && selectedMonth && current.startsWith(selectedMonth)) return current;
+      return next;
     });
   }, [selectedMonth]);
   const weeklyProgress = useMemo(
@@ -7812,10 +7826,14 @@ function Dashboard({ session, onLogout }) {
                 Fecha de inventario
                 <input
                   type="date"
-                  value={inventoryDate}
+                  min="2020-01-01"
+                  max="2100-12-31"
+                  value={isPlausibleIsoDate(inventoryDate) ? inventoryDate : ""}
                   onChange={(event) => {
-                    setStockCaptureDate(event.target.value);
-                    setDailyDateFilter(event.target.value);
+                    const next = event.target.value;
+                    if (next && !isPlausibleIsoDate(next)) return;
+                    setStockCaptureDate(next);
+                    setDailyDateFilter(next);
                   }}
                 />
               </label>
@@ -7946,10 +7964,14 @@ function Dashboard({ session, onLogout }) {
               Fecha
               <input
                 type="date"
-                value={dailyDateFilter}
+                min="2020-01-01"
+                max="2100-12-31"
+                value={isPlausibleIsoDate(dailyDateFilter) ? dailyDateFilter : ""}
                 onChange={(e) => {
-                  setDailyDateFilter(e.target.value);
-                  if (e.target.value) setStockCaptureDate(e.target.value);
+                  const next = e.target.value;
+                  if (next && !isPlausibleIsoDate(next)) return;
+                  setDailyDateFilter(next);
+                  if (next) setStockCaptureDate(next);
                 }}
               />
             </label>

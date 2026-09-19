@@ -3762,6 +3762,7 @@ tbody tr:hover {
 
 .daily-stock-upload {
   margin: 0;
+  width: auto;
 }
 
 .daily-stock-table-wrap {
