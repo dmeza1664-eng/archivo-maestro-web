@@ -4381,6 +4381,42 @@ function KpiCard({ icon: Icon, label, value, tone, caption }) {
   );
 }
 
+function SectionDisclosure({
+  className = "",
+  summaryClassName = "compact-analytics-summary",
+  contentClassName = "compact-analytics-content",
+  eyebrow,
+  title,
+  description,
+  badge,
+  icon: Icon,
+  children,
+  open,
+  onToggle,
+  defaultOpen = false,
+}) {
+  const detailsProps = typeof onToggle === "function"
+    ? {
+      open,
+      onToggle: (event) => onToggle(event.currentTarget.open),
+    }
+    : { defaultOpen };
+  return (
+    <details className={className} {...detailsProps}>
+      <summary className={summaryClassName}>
+        {Icon ? <span className="compact-analytics-icon"><Icon size={19} /></span> : null}
+        <div>
+          {eyebrow ? <span className="eyebrow">{eyebrow}</span> : null}
+          <strong>{title}</strong>
+          {description ? <small>{description}</small> : null}
+        </div>
+        {badge}
+      </summary>
+      <div className={contentClassName}>{children}</div>
+    </details>
+  );
+}
+
 function summarizeOperationalRows(rows, dimensionValues) {
   const dailyRows = [];
   const dimensions = new Set();
@@ -4594,10 +4630,13 @@ function ForecastHealthStrip({ health, selectedMonth }) {
         </p>
       )}
       {topErrors.length > 0 && (
-        <p className="freeze-strip-alert warn forecast-health-errors">
-          Más error absoluto en {shortMonthLabel(latest.month)}:{" "}
-          {topErrors.map((row) => `${row.producto} (${row.error > 0 ? "+" : ""}${Math.round(row.error)})`).join(" · ")}
-        </p>
+        <details className="forecast-health-more">
+          <summary>Ver productos con más error</summary>
+          <p className="freeze-strip-alert warn forecast-health-errors">
+            Más error absoluto en {shortMonthLabel(latest.month)}:{" "}
+            {topErrors.map((row) => `${row.producto} (${row.error > 0 ? "+" : ""}${Math.round(row.error)})`).join(" · ")}
+          </p>
+        </details>
       )}
     </section>
   );
@@ -4697,6 +4736,8 @@ function Dashboard({ session, onLogout }) {
   const [activePromos, setActivePromos] = useState(loadStoredActivePromos);
   const [promoForm, setPromoForm] = useState(() => emptyPromoForm());
   const [promoFormError, setPromoFormError] = useState("");
+  const [promoOpen, setPromoOpen] = useState(() => loadStoredActivePromos().some((promo) => isPromoListedAsActive(promo)));
+  const [showPromoForm, setShowPromoForm] = useState(false);
   const [cloudStatus, setCloudStatus] = useState("Buscando respaldo...");
   const [databaseSync, setDatabaseSync] = useState(null);
   const [cloudSaving, setCloudSaving] = useState(false);
@@ -5356,6 +5397,7 @@ function Dashboard({ session, onLogout }) {
   function resetPromoForm() {
     setPromoForm(emptyPromoForm());
     setPromoFormError("");
+    setShowPromoForm(false);
   }
 
   function submitPromo(event) {
@@ -5410,10 +5452,13 @@ function Dashboard({ session, onLogout }) {
         ? `Promo de ${catalogName} actualizada.`
         : `Promo activa registrada para ${catalogName}.`,
     });
+    setPromoOpen(true);
     resetPromoForm();
   }
 
   function editPromo(promo) {
+    setPromoOpen(true);
+    setShowPromoForm(true);
     setPromoForm({
       id: promo.id,
       producto: promo.producto,
@@ -6059,46 +6104,76 @@ function Dashboard({ session, onLogout }) {
         <header className="top">
           <div>
             <span className="eyebrow">Archivo Maestro</span>
-            <h2>Producción diaria sugerida</h2>
-            <p>Selecciona por producto el método con menor error histórico y lo distribuye por día de semana.</p>
+            <h2>Decisión de planta</h2>
+            <p>Carga datos, revisa la salud del pronóstico y congela la producción sugerida del mes.</p>
           </div>
-          <div className="top-actions">
-            <div className="session-user">
-              <UserRound size={17} />
-              <span>{session.user.nombre}</span>
-              <small>{session.user.rol}</small>
-            </div>
-            <button
-              className="primary"
-              type="button"
-              onClick={() => saveWorkspace()}
-              disabled={!canSave || cloudSaving || (!hasUnsavedChanges && Boolean(lastBackup))}
-            >
-              <Save size={18} /> {cloudSaving ? "Guardando..." : hasUnsavedChanges ? "Guardar respaldo" : "Respaldo guardado"}
-            </button>
-            <button className="secondary" type="button" onClick={() => exportToExcel(filtered, summary)} disabled={!forecast.length}>
-              <Download size={18} /> Exportar
-            </button>
-            <button
-              className="secondary"
-              type="button"
-              onClick={freezeAndExportForecast}
-              disabled={!canSave || cloudSaving || forecastFreezing || !forecast.length || !freezeReadiness.canFreeze}
-              title={freezeBlockedReason}
-            >
-              <ShieldCheck size={18} /> {forecastFreezing ? "Congelando..." : "Congelar mes"}
-            </button>
-            {session.user.rol === "admin" && (
-              <button className="secondary" type="button" onClick={toggleUsers}>
-                <UserRound size={18} /> Usuarios
+          <div className="top-toolbar">
+            <label className="month-control">
+              Mes
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={(e) => {
+                  setSelectedMonthTouched(true);
+                  setSelectedMonth(e.target.value);
+                  setHasUnsavedChanges(true);
+                }}
+              />
+            </label>
+            <div className="top-actions">
+              <div className="session-user">
+                <UserRound size={17} />
+                <span>{session.user.nombre}</span>
+                <small>{session.user.rol}</small>
+              </div>
+              <button
+                className="primary"
+                type="button"
+                onClick={() => saveWorkspace()}
+                disabled={!canSave || cloudSaving || (!hasUnsavedChanges && Boolean(lastBackup))}
+              >
+                <Save size={18} /> {cloudSaving ? "Guardando..." : hasUnsavedChanges ? "Guardar respaldo" : "Respaldo guardado"}
               </button>
-            )}
-            <button className="icon-button" type="button" onClick={onLogout} title="Cerrar sesión" aria-label="Cerrar sesión">
-              <LogOut size={18} />
-            </button>
+              <button
+                className="primary"
+                type="button"
+                onClick={freezeAndExportForecast}
+                disabled={!canSave || cloudSaving || forecastFreezing || !forecast.length || !freezeReadiness.canFreeze}
+                title={freezeBlockedReason}
+              >
+                <ShieldCheck size={18} /> {forecastFreezing ? "Congelando..." : "Congelar mes"}
+              </button>
+              <button className="secondary" type="button" onClick={() => exportToExcel(filtered, summary)} disabled={!forecast.length}>
+                <Download size={18} /> Exportar
+              </button>
+              <details className="more-menu">
+                <summary className="secondary">Más opciones</summary>
+                <div className="more-menu-panel">
+                  <p>Filtros del Excel mensual. No cambian la tabla diaria.</p>
+                  <div className="search">
+                    <Search size={18} />
+                    <input placeholder="Buscar producto del Excel..." value={query} onChange={(e) => setQuery(e.target.value)} />
+                  </div>
+                  <label className="check-control">
+                    <input
+                      type="checkbox"
+                      checked={showMissingReal}
+                      onChange={(e) => setShowMissingReal(e.target.checked)}
+                    />
+                    Incluir productos sin dato real
+                  </label>
+                  {session.user.rol === "admin" && (
+                    <button className="secondary" type="button" onClick={toggleUsers}>
+                      <UserRound size={18} /> Usuarios
+                    </button>
+                  )}
+                </div>
+              </details>
+              <button className="icon-button" type="button" onClick={onLogout} title="Cerrar sesión" aria-label="Cerrar sesión">
+                <LogOut size={18} />
+              </button>
+            </div>
           </div>
-          <FreezeReadinessStrip readiness={freezeReadiness} selectedMonth={selectedMonth} />
-          <ForecastHealthStrip health={forecastHealth} selectedMonth={selectedMonth} />
         </header>
 
         {toast && (
@@ -6157,51 +6232,6 @@ function Dashboard({ session, onLogout }) {
             </div>
           </section>
         )}
-
-        <section className="executive-summary-section">
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">Vista general</span>
-              <h3>Resumen Ejecutivo</h3>
-              <p>Resumen operativo del mes seleccionado, sin comparativos contra producción real incompleta.</p>
-            </div>
-            <BarChart3 size={24} />
-          </div>
-
-          <section className="executive-summary-kpis">
-            <KpiCard
-              icon={PackageCheck}
-              label="Productos analizados"
-              value={formatNumber(forecast.length)}
-              caption="Catálogo filtrado sin rebanadas"
-            />
-            <KpiCard
-              icon={BarChart3}
-              label="Pronóstico de venta mensual"
-              value={formatNumber(dailySummary.pronosticoVentaMensual, 0)}
-              caption="Suma de pronósticos diarios"
-            />
-            <KpiCard
-              icon={ShieldCheck}
-              label="Producción sugerida mensual"
-              value={formatNumber(dailySummary.produccionSugeridaMensual, 0)}
-              caption="Con regla operativa"
-            />
-            <KpiCard
-              icon={Target}
-              label="Mes analizado"
-              value={selectedMonth || "Sin mes"}
-              caption={`Margen de seguridad: ${dailyBufferPct}%`}
-            />
-          </section>
-
-          <div className="forecast-concepts" role="note">
-            <p><strong>Pronóstico de venta:</strong> cantidad estimada que se espera vender.</p>
-            <p><strong>Producción sugerida:</strong> piezas a fabricar ese día. En pasteles GDE, MED y CH es 0 o 10, 15, 20… (un 13 se hace 15).</p>
-            <p><strong>Escenario operativo +{OPERATIONAL_MARGIN_PCT}%:</strong> {formatNumber(operationalScenarioTotal, 0)} piezas; se conserva separado del pronóstico estadístico.</p>
-            <p><strong>Promo activa:</strong> overlay de planta para un empujón puntual. No cambia el WAPE histórico; sí sube la producción sugerida y evita que la limpieza de catálogo apague ese SKU.</p>
-          </div>
-        </section>
 
         <details className="weekly-progress-section compact-analytics-section">
           <summary className="compact-analytics-summary">
@@ -6821,9 +6851,9 @@ function Dashboard({ session, onLogout }) {
         <section className="loaded-files-section">
           <div className="section-heading compact-heading">
             <div>
-              <span className="eyebrow">Preparación de datos</span>
-              <h3>Archivos cargados</h3>
-              <p>Carga stock fijo y ventas para generar el pronóstico. Producción real, bajas y existencias son complementarios.</p>
+              <span className="eyebrow">Paso 1 · Datos</span>
+              <h3>Cargar stock y ventas</h3>
+              <p>Estos dos archivos encienden el pronóstico. Bajas, existencias y producción real están en Más archivos.</p>
             </div>
             <div className="loaded-context">
               <span>Mes: {selectedMonth || "Sin mes"}</span>
@@ -6897,7 +6927,7 @@ function Dashboard({ session, onLogout }) {
           </section>
         </details>}
 
-        <section className="uploads">
+        <section className="uploads required-uploads">
           <UploadBox
             title="Stock fijo"
             description="Productos oficiales, stock objetivo y orden."
@@ -6913,26 +6943,48 @@ function Dashboard({ session, onLogout }) {
             onFile={handleSalesFiles}
             fileName={files.ventas}
           />
-          <UploadBox
-            title="Bajas"
-            description="Merma, devoluciones o bajas por producto."
-            onFile={handleWasteFile}
-            fileName={files.bajas}
-          />
-          <UploadBox
-            title="Existencias"
-            description="Hoja EXISTENCIA EN SUCURSALES. Confirma la fecha de corte antes de descontar inventario."
-            onFile={handleExistenciasFile}
-            fileName={files.existencias}
-          />
-          <UploadBox
-            title="Producción real"
-            description="Excel consolidado o ZIP con producción real."
-            accept=".xlsx,.xls,.zip"
-            onFile={handleProductionReal}
-            fileName={files.real}
-          />
         </section>
+
+        <SectionDisclosure
+          className="complementary-files advanced-details"
+          summaryClassName="advanced-summary"
+          contentClassName="advanced-details-content complementary-files-content"
+          eyebrow="Opcional"
+          title="Más archivos"
+          description="Bajas, existencias y producción real. No bloquean el pronóstico base."
+          badge={(
+            <span className="advanced-count">
+              {[
+                files.bajas || bajas.length,
+                files.existencias || existencias.length,
+                files.real || realProduction.length,
+              ].filter(Boolean).length}
+              /3 cargados
+            </span>
+          )}
+        >
+          <section className="uploads optional-uploads">
+            <UploadBox
+              title="Bajas"
+              description="Merma, devoluciones o bajas por producto."
+              onFile={handleWasteFile}
+              fileName={files.bajas}
+            />
+            <UploadBox
+              title="Existencias"
+              description="Hoja EXISTENCIA EN SUCURSALES. Confirma la fecha de corte antes de descontar inventario."
+              onFile={handleExistenciasFile}
+              fileName={files.existencias}
+            />
+            <UploadBox
+              title="Producción real"
+              description="Excel consolidado o ZIP con producción real."
+              accept=".xlsx,.xls,.zip"
+              onFile={handleProductionReal}
+              fileName={files.real}
+            />
+          </section>
+        </SectionDisclosure>
 
         {salesSourceDecisions.length > 0 && (
           <section className="sales-conflict-bar">
@@ -7168,16 +7220,65 @@ function Dashboard({ session, onLogout }) {
           </div>
         </details>
 
-        <section className="promo-section">
-          <div className="section-heading">
+        <section className="executive-summary-section decision-section">
+          <div className="section-heading compact-heading">
             <div>
-              <span className="eyebrow">Decisión de reunión</span>
-              <h3>Promo activa</h3>
-              <p>Registra un empujón puntual (mover inventario o impulsar un SKU unos días). No es un calendario anual: mientras esté activa, la planta no apaga ese producto y suma el impulso a la producción sugerida.</p>
+              <span className="eyebrow">Paso 2 · Salud</span>
+              <h3>Pronóstico listo para planta</h3>
+              <p>Revisa WAPE, sync y el total sugerido antes de congelar. El detalle de error queda un clic abajo.</p>
             </div>
-            <Megaphone size={24} />
+            <strong className="decision-month-chip">{selectedMonth || "Sin mes"} · margen {dailyBufferPct}%</strong>
           </div>
+
+          <ForecastHealthStrip health={forecastHealth} selectedMonth={selectedMonth} />
+          <FreezeReadinessStrip readiness={freezeReadiness} selectedMonth={selectedMonth} />
+
+          <section className="executive-summary-kpis decision-kpis">
+            <KpiCard
+              icon={PackageCheck}
+              label="Productos analizados"
+              value={formatNumber(forecast.length)}
+              caption="Catálogo filtrado sin rebanadas"
+            />
+            <KpiCard
+              icon={BarChart3}
+              label="Pronóstico de venta mensual"
+              value={formatNumber(dailySummary.pronosticoVentaMensual, 0)}
+              caption="Suma de pronósticos diarios"
+            />
+            <KpiCard
+              icon={ShieldCheck}
+              label="Producción sugerida mensual"
+              value={formatNumber(dailySummary.produccionSugeridaMensual, 0)}
+              caption="Con regla operativa"
+            />
+            <KpiCard
+              icon={Target}
+              label="Escenario operativo"
+              value={formatNumber(operationalScenarioTotal, 0)}
+              caption={`Colchón +${OPERATIONAL_MARGIN_PCT}% separado del estadístico`}
+            />
+          </section>
+        </section>
+
+        <SectionDisclosure
+          className={`promo-section compact-analytics-section ${listedActivePromos.length ? "has-promos" : "is-empty"}`}
+          eyebrow="Cuando haga falta"
+          title="Promo activa"
+          description={listedActivePromos.length
+            ? "Empuje puntual sobre la producción sugerida. No cambia el WAPE histórico."
+            : "Vacía. Ábrela solo si hay que empujar un SKU para que planta no se quede corta."}
+          icon={Megaphone}
+          badge={(
+            <span className={`pill ${listedActivePromos.length ? "ok" : "muted"}`}>
+              {listedActivePromos.length ? `${listedActivePromos.length} activa${listedActivePromos.length === 1 ? "" : "s"}` : "Sin promo"}
+            </span>
+          )}
+          open={promoOpen}
+          onToggle={setPromoOpen}
+        >
           <div className="promo-grid">
+            {(showPromoForm || !listedActivePromos.length) ? (
             <form className="promo-form" onSubmit={submitPromo}>
               <label>
                 Producto
@@ -7261,6 +7362,14 @@ function Dashboard({ session, onLogout }) {
                 ×1.3 sube la sugerencia de planta 30%. Las piezas extra se suman cada día de planta (lunes a sábado). ×1 sin extras solo evita que la limpieza de catálogo apague el SKU.
               </small>
             </form>
+            ) : (
+              <div className="promo-list-toolbar">
+                <p>Las promos de abajo ya empujan la producción sugerida. El formulario queda oculto hasta que agregues otra.</p>
+                <button className="secondary" type="button" onClick={() => setShowPromoForm(true)} disabled={!canSave}>
+                  <Megaphone size={17} /> Nueva promo
+                </button>
+              </div>
+            )}
             <div className="promo-list">
               {listedActivePromos.map((promo) => (
                 <div className="promo-list-row" key={promo.id}>
@@ -7285,29 +7394,14 @@ function Dashboard({ session, onLogout }) {
               )}
             </div>
           </div>
-        </section>
-
-        <section className="controls">
-          <div className="search">
-            <Search size={18} />
-            <input placeholder="Buscar producto..." value={query} onChange={(e) => setQuery(e.target.value)} />
-          </div>
-          <label className="check-control">
-            <input
-              type="checkbox"
-              checked={showMissingReal}
-              onChange={(e) => setShowMissingReal(e.target.checked)}
-            />
-            Mostrar productos sin dato real
-          </label>
-        </section>
+        </SectionDisclosure>
 
         <section className="daily-section">
-          <div className="section-heading">
+          <div className="section-heading compact-heading">
             <div>
-              <span className="eyebrow">Planeación por día</span>
+              <span className="eyebrow">Paso 3 · Planta</span>
               <h3>Producción diaria sugerida</h3>
-              <p>Usa backtesting, estacionalidad y comportamiento reciente sin leer el mes objetivo ni meses futuros.</p>
+              <p>Esta es la lista de trabajo del día. El mes se cambia arriba, junto a Congelar.</p>
               <strong className="row-counter">{formatNumber(dailyRows.length)} filas diarias generadas</strong>
               {files.ventas && (
                 <p className={`real-validation-message ${historicalVentas.length ? "success" : "warning"}`}>
@@ -7325,18 +7419,6 @@ function Dashboard({ session, onLogout }) {
           </div>
 
           <section className="controls daily-controls">
-            <label>
-              Mes
-              <input
-                type="month"
-                value={selectedMonth}
-                onChange={(e) => {
-                  setSelectedMonthTouched(true);
-                  setSelectedMonth(e.target.value);
-                  setHasUnsavedChanges(true);
-                }}
-              />
-            </label>
             <label>
               Fecha
               <input type="date" value={dailyDateFilter} onChange={(e) => setDailyDateFilter(e.target.value)} />
@@ -7372,23 +7454,38 @@ function Dashboard({ session, onLogout }) {
                 }}
               />
             </label>
-            <label className="check-control">
-              <input
-                type="checkbox"
-                checked={onlyDailyShortage}
-                onChange={(e) => setOnlyDailyShortage(e.target.checked)}
-              />
-              Ver solo productos con faltante
-            </label>
-            <label className="check-control">
-              <input
-                type="checkbox"
-                checked={onlyDailyOverproduction}
-                onChange={(e) => setOnlyDailyOverproduction(e.target.checked)}
-              />
-              Ver solo productos con sobreproducción
-            </label>
           </section>
+
+          <details className="advanced-details daily-more-filters">
+            <summary className="advanced-summary">
+              <div>
+                <span className="eyebrow">Filtros extra</span>
+                <strong>Más filtros de la tabla</strong>
+                <small>Faltante, sobreproducción y recortes de revisión</small>
+              </div>
+              <span className="advanced-count">
+                {[onlyDailyShortage, onlyDailyOverproduction].filter(Boolean).length || "Ocultos"}
+              </span>
+            </summary>
+            <div className="advanced-details-content daily-more-filters-content">
+              <label className="check-control">
+                <input
+                  type="checkbox"
+                  checked={onlyDailyShortage}
+                  onChange={(e) => setOnlyDailyShortage(e.target.checked)}
+                />
+                Ver solo productos con faltante
+              </label>
+              <label className="check-control">
+                <input
+                  type="checkbox"
+                  checked={onlyDailyOverproduction}
+                  onChange={(e) => setOnlyDailyOverproduction(e.target.checked)}
+                />
+                Ver solo productos con sobreproducción
+              </label>
+            </div>
+          </details>
 
           <section className="table-card daily-table-card">
             <table className="daily-table">
@@ -7437,13 +7534,22 @@ function Dashboard({ session, onLogout }) {
           </section>
         </section>
 
-        <section className="notes-section">
-          <div className="section-heading compact-heading">
-            <div>
-              <span className="eyebrow">Lectura rápida</span>
-              <h3>Notas de interpretación</h3>
-            </div>
+        <section className="secondary-tools-heading">
+          <div>
+            <span className="eyebrow">Cuando haga falta</span>
+            <h3>Seguimiento y auditoría</h3>
+            <p>Avance semanal, cierre, homologación y validación. Cerrados para no competir con la decisión de planta.</p>
           </div>
+        </section>
+
+        <SectionDisclosure
+          className="notes-section compact-analytics-section"
+          eyebrow="Lectura rápida"
+          title="Notas de interpretación"
+          description="Reglas de domingo, lotes de pastel y cómo se lee una promo."
+          icon={FileSpreadsheet}
+          badge={<span className="pill muted">Guía</span>}
+        >
           <div className="notes-list">
             <p>El pronóstico elige el método con menor error en el mes anterior y aplica una calibración limitada.</p>
             <p>El pronóstico de venta se reparte por día de semana. El domingo no se produce y su demanda pasa al sábado.</p>
@@ -7452,14 +7558,21 @@ function Dashboard({ session, onLogout }) {
             <p>Una promo activa es un overlay de planta: no reescribe el WAPE histórico. Mientras dura, no se apaga el SKU por la limpieza de catálogo y la producción sugerida aplica el multiplicador y/o las piezas extra.</p>
             <p>La vista Validación de cálculos permite auditar cada producto.</p>
           </div>
-        </section>
+        </SectionDisclosure>
 
-        <section className="validation-section">
-          <div className="section-heading">
+        <SectionDisclosure
+          className="validation-section compact-analytics-section"
+          eyebrow="Auditoría paso a paso"
+          title="Validación de cálculos"
+          description="Ventas leídas, promedios y el cálculo diario de un producto."
+          icon={BarChart3}
+          badge={<span className="pill muted">{validationProduct || "Sin producto"}</span>}
+        >
+          <div className="section-heading compact-heading">
             <div>
-              <span className="eyebrow">Auditoría paso a paso</span>
-              <h3>Validación de cálculos</h3>
-              <p>Revisa las ventas leídas, los promedios aplicados y el cálculo diario completo de un producto.</p>
+              <span className="eyebrow">Producto a auditar</span>
+              <h3>Desglose del cálculo</h3>
+              <p>Revisa las ventas leídas, los promedios aplicados y el cálculo diario completo.</p>
             </div>
             <label className="validation-product-select">
               Producto
@@ -7699,7 +7812,7 @@ function Dashboard({ session, onLogout }) {
               Carga stock fijo y ventas para validar paso a paso un producto como <strong>PIÑA GDE</strong>.
             </div>
           )}
-        </section>
+        </SectionDisclosure>
 
       </main>
     </div>
