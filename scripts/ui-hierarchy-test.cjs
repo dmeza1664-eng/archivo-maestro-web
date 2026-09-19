@@ -15,6 +15,9 @@ assert.match(app, /secondary-tools-heading/, "El seguimiento queda agrupado como
 assert.match(app, /Paso 1 · Datos/, "La carga de datos es el primer paso visible.");
 assert.match(app, /Paso 2 · Salud/, "La salud del pronóstico es el segundo paso visible.");
 assert.match(app, /Paso 3 · Planta/, "La tabla diaria es el tercer paso visible.");
+assert.match(app, /className="daily-stock-panel"/, "El inventario diario vive en Planta, no enterrado en Más archivos.");
+assert.match(app, /Inventario del día/, "La captura de stock diario usa etiqueta en español.");
+assert.match(app, /Pedido planta/, "La tabla de planta muestra el pedido neto.");
 assert.doesNotMatch(
   app,
   /<FreezeReadinessStrip[\s\S]*<\/header>/,

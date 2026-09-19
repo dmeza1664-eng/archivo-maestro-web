@@ -3704,6 +3704,101 @@ tbody tr:hover {
   margin-bottom: 0;
 }
 
+.daily-stock-panel {
+  background: #ffffff;
+  border: 1px solid #e6ddd2;
+  border-radius: 10px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.daily-stock-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.daily-stock-icon {
+  align-items: center;
+  background: rgba(176, 106, 58, 0.08);
+  border-radius: 10px;
+  color: #8a4e24;
+  display: inline-flex;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+
+.daily-stock-heading h4 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.daily-stock-heading p {
+  color: #82705f;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+  max-width: 640px;
+}
+
+.daily-stock-toolbar {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.daily-stock-add-branch span {
+  display: flex;
+  gap: 6px;
+}
+
+.daily-stock-add-branch input {
+  min-width: 160px;
+}
+
+.daily-stock-upload {
+  margin: 0;
+}
+
+.daily-stock-table-wrap {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.daily-stock-table {
+  min-width: 100%;
+}
+
+.daily-stock-table th:first-child,
+.daily-stock-table td:first-child {
+  left: 0;
+  position: sticky;
+  z-index: 1;
+}
+
+.daily-stock-table td:first-child {
+  background: #ffffff;
+}
+
+.daily-stock-table thead th:first-child {
+  background: #2e241c;
+  z-index: 2;
+}
+
+.daily-stock-qty {
+  max-width: 88px;
+  min-width: 72px;
+}
+
+.daily-stock-hint {
+  color: #82705f;
+  font-size: 12px;
+}
+
 .daily-more-filters {
   margin: 0;
 }
@@ -3776,6 +3871,16 @@ tbody tr:hover {
 }
 
 @media (max-width: 880px) {
+  .daily-stock-heading {
+    flex-direction: column;
+  }
+
+  .daily-stock-toolbar,
+  .daily-stock-add-branch span {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .top-toolbar {
     align-items: stretch;
     flex-direction: column;
