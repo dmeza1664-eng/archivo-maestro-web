@@ -59,6 +59,9 @@ async function main() {
     computeAnnualGrowthFactor,
     resolvePriorYearSeasonal,
     computeRecentMomentumFactor,
+    computeEventCarryoverScale,
+    calendarEventForMonth,
+    normalizeProduct,
     isPriceTaggedProduct,
     applyCatalogOutlierCleanup,
     assessForecastFreezeReadiness,
@@ -333,6 +336,34 @@ async function main() {
   ]);
   assert(computeRecentMomentumFactor(julyCloseOnlyMonth, "2026-08") === 1, "un cierre sin diario no impulsa agosto");
 
+  assert(normalizeProduct("CHEESECAKE GDE") === "CHESSECAKE GDE", "CHEESECAKE empata con el catálogo");
+  assert(normalizeProduct("NUTELLA GDE") === "NUTELA GDE", "NUTELLA empata con NUTELA");
+  assert(normalizeProduct("M&M MEDIANO") === "M & M MED", "M&M MEDIANO empata con M & M MED");
+  assert(normalizeProduct("M Y M GRANDE") === "M & M GDE", "M Y M GRANDE empata con M & M GDE");
+  assert(normalizeProduct("PINA GRANDE") === "PINA GDE", "PINA GRANDE sigue siendo PINA GDE");
+  assert(calendarEventForMonth("2026-05")?.id === "madres", "mayo es Día de las Madres");
+  assert(calendarEventForMonth("2026-06")?.id === "padre", "junio es Día del Padre");
+  assert(!calendarEventForMonth("2026-07"), "julio no es mes de evento de pastelería");
+
+  const madresPeak = new Map([
+    ["2026-03", { total: 524 }],
+    ["2026-04", { total: 500 }],
+    ["2026-05", { total: 660 }],
+    ["2025-05", { total: 658 }],
+    ["2025-06", { total: 519 }],
+  ]);
+  const mayToJune = computeEventCarryoverScale(madresPeak, "2026-05", "2026-06");
+  assert(mayToJune < 0.85 && mayToJune >= 0.72, `mayo pico no debe copiarse a junio (escala ${mayToJune})`);
+  assert(computeEventCarryoverScale(madresPeak, "2025-05", "2026-05") === 1, "al pronosticar mayo se conserva el evento");
+  const juneNotPeak = new Map([
+    ["2026-05", { total: 660 }],
+    ["2026-06", { total: 519 }],
+    ["2026-04", { total: 500 }],
+    ["2025-06", { total: 519 }],
+    ["2025-07", { total: 475 }],
+  ]);
+  assert(computeEventCarryoverScale(juneNotPeak, "2026-06", "2026-07") === 1, "junio no es pico vs mayo: julio no se desinfla");
+
   function dailyRowsForMonth(monthKey, dayCount, quantity = 10) {
     const [year, month] = monthKey.split("-").map(Number);
     return Array.from({ length: dayCount }, (_, index) => ({
@@ -588,6 +619,42 @@ async function main() {
   });
   assert(paletaRaw[0].pronosticoVenta < 180, `PALETA $35 no debe extrapolar el pico de junio (fc ${paletaRaw[0].pronosticoVenta.toFixed(1)})`);
   assert(/limpieza catálogo/i.test(paletaRaw[0].metodoPronostico || ""), "PALETA $35 debe anotar limpieza de catálogo");
+
+  const cheesecakeObserved = [
+    monthClose("2025-04", "CHEESECAKE GDE", 180),
+    monthClose("2025-05", "CHEESECAKE GDE", 230),
+    monthClose("2025-06", "CHEESECAKE GDE", 188),
+    monthClose("2025-07", "CHEESECAKE GDE", 165),
+    monthClose("2025-08", "CHEESECAKE GDE", 186),
+    monthClose("2026-04", "CHEESECAKE GDE", 182),
+    monthClose("2026-05", "CHEESECAKE GDE", 235),
+  ];
+  const gapMonths = ["2025-09", "2025-10", "2025-11", "2026-01", "2026-02", "2026-03"];
+  const cheesecakeWithInferredGaps = [
+    ...cheesecakeObserved,
+    ...gapMonths.map((monthKey) => {
+      const [year, month] = monthKey.split("-").map(Number);
+      return {
+        fecha: new Date(year, month - 1, 1),
+        producto: "CHESSECAKE GDE",
+        cantidad: 0,
+        monthlyTotal: true,
+        monthDays: new Date(year, month, 0).getDate(),
+        inferredZeroMonth: true,
+      };
+    }),
+  ];
+  const cheesecakeJuly = calculateForecast({
+    stockRows: [{ producto: "CHEESECAKE GDE", stock: 20, orden: 1 }],
+    historicalVentas: cheesecakeWithInferredGaps,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 10,
+  });
+  assert(cheesecakeJuly[0].pronosticoVenta > 150, `ceros inferidos no deben apagar CHEESECAKE (fc ${cheesecakeJuly[0].pronosticoVenta.toFixed(1)})`);
+  assert(!/venta intermitente/i.test(cheesecakeJuly[0].metodoPronostico || ""), "CHEESECAKE regular no es intermitente por huecos de carga");
 
   const cajitaHistory = [
     monthClose("2025-04", "CAJITA FELIZ", 599),
