@@ -345,10 +345,20 @@ function normalizeProduct(value) {
     .replace(/\s+/g, " ")
     .trim()
     // El catalogo escribe CHESSECAKE; las ventas usan ambas grafias.
-    .replace(/CHE{1,2}S{1,2}ECAKE/g, "CHESSECAKE");
+    .replace(/CHE{1,2}S{1,2}ECAKE/g, "CHESSECAKE")
+    .replace(/\bNUTELLA\b/g, "NUTELA")
+    .replace(/\bM\s*&\s*M\b/g, "M & M")
+    .replace(/\bM\s+Y\s+M\b/g, "M & M")
+    .replace(/\bMYM\b/g, "M & M")
+    .replace(/\bGRANDE\b/g, "GDE")
+    .replace(/\bMEDIANO\b/g, "MED")
+    .replace(/\bCHICO\b/g, "CH");
   const compact = normalized.replace(/[^A-Z0-9]/g, "");
   if (compact === "PINAGDE" || compact === "PINAGRANDE") return "PINA GDE";
-  return normalized;
+  if (compact === "MMGDE" || compact === "MYMGDE") return "M & M GDE";
+  if (compact === "MMMED" || compact === "MYMMED") return "M & M MED";
+  if (compact === "MMCH" || compact === "MYMCH") return "M & M CH";
+  return normalized.replace(/\s+/g, " ").trim();
 }
 
 function productMatchKey(value) {
@@ -2661,6 +2671,12 @@ function applyRecentMomentum(model, records, selectedMonth, options = {}) {
 // amortiguar caídas hacia cero y evitar extrapolar picos de productos con
 // etiqueta de precio / venta intermitente (p. ej. PALETA GALLETA $35).
 // No toca reglas de lote de pasteles ni el selector estacional/GDE.
+function monthIsInferredZero(records, monthKey) {
+  if (!monthKey) return false;
+  const rows = (records || []).filter((row) => monthKeyFromRecord(row) === monthKey);
+  return rows.length > 0 && rows.every((row) => row.inferredZeroMonth);
+}
+
 function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
   if (!model?.averages) return model;
   const modelTotal = forecastTotalFromAverages(model.averages, selectedMonth);
@@ -2668,7 +2684,11 @@ function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
 
   const monthlyData = buildMonthlyForecastData(records || []);
   const history = [...monthlyData.keys()].filter((month) => month < selectedMonth).sort();
-  if (!history.length) {
+  // Los ceros inferidos (mes cargado para otro SKU, este no apareció / alias
+  // partido) no son una baja real. Si se cuentan, CHEESECAKE / NUTELA / M & M
+  // MED se marcan intermitentes y dominan el WAPE.
+  const observedHistory = history.filter((month) => !monthIsInferredZero(records, month));
+  if (!observedHistory.length) {
     return {
       ...model,
       averages: scaleForecastAverages(model.averages, 0),
@@ -2678,8 +2698,8 @@ function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
     };
   }
 
-  const recent3 = history.slice(-3).map((month) => monthlyData.get(month)?.total || 0);
-  const recent6 = history.slice(-6).map((month) => monthlyData.get(month)?.total || 0);
+  const recent3 = observedHistory.slice(-3).map((month) => monthlyData.get(month)?.total || 0);
+  const recent6 = observedHistory.slice(-6).map((month) => monthlyData.get(month)?.total || 0);
   const last = recent3.at(-1) ?? 0;
   const prev = recent3.length >= 2 ? recent3.at(-2) : null;
   const mean6 = recent6.reduce((sum, value) => sum + value, 0) / Math.max(recent6.length, 1);
@@ -2689,7 +2709,8 @@ function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
   const zeroRate6 = recent6.filter((value) => value <= 0.5).length / Math.max(recent6.length, 1);
   const median6 = median(recent6);
   const priceTagged = isPriceTaggedProduct(product);
-  const intermittent = zeroRate6 >= 0.4 || (cv6 >= 1.2 && mean6 < 350);
+  const regularCake = isOperationalCakeProduct(product);
+  const intermittent = !regularCake && (zeroRate6 >= 0.4 || (cv6 >= 1.2 && mean6 < 350));
   const nearZero = (value) => value <= 0.5;
 
   let targetTotal = modelTotal;
@@ -2724,7 +2745,7 @@ function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
   }
 
   if ((priceTagged || intermittent) && targetTotal > 0.5) {
-    const prior = history.slice(-6, -1).map((month) => monthlyData.get(month)?.total || 0);
+    const prior = observedHistory.slice(-6, -1).map((month) => monthlyData.get(month)?.total || 0);
     const priorPositive = prior.filter((value) => value > 0.5);
     const priorMed = priorPositive.length ? median(priorPositive) : median(prior);
     const isSpike =
@@ -2772,15 +2793,25 @@ function summarizeForecastAccuracy(rows) {
   };
 }
 
+function actualFromMap(actualMap, product, original) {
+  if (!actualMap || typeof actualMap.entries !== "function") return null;
+  let sum = 0;
+  let found = false;
+  for (const [key, value] of actualMap.entries()) {
+    if (normalizeProduct(key) === product || key === product || (original && key === original)) {
+      sum += toNumber(value);
+      found = true;
+    }
+  }
+  return found ? sum : null;
+}
+
 function analyzeForecastProductErrors(forecastRows, actualMap = new Map(), { topN = 20 } = {}) {
   const rows = (forecastRows || []).map((row) => {
     const product = normalizeProduct(row.producto || row.product || "");
     const forecast = toNumber(row.pronosticoVenta ?? row.forecast);
-    const actual = toNumber(
-      actualMap.get(product) ??
-      actualMap.get(row.producto) ??
-      row.actual
-    );
+    const mappedActual = actualFromMap(actualMap, product, row.producto);
+    const actual = mappedActual != null ? mappedActual : toNumber(row.actual);
     const absoluteError = Math.abs(actual - forecast);
     return {
       producto: row.producto || product,
@@ -3109,6 +3140,76 @@ function median(values) {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
+function thirdSundayOfJune(year) {
+  const first = new Date(year, 5, 1);
+  const firstSunday = 1 + ((7 - first.getDay()) % 7);
+  return firstSunday + 14;
+}
+
+// Ventanas validadas en CONTROL_MODELO: Madres ~8-11 mayo; Padre vie-lun
+// alrededor del tercer domingo de junio. El incremento se queda en el mes
+// del evento; no debe inflar el "último mes" del mes siguiente.
+function calendarEventForMonth(monthKey) {
+  const [year, month] = String(monthKey || "").split("-").map(Number);
+  if (!year || !month) return null;
+  if (month === 5) {
+    return { id: "madres", label: "Día de las Madres", upliftShare: 0.9, peakDays: [8, 9, 10, 11] };
+  }
+  if (month === 6) {
+    const sunday = thirdSundayOfJune(year);
+    return { id: "padre", label: "Día del Padre", upliftShare: 0.35, peakDays: [sunday - 2, sunday - 1, sunday, sunday + 1] };
+  }
+  return null;
+}
+
+function scaleMonthDataForCarryover(monthData, scale) {
+  if (!monthData || !(scale < 0.999)) return monthData;
+  const weekdays = new Map();
+  for (const [weekday, bucket] of monthData.weekdays || []) {
+    weekdays.set(weekday, { total: (bucket.total || 0) * scale, count: bucket.count });
+  }
+  return {
+    ...monthData,
+    total: (monthData.total || 0) * scale,
+    dailyRate: (monthData.dailyRate || 0) * scale,
+    weekdays,
+    eventCarryoverScale: scale,
+  };
+}
+
+function computeEventCarryoverScale(monthlyData, sourceMonth, targetMonth) {
+  const event = calendarEventForMonth(sourceMonth);
+  if (!event) return 1;
+  if (calendarEventForMonth(targetMonth)?.id === event.id) return 1;
+  const sourceTotal = monthTotalFromData(monthlyData, sourceMonth);
+  if (!(sourceTotal > 0)) return 1;
+  const neighborKeys = [
+    previousMonthKey(previousMonthKey(sourceMonth)),
+    previousMonthKey(sourceMonth),
+    nextMonthKey(sourceMonth),
+    nextMonthKey(nextMonthKey(sourceMonth)),
+  ].filter((key) => key && key < targetMonth && !calendarEventForMonth(key));
+  const neighbors = neighborKeys
+    .map((key) => monthTotalFromData(monthlyData, key))
+    .filter((total) => total > 0);
+  const neighborMed = neighbors.length ? median(neighbors) : 0;
+  if (!(neighborMed > 0) || sourceTotal <= neighborMed * 1.08) return 1;
+  return clamp(neighborMed / sourceTotal, 0.72, 1);
+}
+
+function monthlyDataWithoutEventCarryover(monthlyData, targetMonth) {
+  const adjusted = new Map();
+  for (const [monthKey, monthData] of monthlyData.entries()) {
+    if (monthKey >= targetMonth) {
+      adjusted.set(monthKey, monthData);
+      continue;
+    }
+    const scale = computeEventCarryoverScale(monthlyData, monthKey, targetMonth);
+    adjusted.set(monthKey, scaleMonthDataForCarryover(monthData, scale));
+  }
+  return adjusted;
+}
+
 function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {}) {
   const growthLookback = Math.max(1, Number(forecastOptions.growthLookback) || 1);
   const seasonalSplit = Number.isFinite(Number(forecastOptions.seasonalSplit))
@@ -3118,6 +3219,9 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
   const recentMonths = historicalMonths.slice(-3);
   const latestMonth = recentMonths.at(-1);
   const targetDays = datesForMonth(targetMonth).length;
+  // Nivel reciente: si mayo (Madres) es un pico, no copiarlo a junio.
+  // Crecimiento YoY y "mismo mes año anterior" siguen en crudo.
+  const recentData = monthlyDataWithoutEventCarryover(monthlyData, targetMonth);
   const candidates = new Map();
   const addCandidate = (name, averages, sourceMonths = recentMonths) => {
     if (!averages?.size) return;
@@ -3133,8 +3237,8 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
     return candidates;
   }
 
-  const rates = recentMonths.map((monthKey) => monthlyData.get(monthKey)?.dailyRate || 0);
-  const totals = recentMonths.map((monthKey) => monthlyData.get(monthKey)?.total || 0);
+  const rates = recentMonths.map((monthKey) => recentData.get(monthKey)?.dailyRate || 0);
+  const totals = recentMonths.map((monthKey) => recentData.get(monthKey)?.total || 0);
   addCandidate("Último mes por día", uniformWeekdayAverages(rates.at(-1)), [latestMonth]);
   addCandidate("Último total mensual", uniformWeekdayAverages(totals.at(-1) / Math.max(1, targetDays)), [latestMonth]);
   if (recentMonths.length >= 2) {
@@ -3150,7 +3254,7 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
     );
     addCandidate(
       "Día de semana ponderado",
-      weightedWeekdayAverages(monthlyData, recentMonths.slice(-2), [0.35, 0.65]),
+      weightedWeekdayAverages(recentData, recentMonths.slice(-2), [0.35, 0.65]),
       recentMonths.slice(-2)
     );
   }
@@ -3171,7 +3275,7 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
   }
   addCandidate(
     "Día de semana último mes",
-    weightedWeekdayAverages(monthlyData, [latestMonth], [1]),
+    weightedWeekdayAverages(recentData, [latestMonth], [1]),
     [latestMonth]
   );
 
@@ -3188,7 +3292,7 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
       [...new Set([seasonalRef.monthKey, ...seasonalRef.sourceMonths, previousTargetMonth, previousYearReference].filter(Boolean))]
     );
     const recentWeights = recentMonths.length === 1 ? [1] : recentMonths.length === 2 ? [0.35, 0.65] : [0.2, 0.3, 0.5];
-    const recentBase = weightedWeekdayAverages(monthlyData, recentMonths, recentWeights);
+    const recentBase = weightedWeekdayAverages(recentData, recentMonths, recentWeights);
     const seasonalTotal = forecastTotalFromAverages(adjustedSeasonal, targetMonth);
     const recentTotal = forecastTotalFromAverages(recentBase, targetMonth);
     const referencesDiffer = Math.max(seasonalTotal, recentTotal) > 0 &&
@@ -3336,7 +3440,7 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
     const options = forecastTuningOptions(version);
     const category = productCategory(product);
     const seasonalWeight = ["Otros", "Mini medianos"].includes(category) ? 0.5 : 0.75;
-    if (category === "Pasteles grandes") {
+    if (category === "Pasteles grandes" || category === "Pasteles medianos" || category === "Pasteles chicos") {
       const monthlyData = buildMonthlyForecastData(records);
       const latest = previousMonthKey(selectedMonth);
       const latestData = latest ? monthlyData.get(latest) : null;
@@ -3347,25 +3451,31 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
         latest &&
         !String(latest).endsWith("-05")
       );
-      const gdeOptions = {
+      const cakeOptions = {
         ...options,
         dipRatio: 0.92,
-        // Solo si el mes previo trae diario (junio 2026). Mayo (Madres) y un
-        // cierre solo (julio→agosto) no suavizan el recorte.
-        dampenDecline: hasRecentDaily && !priorYearLooksLikeSeasonalFade(monthlyData, selectedMonth)
+        // Impulso de 2ª quincena solo en GDE (PR #5). MED/CH heredan el umbral
+        // de caída atípica pero no el impulso, para no disparar FRUTAS MED.
+        dampenDecline: category === "Pasteles grandes"
+          && hasRecentDaily
+          && !priorYearLooksLikeSeasonalFade(monthlyData, selectedMonth)
           ? 0.4
           : undefined,
         momentumStrength: 0.4,
         momentumCap: 1.12,
         momentumTrigger: 1.1,
       };
-      const model = calculateForecastModelSeasonalAdaptive(
-        records,
-        selectedMonth,
-        [0.25, 0.5, 0.75],
-        gdeOptions
-      );
-      return applyRecentMomentum(model, records, selectedMonth, gdeOptions);
+      const model = category === "Pasteles grandes"
+        ? calculateForecastModelSeasonalAdaptive(
+            records,
+            selectedMonth,
+            [0.25, 0.5, 0.75],
+            cakeOptions
+          )
+        : calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, cakeOptions);
+      return category === "Pasteles grandes"
+        ? applyRecentMomentum(model, records, selectedMonth, cakeOptions)
+        : model;
     }
     return calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, options);
   }
@@ -8525,8 +8635,12 @@ export {
   computeAnnualGrowthFactor,
   resolvePriorYearSeasonal,
   computeRecentMomentumFactor,
+  computeEventCarryoverScale,
+  calendarEventForMonth,
+  normalizeProduct,
   isPriceTaggedProduct,
   isPromotionalProduct,
+  isOperationalCakeProduct,
   applyCatalogOutlierCleanup,
 };
 

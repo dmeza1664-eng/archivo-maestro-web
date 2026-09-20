@@ -266,6 +266,107 @@ async function main() {
   assert(Math.abs(resolvedJuly.wape - realJuly.wape) < 0.15, "el WAPE de julio por resolveCanonical debe empatar con diario+cierre directo");
   assert(Math.abs(resolvedAugust.wape - realAugust.wape) < 0.15, "agosto no debe empeorar por conservar el diario de junio");
 
+  // Peores SKU de error absoluto tras PR #7: pasteles regulares con huecos de
+  // carga (ceros inferidos) y alias (CHEESECAKE / NUTELLA / M&M MEDIANO).
+  // Antes la limpieza los marcaba intermitentes y dominaban el WAPE (junio
+  // ~10.5%, julio ~12.4% en esta fixture).
+  const heavyStock = [
+    { producto: "FRUTAS GDE", stock: 40, orden: 1 },
+    { producto: "MOKA GDE", stock: 40, orden: 2 },
+    { producto: "M & M GDE", stock: 20, orden: 3 },
+    { producto: "PAY DE FRESA GDE", stock: 20, orden: 4 },
+    { producto: "FRUTAS MED", stock: 30, orden: 5 },
+    { producto: "GELATINA IND FRESA", stock: 40, orden: 6 },
+    { producto: "GELATINA IND MOSAICO", stock: 40, orden: 7 },
+    { producto: "CHEESECAKE GDE", stock: 20, orden: 8 },
+    { producto: "NUTELA GDE", stock: 20, orden: 9 },
+    { producto: "M & M MED", stock: 20, orden: 10 },
+  ];
+  const heavySeries = {
+    "FRUTAS GDE": {
+      "2025-03": 524, "2025-04": 500, "2025-05": 658, "2025-06": 519, "2025-07": 475, "2025-08": 524, "2025-09": 492, "2025-10": 512,
+      "2026-03": 510, "2026-04": 500, "2026-05": 660, "2026-07": 580, "2026-08": 541,
+    },
+    "MOKA GDE": {
+      "2025-03": 605, "2025-04": 605, "2025-05": 755, "2025-06": 624, "2025-07": 612, "2025-08": 639, "2025-09": 604, "2025-10": 652,
+      "2026-03": 610, "2026-04": 600, "2026-05": 720, "2026-07": 697, "2026-08": 619,
+    },
+    "M & M GDE": {
+      "2025-03": 302, "2025-04": 302, "2025-05": 320, "2025-06": 284, "2025-07": 308, "2025-08": 324, "2025-09": 298, "2025-10": 317,
+      "2026-03": 270, "2026-04": 268, "2026-05": 263, "2026-07": 324, "2026-08": 304,
+    },
+    "PAY DE FRESA GDE": {
+      "2025-03": 200, "2025-04": 175, "2025-05": 308, "2025-06": 264, "2025-07": 199, "2025-08": 222, "2025-09": 168, "2025-10": 194,
+      "2026-03": 190, "2026-04": 180, "2026-05": 285, "2026-07": 212, "2026-08": 181,
+    },
+    "FRUTAS MED": {
+      "2025-03": 530, "2025-04": 510, "2025-05": 640, "2025-06": 520, "2025-07": 500, "2025-08": 530, "2025-09": 510, "2025-10": 520,
+      "2026-03": 525, "2026-04": 512, "2026-05": 642, "2026-06": 522, "2026-07": 530, "2026-08": 528,
+    },
+    "GELATINA IND FRESA": {
+      "2025-03": 780, "2025-04": 790, "2025-05": 980, "2025-06": 800, "2025-07": 810, "2025-08": 805,
+      "2026-03": 785, "2026-04": 795, "2026-05": 990, "2026-06": 816, "2026-07": 820, "2026-08": 812,
+    },
+    "GELATINA IND MOSAICO": {
+      "2025-03": 680, "2025-04": 690, "2025-05": 860, "2025-06": 700, "2025-07": 705, "2025-08": 698,
+      "2026-03": 685, "2026-04": 692, "2026-05": 870, "2026-06": 710, "2026-07": 708, "2026-08": 702,
+    },
+    "CHEESECAKE GDE": {
+      "2025-04": 180, "2025-05": 230, "2025-06": 188, "2025-07": 165, "2025-08": 186,
+      "2026-04": 182, "2026-05": 235, "2026-06": 189, "2026-07": 197, "2026-08": 192,
+    },
+    "NUTELLA GDE": {
+      "2025-04": 270, "2025-05": 340, "2025-06": 275, "2025-07": 250, "2025-08": 280,
+      "2026-04": 268, "2026-05": 338, "2026-06": 272, "2026-07": 307, "2026-08": 278,
+    },
+    "M&M MEDIANO": {
+      "2025-04": 270, "2025-05": 330, "2025-06": 280, "2025-07": 275, "2025-08": 285,
+      "2026-04": 272, "2026-05": 328, "2026-06": 285, "2026-07": 288, "2026-08": 282,
+    },
+  };
+  const heavyVentas = [];
+  for (const [product, months] of Object.entries(heavySeries)) {
+    for (const [month, qty] of Object.entries(months)) {
+      heavyVentas.push(monthClose(month, product, qty));
+    }
+  }
+  heavyVentas.push(...juneDaily("FRUTAS GDE", 223, 296));
+  heavyVentas.push(...juneDaily("MOKA GDE", 276, 341));
+  heavyVentas.push(...juneDaily("M & M GDE", 115, 141));
+  heavyVentas.push(...juneDaily("PAY DE FRESA GDE", 89, 165));
+
+  const heavyJune = evaluateMonth(app, heavyStock, heavyVentas, "2026-06");
+  const heavyJuly = evaluateMonth(app, heavyStock, heavyVentas, "2026-07");
+  const heavyAugust = evaluateMonth(app, heavyStock, heavyVentas, "2026-08");
+  const heavyPick = (analysis, name) => analysis.rows.find((row) => app.normalizeProduct(row.producto) === app.normalizeProduct(name));
+  const heavyWeighted = (() => {
+    const months = [heavyJune, heavyJuly, heavyAugust];
+    const actual = months.reduce((sum, row) => sum + row.actual, 0);
+    const abs = months.reduce((sum, row) => sum + row.rows.reduce((inner, item) => inner + item.absoluteError, 0), 0);
+    return actual > 0 ? (abs / actual) * 100 : null;
+  })();
+
+  assert(heavyJune.wape < 5.5, `junio de SKU pesados debe bajar del ~10.5% (WAPE ${heavyJune.wape.toFixed(2)}%)`);
+  assert(heavyJuly.wape < 6.5, `julio de SKU pesados debe bajar del ~12.4% (WAPE ${heavyJuly.wape.toFixed(2)}%)`);
+  assert(heavyAugust.wape < 6, `agosto de SKU pesados no debe dispararse (WAPE ${heavyAugust.wape.toFixed(2)}%)`);
+  assert(heavyWeighted < 5.5, `WAPE ponderado jun-ago debe bajar del ~8.9% (${heavyWeighted.toFixed(2)}%)`);
+
+  const heavyCheeseJune = heavyPick(heavyJune, "CHEESECAKE GDE");
+  const heavyNutelaJune = heavyPick(heavyJune, "NUTELA GDE");
+  const heavyMmMedJune = heavyPick(heavyJune, "M & M MED");
+  const heavyCheeseJuly = heavyPick(heavyJuly, "CHEESECAKE GDE");
+  const heavyNutelaJuly = heavyPick(heavyJuly, "NUTELA GDE");
+  const heavyFrutasJuly = heavyPick(heavyJuly, "FRUTAS GDE");
+  const heavyMedJuly = heavyPick(heavyJuly, "FRUTAS MED");
+  assert(heavyCheeseJune.absoluteError < 40, `junio CHEESECAKE no debe aplastarse por huecos (abs ${heavyCheeseJune.absoluteError.toFixed(1)})`);
+  assert(heavyNutelaJune.absoluteError < 40, `junio NUTELA/NUTELLA debe empatar y no ir a 0 (abs ${heavyNutelaJune.absoluteError.toFixed(1)})`);
+  assert(heavyMmMedJune.absoluteError < 40, `junio M&M MEDIANO debe empatar con M & M MED (abs ${heavyMmMedJune.absoluteError.toFixed(1)})`);
+  assert(heavyCheeseJuly.forecast > 150, `julio CHEESECAKE no es intermitente (fc ${heavyCheeseJuly.forecast.toFixed(1)})`);
+  assert(heavyNutelaJuly.forecast > 220, `julio NUTELA no es intermitente (fc ${heavyNutelaJuly.forecast.toFixed(1)})`);
+  assert(heavyFrutasJuly.forecast > 540, `el impulso GDE de julio debe seguir (fc ${heavyFrutasJuly.forecast.toFixed(1)})`);
+  assert(heavyMedJuly.absoluteError < 45, `FRUTAS MED no hereda el impulso GDE (abs ${heavyMedJuly.absoluteError.toFixed(1)})`);
+  assert(!/venta intermitente/i.test(heavyCheeseJuly.metodo || ""), "CHEESECAKE no debe marcarse intermitente");
+
   const uploadDir = process.env.WAPE_UPLOAD_DIR
     || "/home/ubuntu/.cursor/projects/workspace/uploads";
   const excelCandidates = {
@@ -460,6 +561,16 @@ async function main() {
           paletaJuly: Number(paletaJuly.forecast.toFixed(1)),
           cajitaJuly: Number(cajitaJuly.forecast.toFixed(1)),
           bollosAugust: Number(bollosAugust.forecast.toFixed(1)),
+        },
+        heavySkus: {
+          june: Number(heavyJune.wape.toFixed(2)),
+          july: Number(heavyJuly.wape.toFixed(2)),
+          august: Number(heavyAugust.wape.toFixed(2)),
+          weighted: Number(heavyWeighted.toFixed(2)),
+          cheeseJuneAbs: Number(heavyCheeseJune.absoluteError.toFixed(1)),
+          nutelaJuneAbs: Number(heavyNutelaJune.absoluteError.toFixed(1)),
+          mmMedJuneAbs: Number(heavyMmMedJune.absoluteError.toFixed(1)),
+          frutasJuly: Number(heavyFrutasJuly.forecast.toFixed(1)),
         },
         promoActiva: {
           paletaJuly: Number(paletaPromoRow.pronosticoVenta.toFixed(1)),
