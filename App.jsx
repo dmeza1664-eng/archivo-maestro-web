@@ -19,6 +19,7 @@ import {
   Upload,
   UserRound,
   Megaphone,
+  Warehouse,
 } from "lucide-react";
 import "./style.css";
 
@@ -519,6 +520,20 @@ function todayKey(now = new Date()) {
   return dateKey(now);
 }
 
+function defaultInventoryDate(selectedMonth, now = new Date()) {
+  const today = todayKey(now);
+  if (selectedMonth && today.startsWith(selectedMonth)) return today;
+  if (/^\d{4}-(0[1-9]|1[0-2])$/.test(String(selectedMonth || ""))) return `${selectedMonth}-01`;
+  return today;
+}
+
+function isPlausibleIsoDate(value) {
+  const key = dateKey(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return false;
+  const year = Number(key.slice(0, 4));
+  return year >= 2000 && year <= 2100;
+}
+
 function createPromoId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `promo-${crypto.randomUUID()}`;
@@ -670,6 +685,80 @@ function applyPromoUpliftToQuantity(product, baseQuantity, promo) {
   const safeMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
   const extra = Math.max(0, Number(promo.extraPiecesPerDay) || 0);
   return getProduccionSugerida(product, base * safeMultiplier + extra);
+}
+
+function dailyBranchStockKey(row) {
+  return [dateKey(row?.fecha), normalizeProduct(row?.producto), norm(row?.sucursal)].join("|");
+}
+
+function normalizeDailyBranchStockRow(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const fecha = dateKey(raw.fecha);
+  const productoOriginal = String(raw.productoOriginal || raw.producto || "").trim();
+  const producto = normalizeProduct(raw.producto || productoOriginal);
+  const sucursal = String(raw.sucursal || raw.tienda || raw.canal || "").trim();
+  if (!fecha || !producto || !sucursal) return null;
+  const cantidad = Math.max(0, Math.round(toNumber(raw.cantidad ?? raw.stock ?? raw.piezas)));
+  return {
+    fecha,
+    sucursal,
+    producto,
+    productoOriginal: productoOriginal || producto,
+    cantidad,
+  };
+}
+
+function sanitizeDailyBranchStock(rows) {
+  if (!Array.isArray(rows)) return [];
+  const byKey = new Map();
+  for (const raw of rows) {
+    const row = normalizeDailyBranchStockRow(raw);
+    if (!row) continue;
+    byKey.set(dailyBranchStockKey(row), row);
+  }
+  return [...byKey.values()].sort((left, right) =>
+    left.fecha.localeCompare(right.fecha)
+    || left.producto.localeCompare(right.producto, "es")
+    || left.sucursal.localeCompare(right.sucursal, "es")
+  );
+}
+
+function upsertDailyBranchStock(existing, incoming) {
+  return sanitizeDailyBranchStock([...(existing || []), ...(incoming || [])]);
+}
+
+function removeDailyBranchStockKey(rows, key) {
+  return sanitizeDailyBranchStock(rows).filter((row) => dailyBranchStockKey(row) !== key);
+}
+
+function sumDailyBranchStockByProductDate(rows) {
+  const totals = new Map();
+  for (const row of sanitizeDailyBranchStock(rows)) {
+    const key = `${row.fecha}|${row.producto}`;
+    totals.set(key, (totals.get(key) || 0) + row.cantidad);
+  }
+  return totals;
+}
+
+// El pedido de planta ya trajo lote y promo. Aquí se resta lo que la sucursal
+// ya tiene: importa no sobrerepartir, no volver a redondear a lote de pastel.
+function applyDailyBranchStockToPlantSuggestion(baseQuantity, stockOnHand) {
+  const base = Math.max(0, Number(baseQuantity) || 0);
+  const stock = Math.max(0, Number(stockOnHand) || 0);
+  return Math.max(0, Math.round(base - stock));
+}
+
+function collectSucursales({ ventas = [], bajas = [], dailyBranchStock = [], extra = [] } = {}) {
+  const names = new Set();
+  for (const row of [...ventas, ...bajas, ...dailyBranchStock]) {
+    const name = String(row?.sucursal || row?.canal || row?.tienda || "").trim();
+    if (name) names.add(name);
+  }
+  for (const name of extra) {
+    const cleaned = String(name || "").trim();
+    if (cleaned) names.add(cleaned);
+  }
+  return [...names].sort((left, right) => left.localeCompare(right, "es"));
 }
 
 function emptyPromoForm(today = todayKey()) {
@@ -1249,6 +1338,170 @@ function inferInventoryCutoffDate(workbook, fileName = "") {
   const hint = inferMonthHintFromFileName(fileName);
   if (hint) return { date: lastDateOfMonth(hint.year, hint.monthIndex), source: "mes del archivo" };
   return { date: "", source: "" };
+}
+
+function looksLikeStockQtyHeader(value) {
+  const p = norm(value);
+  return ["CANTIDAD", "CANT", "STOCK", "PIEZAS", "PZAS", "EXISTENCIA", "INVENTARIO", "QTY", "UNIDADES"].some(
+    (token) => p === token || p.startsWith(`${token} `)
+  );
+}
+
+function looksLikeDateHeader(value) {
+  const p = norm(value);
+  return p === "FECHA" || p === "DATE" || p === "DIA" || p.startsWith("FECHA");
+}
+
+function looksLikeBranchHeader(value) {
+  const p = norm(value);
+  return p === "SUCURSAL" || p === "TIENDA" || p === "BRANCH" || p === "CANAL" || p.includes("SUCURSAL");
+}
+
+function looksLikeProductHeader(value) {
+  const p = norm(value);
+  return p === "PRODUCTO" || p === "SKU" || p === "PRODUCT" || p.startsWith("PRODUCTO");
+}
+
+function isReservedDailyStockHeader(value) {
+  const p = norm(value);
+  if (!p) return true;
+  if (looksLikeStockQtyHeader(p) || looksLikeDateHeader(p) || looksLikeBranchHeader(p) || looksLikeProductHeader(p)) return true;
+  return p === "TOTAL" || p === "SUMA" || p === "CF" || p === "C.F." || p.includes("CUARTO") || p.includes("TOTAL");
+}
+
+function isGenericSheetName(name) {
+  const p = norm(name);
+  return !p || /^HOJA\s*\d*$/.test(p) || /^SHEET\s*\d*$/.test(p) || p === "INVENTARIO" || p === "STOCK" || p === "DATOS";
+}
+
+function inferDateFromSheetRows(rows, sheetName = "", fallbackDate = "") {
+  for (const row of (rows || []).slice(0, 8)) {
+    for (const cell of (row || []).slice(0, 10)) {
+      const parsed = parseDateCell(cell);
+      if (parsed) return dateKey(parsed);
+    }
+  }
+  const fromSheet = parseDateCell(sheetName) || parseDateCell(String(sheetName || "").replace(/[_-]+/g, " "));
+  if (fromSheet) return dateKey(fromSheet);
+  return dateKey(fallbackDate);
+}
+
+function parseDailyBranchStock(workbook, fallbackDate = "") {
+  if (!workbook?.SheetNames?.length) return [];
+  const parsed = [];
+
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const rows = sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" }) : [];
+    if (!rows.length) continue;
+
+    let headerIndex = -1;
+    let productCol = -1;
+    let qtyCol = -1;
+    let dateCol = -1;
+    let branchCol = -1;
+    const wideBranchCols = [];
+
+    for (let i = 0; i < Math.min(rows.length, 12); i++) {
+      const row = rows[i] || [];
+      const productIdx = row.findIndex((cell) => looksLikeProductHeader(cell));
+      if (productIdx < 0) continue;
+      const qtyIdx = row.findIndex((cell) => looksLikeStockQtyHeader(cell));
+      const dateIdx = row.findIndex((cell) => looksLikeDateHeader(cell));
+      const branchIdx = row.findIndex((cell) => looksLikeBranchHeader(cell));
+      const branchNameCols = row
+        .map((cell, index) => ({ cell, index }))
+        .filter(({ cell, index }) => index !== productIdx && String(cell ?? "").trim() && !isReservedDailyStockHeader(cell));
+
+      if (qtyIdx >= 0 && branchIdx >= 0) {
+        headerIndex = i;
+        productCol = productIdx;
+        qtyCol = qtyIdx;
+        dateCol = dateIdx;
+        branchCol = branchIdx;
+        break;
+      }
+      if (branchNameCols.length >= 1) {
+        headerIndex = i;
+        productCol = productIdx;
+        dateCol = dateIdx;
+        wideBranchCols.push(...branchNameCols.map(({ cell, index }) => ({
+          index,
+          sucursal: String(cell ?? "").trim(),
+        })));
+        break;
+      }
+      if (qtyIdx >= 0 && !isGenericSheetName(sheetName)) {
+        headerIndex = i;
+        productCol = productIdx;
+        qtyCol = qtyIdx;
+        dateCol = dateIdx;
+        branchCol = branchIdx;
+        break;
+      }
+    }
+
+    if (headerIndex < 0) continue;
+    const sheetFallbackDate = inferDateFromSheetRows(rows.slice(0, headerIndex + 1), sheetName, fallbackDate);
+    const sheetBranch = isGenericSheetName(sheetName) ? "" : String(sheetName).trim();
+
+    for (let i = headerIndex + 1; i < rows.length; i++) {
+      const row = rows[i] || [];
+      if (!isValidInventoryProduct(row[productCol], row)) continue;
+      const productoOriginal = String(row[productCol] ?? "").trim();
+      const producto = normalizeProduct(productoOriginal);
+      const rowDate = dateCol >= 0 ? dateKey(parseDateCell(row[dateCol])) : "";
+      const fecha = rowDate || sheetFallbackDate;
+      if (!fecha) continue;
+
+      if (wideBranchCols.length) {
+        for (const branch of wideBranchCols) {
+          const raw = row[branch.index];
+          if (String(raw ?? "").trim() === "") continue;
+          parsed.push({
+            fecha,
+            sucursal: branch.sucursal,
+            producto,
+            productoOriginal,
+            cantidad: toNumber(raw),
+          });
+        }
+        continue;
+      }
+
+      const rawQty = row[qtyCol];
+      if (String(rawQty ?? "").trim() === "") continue;
+      const sucursal = branchCol >= 0 ? String(row[branchCol] ?? "").trim() : sheetBranch;
+      if (!sucursal) continue;
+      parsed.push({
+        fecha,
+        sucursal,
+        producto,
+        productoOriginal,
+        cantidad: toNumber(rawQty),
+      });
+    }
+  }
+
+  return sanitizeDailyBranchStock(parsed);
+}
+
+function exportDailyBranchStockTemplate(date, sucursales, products) {
+  const fecha = dateKey(date) || todayKey();
+  const branches = (sucursales || []).filter(Boolean);
+  const usableBranches = branches.length ? branches : ["Sucursal 1"];
+  const catalog = (products || []).filter(Boolean);
+  const rows = catalog.length
+    ? catalog.flatMap((producto) => usableBranches.map((sucursal) => ({
+      Fecha: fecha,
+      Sucursal: sucursal,
+      Producto: producto,
+      Cantidad: "",
+    })))
+    : [{ Fecha: fecha, Sucursal: usableBranches[0], Producto: "", Cantidad: "" }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), "Inventario diario");
+  XLSX.writeFile(wb, `plantilla_inventario_sucursales_${fecha}.xlsx`);
 }
 
 function inferYearHintFromFileName(fileName = "", fallbackYear = 2026) {
@@ -3208,9 +3461,10 @@ function calculateForecastModel(records, selectedMonth) {
   };
 }
 
-function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, selectedMonth, dailyBufferPct, activePromos = [] }) {
+function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, selectedMonth, dailyBufferPct, activePromos = [], dailyBranchStock = [] }) {
   const realDailyMap = aggregateDailyProductionRows(realProduction);
   const salesDailyMap = aggregateDailySalesRows(ventasReales);
+  const stockByProductDate = sumDailyBranchStockByProductDate(dailyBranchStock);
   const monthDates = datesForMonth(selectedMonth);
   const monthKeySet = new Set(monthDates.map((date) => dateKey(date)));
   const productRows = monthlyRows.filter((row) => isValidProduct(row.producto) && !isSliceProduct(row.producto));
@@ -3239,9 +3493,15 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
 
     return demandByDate.map((row, index) => {
       const promo = findActivePromoForProduct(activePromos, product, row.date);
-      const produccionSugeridaDia = promo && row.weekday !== 0
+      const produccionBrutaDia = promo && row.weekday !== 0
         ? applyPromoUpliftToQuantity(product, allocated[index], promo)
         : allocated[index];
+      const stockKey = `${row.key}|${normalizeProduct(product)}`;
+      const hasDailyBranchStock = stockByProductDate.has(stockKey);
+      const inventarioSucursalesDia = hasDailyBranchStock ? stockByProductDate.get(stockKey) : 0;
+      const produccionSugeridaDia = hasDailyBranchStock
+        ? applyDailyBranchStockToPlantSuggestion(produccionBrutaDia, inventarioSucursalesDia)
+        : produccionBrutaDia;
       const realKey = `${product}|${row.key}`;
       const hasRealData = realDailyMap.has(realKey);
       const produccionRealDia = hasRealData ? realDailyMap.get(realKey) : null;
@@ -3270,6 +3530,9 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
       let reglaOperativa = getReglaOperativaLabel(product, productionWeights[index]);
       if (row.weekday === 0) reglaOperativa = "Domingo: no producir; demanda al sábado";
       else if (receivedSunday) reglaOperativa = `${reglaOperativa} · incluye demanda del domingo`;
+      if (hasDailyBranchStock && row.weekday !== 0) {
+        reglaOperativa = `${reglaOperativa} · menos ${formatNumber(inventarioSucursalesDia, 0)} en sucursales`;
+      }
 
       return {
         fecha: row.key,
@@ -3282,6 +3545,9 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
         colchonDiario: row.colchonDiario,
         baseConColchonDia: row.baseConColchonDia,
         reglaOperativa,
+        produccionBrutaDia,
+        inventarioSucursalesDia,
+        hasDailyBranchStock,
         produccionSugeridaDia,
         promoActiva: Boolean(promo && row.weekday !== 0),
         promoEtiqueta: promo && row.weekday !== 0 ? formatPromoUpliftLabel(promo) : "",
@@ -4127,6 +4393,8 @@ function exportDailyToExcel(rows, summary) {
     "Margen de seguridad diario": Number(row.colchonDiario.toFixed(2)),
     "Base con margen de seguridad": Number((row.baseConColchonDia || 0).toFixed(2)),
     "Regla operativa": row.reglaOperativa,
+    "Produccion bruta dia": row.produccionBrutaDia ?? row.produccionSugeridaDia,
+    "Inventario sucursales": row.hasDailyBranchStock ? row.inventarioSucursalesDia : "",
     "Produccion sugerida dia": row.produccionSugeridaDia,
     "Promo activa": row.promoActiva ? row.promoEtiqueta || "Sí" : "",
     "Produccion destino": row.produccionDestino || row.fecha,
@@ -4710,6 +4978,11 @@ function Dashboard({ session, onLogout }) {
   const [bajas, setBajas] = useState([]);
   const [existencias, setExistencias] = useState([]);
   const [existenciasCutoff, setExistenciasCutoff] = useState({ date: "", source: "", fileName: "" });
+  const [dailyBranchStock, setDailyBranchStock] = useState([]);
+  const [stockCaptureDate, setStockCaptureDate] = useState(() => defaultInventoryDate(defaultMonthValue()));
+  const [stockCaptureQuery, setStockCaptureQuery] = useState("");
+  const [newSucursalName, setNewSucursalName] = useState("");
+  const [manualSucursales, setManualSucursales] = useState([]);
   const [realProduction, setRealProduction] = useState([]);
   const [producedMay, setProducedMay] = useState([]);
   const [producedJune, setProducedJune] = useState([]);
@@ -4724,7 +4997,7 @@ function Dashboard({ session, onLogout }) {
   const [selectedMonth, setSelectedMonth] = useState(defaultMonthValue());
   const [selectedMonthTouched, setSelectedMonthTouched] = useState(false);
   const [dailyBufferPct, setDailyBufferPct] = useState(10);
-  const [dailyDateFilter, setDailyDateFilter] = useState("");
+  const [dailyDateFilter, setDailyDateFilter] = useState(() => defaultInventoryDate(defaultMonthValue()));
   const [dailyProductQuery, setDailyProductQuery] = useState("");
   const [dailyWeekdayFilter, setDailyWeekdayFilter] = useState("");
   const [selectedWeekKey, setSelectedWeekKey] = useState("");
@@ -4906,6 +5179,10 @@ function Dashboard({ session, onLogout }) {
             fileName: String(data.existenciasCutoff.fileName || ""),
           }
         : { date: "", source: "", fileName: "" });
+      setDailyBranchStock(sanitizeDailyBranchStock(data.dailyBranchStock));
+      if (Array.isArray(data.manualSucursales)) {
+        setManualSucursales(data.manualSucursales.map((name) => String(name || "").trim()).filter(Boolean));
+      }
       setRealProduction(mergeRemoteRecords(localProduction, remoteProduction, productionRecordKey));
       setProducedMay(Array.isArray(data.producedMay) ? data.producedMay : []);
       setProducedJune(Array.isArray(data.producedJune) ? data.producedJune : []);
@@ -5024,6 +5301,8 @@ function Dashboard({ session, onLogout }) {
         bajas: snapshotOperationalRows(bajas, wasteRecordKey, persistedKeys.waste),
         existencias,
         existenciasCutoff,
+        dailyBranchStock: sanitizeDailyBranchStock(dailyBranchStock),
+        manualSucursales,
         realProduction: snapshotOperationalRows(realProduction, productionRecordKey, persistedKeys.production),
         producedMay,
         producedJune,
@@ -5132,6 +5411,61 @@ function Dashboard({ session, onLogout }) {
       fileName: file.name,
     });
     setFiles((current) => ({ ...current, existencias: file.name }));
+    setHasUnsavedChanges(true);
+  }
+
+  async function handleDailyBranchStockFile(file) {
+    if (!file) return;
+    const workbook = await readWorkbook(file);
+    const parsed = parseDailyBranchStock(workbook, stockCaptureDate);
+    if (!parsed.length) {
+      setToast({ tone: "warning", message: "No se reconocieron filas de inventario. Usa Fecha, Sucursal, Producto y Cantidad, o un cruce Producto × sucursal." });
+      return;
+    }
+    setDailyBranchStock((current) => upsertDailyBranchStock(current, parsed));
+    const importedBranches = [...new Set(parsed.map((row) => row.sucursal).filter(Boolean))];
+    setManualSucursales((current) => collectSucursales({ extra: [...current, ...importedBranches] }));
+    setFiles((current) => ({ ...current, dailyBranchStock: file.name }));
+    setHasUnsavedChanges(true);
+    const dates = [...new Set(parsed.map((row) => row.fecha))].sort();
+    if (dates.length === 1) {
+      setStockCaptureDate(dates[0]);
+      setDailyDateFilter(dates[0]);
+    }
+    setToast({
+      tone: "success",
+      message: `Inventario diario: ${parsed.length} filas (${dates[0] === dates.at(-1) ? displayDate(dates[0]) : `${displayDate(dates[0])} a ${displayDate(dates.at(-1))}`}).`,
+    });
+  }
+
+  function updateDailyBranchStockCell(fecha, sucursal, producto, rawValue) {
+    const key = dailyBranchStockKey({ fecha, sucursal, producto });
+    if (!fecha || !sucursal || !producto) return;
+    if (rawValue === "" || rawValue === null || rawValue === undefined) {
+      setDailyBranchStock((current) => removeDailyBranchStockKey(current, key));
+      setHasUnsavedChanges(true);
+      return;
+    }
+    setDailyBranchStock((current) => upsertDailyBranchStock(current, [{
+      fecha,
+      sucursal,
+      producto,
+      cantidad: rawValue,
+    }]));
+    setHasUnsavedChanges(true);
+  }
+
+  function addManualSucursal() {
+    const name = newSucursalName.trim();
+    if (!name) return;
+    setManualSucursales((current) => collectSucursales({ extra: [...current, name] }));
+    setNewSucursalName("");
+    setHasUnsavedChanges(true);
+  }
+
+  function clearDailyBranchStockForDate(fecha) {
+    if (!fecha) return;
+    setDailyBranchStock((current) => current.filter((row) => row.fecha !== fecha));
     setHasUnsavedChanges(true);
   }
 
@@ -5539,6 +5873,10 @@ function Dashboard({ session, onLogout }) {
   const effectiveExistencias = useMemo(
     () => applyProductAliases(existencias, productAliases, officialProducts),
     [existencias, productAliases, officialProducts]
+  );
+  const effectiveDailyBranchStock = useMemo(
+    () => applyProductAliases(sanitizeDailyBranchStock(dailyBranchStock), productAliases, officialProducts),
+    [dailyBranchStock, productAliases, officialProducts]
   );
   const effectiveRealProduction = useMemo(
     () => applyProductAliases(realProduction, productAliases, officialProducts),
@@ -5962,8 +6300,9 @@ function Dashboard({ session, onLogout }) {
         selectedMonth,
         dailyBufferPct,
         activePromos,
+        dailyBranchStock: effectiveDailyBranchStock,
       }),
-    [forecast, ventasRealesMes, effectiveRealProduction, selectedMonth, dailyBufferPct, activePromos]
+    [forecast, ventasRealesMes, effectiveRealProduction, selectedMonth, dailyBufferPct, activePromos, effectiveDailyBranchStock]
   );
   const filteredDailyRows = dailyRows.filter((row) => {
     if (dailyDateFilter && row.fecha !== dailyDateFilter) return false;
@@ -5976,6 +6315,55 @@ function Dashboard({ session, onLogout }) {
   });
 
   const dailySummary = useMemo(() => summarizeDailyMonth(dailyRows), [dailyRows]);
+  const inventoryDate = [stockCaptureDate, dailyDateFilter, defaultInventoryDate(selectedMonth)].find(isPlausibleIsoDate)
+    || defaultInventoryDate(selectedMonth);
+  const knownSucursales = useMemo(
+    () => collectSucursales({
+      ventas: effectiveVentas,
+      bajas: effectiveBajas,
+      dailyBranchStock: effectiveDailyBranchStock,
+      extra: manualSucursales,
+    }),
+    [effectiveVentas, effectiveBajas, effectiveDailyBranchStock, manualSucursales]
+  );
+  const stockRowsForDate = useMemo(
+    () => effectiveDailyBranchStock.filter((row) => row.fecha === inventoryDate),
+    [effectiveDailyBranchStock, inventoryDate]
+  );
+  const stockQtyByProductBranch = useMemo(() => {
+    const map = new Map();
+    for (const row of stockRowsForDate) {
+      map.set(`${row.producto}|${norm(row.sucursal)}`, row.cantidad);
+    }
+    return map;
+  }, [stockRowsForDate]);
+  const stockGridProducts = useMemo(() => {
+    const catalog = officialProducts.length
+      ? officialProducts
+      : [...new Set(stockRowsForDate.map((row) => row.producto))];
+    const query = norm(stockCaptureQuery);
+    return catalog.filter((product) => !query || product.includes(query));
+  }, [officialProducts, stockRowsForDate, stockCaptureQuery]);
+  const inventoryCapturedDates = useMemo(
+    () => [...new Set(effectiveDailyBranchStock.map((row) => row.fecha))].sort(),
+    [effectiveDailyBranchStock]
+  );
+  const inventoryDayCount = stockRowsForDate.length;
+  const inventoryDayProducts = new Set(stockRowsForDate.map((row) => row.producto)).size;
+  const inventoryDayPieces = stockRowsForDate.reduce((sum, row) => sum + row.cantidad, 0);
+
+  useEffect(() => {
+    const next = defaultInventoryDate(selectedMonth);
+    setStockCaptureDate((current) => {
+      if (isPlausibleIsoDate(current) && selectedMonth && current.startsWith(selectedMonth)) return current;
+      return next;
+    });
+    setDailyDateFilter((current) => {
+      if (!current) return next;
+      if (isPlausibleIsoDate(current) && selectedMonth && current.startsWith(selectedMonth)) return current;
+      return next;
+    });
+  }, [selectedMonth]);
   const weeklyProgress = useMemo(
     () => buildWeeklyProgress(dailyRows, selectedMonth),
     [dailyRows, selectedMonth]
@@ -6973,7 +7361,7 @@ function Dashboard({ session, onLogout }) {
             />
             <UploadBox
               title="Existencias"
-              description="Hoja EXISTENCIA EN SUCURSALES. Confirma la fecha de corte antes de descontar inventario."
+              description="Corte mensual (EXISTENCIA EN SUCURSALES) para el balance. El inventario diario por sucursal se captura en Planta."
               onFile={handleExistenciasFile}
               fileName={files.existencias}
             />
@@ -7251,7 +7639,7 @@ function Dashboard({ session, onLogout }) {
               icon={ShieldCheck}
               label="Producción sugerida mensual"
               value={formatNumber(dailySummary.produccionSugeridaMensual, 0)}
-              caption="Con regla operativa"
+              caption={effectiveDailyBranchStock.length ? "Con regla operativa e inventario del día" : "Con regla operativa"}
             />
             <KpiCard
               icon={Target}
@@ -7402,7 +7790,7 @@ function Dashboard({ session, onLogout }) {
             <div>
               <span className="eyebrow">Paso 3 · Planta</span>
               <h3>Producción diaria sugerida</h3>
-              <p>Esta es la lista de trabajo del día. El mes se cambia arriba, junto a Congelar.</p>
+              <p>Captura el inventario de sucursales del día y revisa el pedido neto. El mes se cambia arriba, junto a Congelar.</p>
               <strong className="row-counter">{formatNumber(dailyRows.length)} filas diarias generadas</strong>
               {files.ventas && (
                 <p className={`real-validation-message ${historicalVentas.length ? "success" : "warning"}`}>
@@ -7419,10 +7807,173 @@ function Dashboard({ session, onLogout }) {
             </button>
           </div>
 
+          <section className="daily-stock-panel" aria-label="Inventario diario por sucursal">
+            <div className="daily-stock-heading">
+              <span className="daily-stock-icon"><Warehouse size={20} /></span>
+              <div>
+                <span className="eyebrow">Inventario del día</span>
+                <h4>Stock por sucursal y SKU</h4>
+                <p>Lo que ya hay en tienda se resta del pedido de planta. Vacío = no capturado (no se descuenta). 0 = contado vacío.</p>
+              </div>
+              <span className={`pill ${inventoryDayCount ? "ok" : "muted"}`}>
+                {inventoryDayCount
+                  ? `${formatNumber(inventoryDayProducts)} SKU · ${formatNumber(inventoryDayPieces, 0)} pzas · ${displayDate(inventoryDate)}`
+                  : `Sin captura · ${displayDate(inventoryDate)}`}
+              </span>
+            </div>
+            <div className="daily-stock-toolbar">
+              <label>
+                Fecha de inventario
+                <input
+                  type="date"
+                  min="2020-01-01"
+                  max="2100-12-31"
+                  value={isPlausibleIsoDate(inventoryDate) ? inventoryDate : ""}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    if (next && !isPlausibleIsoDate(next)) return;
+                    setStockCaptureDate(next);
+                    setDailyDateFilter(next);
+                  }}
+                />
+              </label>
+              <div className="search">
+                <Search size={18} />
+                <input
+                  placeholder="Buscar SKU del inventario..."
+                  value={stockCaptureQuery}
+                  onChange={(event) => setStockCaptureQuery(event.target.value)}
+                />
+              </div>
+              <label className="daily-stock-add-branch">
+                Sucursal
+                <span>
+                  <input
+                    value={newSucursalName}
+                    onChange={(event) => setNewSucursalName(event.target.value)}
+                    placeholder="Nombre de sucursal"
+                    disabled={!canSave}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        addManualSucursal();
+                      }
+                    }}
+                  />
+                  <button className="secondary" type="button" onClick={addManualSucursal} disabled={!canSave || !newSucursalName.trim()}>
+                    Agregar
+                  </button>
+                </span>
+              </label>
+              <label className="upload-button daily-stock-upload">
+                <FileSpreadsheet size={17} />
+                Importar Excel
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  disabled={!canSave}
+                  onChange={(event) => {
+                    handleDailyBranchStockFile(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => exportDailyBranchStockTemplate(inventoryDate, knownSucursales, officialProducts)}
+              >
+                <Download size={17} /> Plantilla
+              </button>
+              <button
+                className="secondary"
+                type="button"
+                onClick={() => clearDailyBranchStockForDate(inventoryDate)}
+                disabled={!canSave || !inventoryDayCount}
+              >
+                Vaciar este día
+              </button>
+            </div>
+            {files.dailyBranchStock && <span className="file-name">Último Excel: {files.dailyBranchStock}</span>}
+            {knownSucursales.length === 0 ? (
+              <div className="empty">Agrega una sucursal o importa un Excel (Fecha, Sucursal, Producto, Cantidad) para capturar el inventario del día.</div>
+            ) : !stockGridProducts.length ? (
+              <div className="empty">
+                {officialProducts.length
+                  ? "Ningún SKU coincide con la búsqueda."
+                  : "Carga el stock fijo para ver el catálogo, o importa un Excel con productos."}
+              </div>
+            ) : (
+              <div className="daily-stock-table-wrap">
+                <table className="daily-stock-table">
+                  <thead>
+                    <tr>
+                      <th>Producto</th>
+                      {knownSucursales.map((sucursal) => (
+                        <th key={sucursal}>{sucursal}</th>
+                      ))}
+                      <th>Total día</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockGridProducts.map((product) => {
+                      const total = knownSucursales.reduce((sum, sucursal) => {
+                        const value = stockQtyByProductBranch.get(`${product}|${norm(sucursal)}`);
+                        return sum + (Number.isFinite(value) ? value : 0);
+                      }, 0);
+                      const captured = knownSucursales.some((sucursal) => stockQtyByProductBranch.has(`${product}|${norm(sucursal)}`));
+                      return (
+                        <tr key={product}>
+                          <td>{product}</td>
+                          {knownSucursales.map((sucursal) => {
+                            const key = `${product}|${norm(sucursal)}`;
+                            const value = stockQtyByProductBranch.has(key) ? stockQtyByProductBranch.get(key) : "";
+                            return (
+                              <td key={sucursal}>
+                                <input
+                                  className="daily-stock-qty"
+                                  type="number"
+                                  min="0"
+                                  step="1"
+                                  inputMode="numeric"
+                                  value={value}
+                                  disabled={!canSave}
+                                  aria-label={`${product} en ${sucursal}`}
+                                  onChange={(event) => updateDailyBranchStockCell(inventoryDate, sucursal, product, event.target.value)}
+                                />
+                              </td>
+                            );
+                          })}
+                          <td className="strong">{captured ? formatNumber(total, 0) : "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {inventoryCapturedDates.length > 1 && (
+              <small className="daily-stock-hint">
+                Días con inventario: {inventoryCapturedDates.map((date) => displayDate(date)).join(" · ")}
+              </small>
+            )}
+          </section>
+
           <section className="controls daily-controls">
             <label>
               Fecha
-              <input type="date" value={dailyDateFilter} onChange={(e) => setDailyDateFilter(e.target.value)} />
+              <input
+                type="date"
+                min="2020-01-01"
+                max="2100-12-31"
+                value={isPlausibleIsoDate(dailyDateFilter) ? dailyDateFilter : ""}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  if (next && !isPlausibleIsoDate(next)) return;
+                  setDailyDateFilter(next);
+                  if (next) setStockCaptureDate(next);
+                }}
+              />
             </label>
             <div className="search">
               <Search size={18} />
@@ -7499,7 +8050,9 @@ function Dashboard({ session, onLogout }) {
                   <th>Pronóstico de venta</th>
                   <th>Margen de seguridad</th>
                   <th>Base con margen</th>
-                  <th>Producción sugerida</th>
+                  <th>Bruto planta</th>
+                  <th>Inventario sucursales</th>
+                  <th>Pedido planta</th>
                 </tr>
               </thead>
               <tbody>
@@ -7517,6 +8070,8 @@ function Dashboard({ session, onLogout }) {
                     <td>{row.pronosticoVentaDia.toFixed(2)}</td>
                     <td>{row.colchonDiario.toFixed(2)}</td>
                     <td>{row.baseConColchonDia.toFixed(2)}</td>
+                    <td>{row.produccionBrutaDia ?? row.produccionSugeridaDia}</td>
+                    <td>{row.hasDailyBranchStock ? formatNumber(row.inventarioSucursalesDia, 0) : "—"}</td>
                     <td className="strong">{row.produccionSugeridaDia}</td>
                   </tr>
                 ))}
@@ -7554,7 +8109,8 @@ function Dashboard({ session, onLogout }) {
           <div className="notes-list">
             <p>El pronóstico elige el método con menor error en el mes anterior y aplica una calibración limitada.</p>
             <p>El pronóstico de venta se reparte por día de semana. El domingo no se produce y su demanda pasa al sábado.</p>
-            <p>Las existencias solo se descuentan si la fecha de corte cae entre el mes anterior y el mes planificado.</p>
+            <p>Las existencias de corte mensual solo se descuentan en el balance si la fecha cae entre el mes anterior y el mes planificado.</p>
+            <p>El inventario diario por sucursal se captura en Planta. Si hay stock ese día, el pedido neto es max(0, sugerencia con promo − piezas en sucursales), sin volver a armar lote de pastel.</p>
             <p>Para pasteles GDE, MED y CH, cada día de planta (lunes a sábado) se produce 0 o un lote de 10, 15, 20… Un 13 se hace 15; menos de 8 no se produce. El domingo queda en cero y su demanda pasa al sábado, que también sale en lote.</p>
             <p>Una promo activa es un overlay de planta: no reescribe el WAPE histórico. Mientras dura, no se apaga el SKU por la limpieza de catálogo y la producción sugerida aplica el multiplicador y/o las piezas extra.</p>
             <p>La vista Validación de cálculos permite auditar cada producto.</p>
@@ -7781,7 +8337,9 @@ function Dashboard({ session, onLogout }) {
                         <th>Pronóstico de venta</th>
                         <th>Margen aplicado</th>
                         <th>Base con margen</th>
-                        <th>Producción sugerida final</th>
+                        <th>Bruto planta</th>
+                        <th>Inventario sucursales</th>
+                        <th>Pedido planta</th>
                         <th>Producción real diaria</th>
                         <th>Diferencia</th>
                       </tr>
@@ -7795,6 +8353,8 @@ function Dashboard({ session, onLogout }) {
                           <td>{formatNumber(row.pronosticoVentaDia, 2)}</td>
                           <td>{formatNumber(row.colchonDiario, 2)}</td>
                           <td>{formatNumber(row.baseConColchonDia, 2)}</td>
+                          <td>{formatNumber(row.produccionBrutaDia ?? row.produccionSugeridaDia)}</td>
+                          <td>{row.hasDailyBranchStock ? formatNumber(row.inventarioSucursalesDia, 0) : "—"}</td>
                           <td className="strong">
                             {formatNumber(row.produccionSugeridaDia)}
                             {row.promoActiva ? ` · promo ${row.promoEtiqueta}` : ""}
@@ -7949,6 +8509,12 @@ export {
   parseBajasReport,
   parseBajasSummaryWorkbook,
   parseExistencias,
+  parseDailyBranchStock,
+  sanitizeDailyBranchStock,
+  upsertDailyBranchStock,
+  sumDailyBranchStockByProductDate,
+  applyDailyBranchStockToPlantSuggestion,
+  collectSucursales,
   parseMonthlySummaryWorkbook,
   parseProductionReal,
   parseSalesOrReturns,
