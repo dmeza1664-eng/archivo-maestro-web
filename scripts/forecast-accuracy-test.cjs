@@ -670,8 +670,8 @@ async function main() {
 
   assert(leftoverJune.wape < 6, `junio residual no debe romperse (WAPE ${leftoverJune.wape.toFixed(2)}%)`);
   assert(leftoverJuly.wape < 8, `julio residual debe bajar del ~14.2% silencioso / peor con alias (WAPE ${leftoverJuly.wape.toFixed(2)}%)`);
-  assert(leftoverAugust.wape < 10, `agosto residual debe bajar del ~17.4% (WAPE ${leftoverAugust.wape.toFixed(2)}%)`);
-  assert(leftoverWeighted < 6.5, `WAPE ponderado residual jun-ago debe bajar del ~11.7% (${leftoverWeighted.toFixed(2)}%)`);
+  assert(leftoverAugust.wape < 6, `agosto residual no debe copiar el salto de julio (WAPE ${leftoverAugust.wape.toFixed(2)}%)`);
+  assert(leftoverWeighted < 4.5, `WAPE ponderado residual jun-ago debe bajar del ~4.8% post-#14 (${leftoverWeighted.toFixed(2)}%)`);
 
   assert(leftGelatinaJuly.actual > 700, "GELATINA INDIVIDUAL debe contar en el actual de IND FRESA");
   assert(leftGelatinaJuly.forecast > 700, `julio GELATINA IND FRESA no puede quedar en 0 por alias (fc ${leftGelatinaJuly.forecast.toFixed(1)})`);
@@ -695,6 +695,16 @@ async function main() {
   assert(!/impulso reciente/i.test(leftFrutasMedJuly.metodo || ""), "FRUTAS MED sin diario no hereda impulso");
   assert(leftFrutasMedJuly.absoluteError < 45, `FRUTAS MED sigue acotado (abs ${leftFrutasMedJuly.absoluteError.toFixed(1)})`);
   assert(leftFrutasGdeJuly.forecast > 540, `el impulso GDE de julio debe seguir (fc ${leftFrutasGdeJuly.forecast.toFixed(1)})`);
+
+  const leftMiniChocAugust = leftoverPick(leftoverAugust, "MINI MEDIANO CHOCOLATE");
+  const leftMiniPinAugust = leftoverPick(leftoverAugust, "MINI MEDIANO PINERO");
+  const leftMokaMedAugust = leftoverPick(leftoverAugust, "MOKA MED");
+  const leftDuraznoAugust = leftoverPick(leftoverAugust, "DURAZNO GDE");
+  assert(leftMiniChocAugust.absoluteError < 50, `agosto MINI CHOCOLATE no hereda el salto de julio (abs ${leftMiniChocAugust.absoluteError.toFixed(1)})`);
+  assert(leftMiniPinAugust.absoluteError < 50, `agosto MINI PINERO no hereda el salto de julio (abs ${leftMiniPinAugust.absoluteError.toFixed(1)})`);
+  assert(leftMokaMedAugust.absoluteError < 35, `agosto MOKA MED no hereda el salto de julio (abs ${leftMokaMedAugust.absoluteError.toFixed(1)})`);
+  assert(leftDuraznoAugust.absoluteError < 60, `agosto DURAZNO no hereda el salto de julio (abs ${leftDuraznoAugust.absoluteError.toFixed(1)})`);
+  assert(!/impulso reciente/i.test(leftMiniChocAugust.metodo || ""), "agosto Mini no vuelve a aplicar impulso");
 
   console.log("forecast-accuracy-test ok");
   console.log(
@@ -744,6 +754,10 @@ async function main() {
           dollarAugust: Number(leftDollarAugust.forecast.toFixed(1)),
           miniChocJuly: Number(leftMiniChocJuly.forecast.toFixed(1)),
           mokaMedJuly: Number(leftMokaMedJuly.forecast.toFixed(1)),
+          miniChocAugustAbs: Number(leftMiniChocAugust.absoluteError.toFixed(1)),
+          miniPinAugustAbs: Number(leftMiniPinAugust.absoluteError.toFixed(1)),
+          mokaMedAugustAbs: Number(leftMokaMedAugust.absoluteError.toFixed(1)),
+          duraznoAugustAbs: Number(leftDuraznoAugust.absoluteError.toFixed(1)),
         },
         promoActiva: {
           paletaJuly: Number(paletaPromoRow.pronosticoVenta.toFixed(1)),

@@ -60,6 +60,7 @@ async function main() {
     resolvePriorYearSeasonal,
     computeRecentMomentumFactor,
     computeEventCarryoverScale,
+    computeImpulseCarryoverScale,
     calendarEventForMonth,
     normalizeProduct,
     isPriceTaggedProduct,
@@ -370,6 +371,38 @@ async function main() {
     ["2025-07", { total: 475 }],
   ]);
   assert(computeEventCarryoverScale(juneNotPeak, "2026-06", "2026-07") === 1, "junio no es pico vs mayo: julio no se desinfla");
+
+  const miniImpulseJump = new Map([
+    ["2025-06", { total: 1100 }],
+    ["2025-07", { total: 1085 }],
+    ["2025-08", { total: 1110 }],
+    ["2026-06", monthWithHalves("2026-06", 470, 640)],
+    ["2026-07", { total: 1240 }],
+  ]);
+  const julyToAugustMini = computeImpulseCarryoverScale(miniImpulseJump, "2026-07", "2026-08");
+  assert(julyToAugustMini < 0.95 && julyToAugustMini >= 0.82, `julio Mini impulsado no debe copiarse a agosto (escala ${julyToAugustMini})`);
+  assert(computeImpulseCarryoverScale(miniImpulseJump, "2026-06", "2026-07") === 1, "al pronosticar julio se conserva el mes que aceleró");
+  assert(computeImpulseCarryoverScale(miniImpulseJump, "2026-07", "2026-09") === 1, "el resguardo es solo el mes inmediato");
+  const mmSeasonalFloor = new Map([
+    ["2025-07", { total: 308 }],
+    ["2025-08", { total: 324 }],
+    ["2026-06", monthWithHalves("2026-06", 115, 141)],
+    ["2026-07", { total: 324 }],
+  ]);
+  assert(computeImpulseCarryoverScale(mmSeasonalFloor, "2026-07", "2026-08") === 1, "si julio ya empató agosto anterior, no se desinfla");
+  const closeOnlyJuly = new Map([
+    ["2025-08", { total: 1110 }],
+    ["2026-06", { total: 1110, filledFromMonthlyTotal: true, valuesByDate: new Map([["2026-06-01", 37]]) }],
+    ["2026-07", { total: 1240 }],
+  ]);
+  assert(computeImpulseCarryoverScale(closeOnlyJuly, "2026-07", "2026-08") === 1, "sin diario de junio no hay impulso que deshacer");
+  const dollarNoDaily = new Map([
+    ["2025-07", { total: 420 }],
+    ["2025-08", { total: 80 }],
+    ["2026-06", { total: 0 }],
+    ["2026-07", { total: 438 }],
+  ]);
+  assert(computeImpulseCarryoverScale(dollarNoDaily, "2026-07", "2026-08") === 1, "GELATINA $150 no tiene diario: el fade de #14 sigue aparte");
 
   function dailyRowsForMonth(monthKey, dayCount, quantity = 10) {
     const [year, month] = monthKey.split("-").map(Number);
