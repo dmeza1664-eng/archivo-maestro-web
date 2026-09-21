@@ -20,6 +20,7 @@ assert.match(app, /Inventario del día/, "La captura de stock diario usa etiquet
 assert.match(app, /Pedido planta/, "La tabla de planta muestra el pedido neto.");
 assert.match(app, /A producir/, "La tabla de planta muestra la sugerencia de fabricación.");
 assert.match(app, /Cuarto frío/, "El inventario del día captura cuarto frío.");
+assert.match(app, /Las metas TOTAL A TENER no se importan como sucursal/, "El import RAIZ avisa que las metas TOTAL A TENER no son sucursal.");
 assert.doesNotMatch(
   app,
   /<FreezeReadinessStrip[\s\S]*<\/header>/,

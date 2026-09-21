@@ -713,7 +713,7 @@ function normalizeDailyBranchStockRow(raw) {
   const productoOriginal = String(raw.productoOriginal || raw.producto || "").trim();
   const producto = normalizeProduct(raw.producto || productoOriginal);
   const sucursal = String(raw.sucursal || raw.tienda || raw.canal || "").trim();
-  if (!fecha || !producto || !sucursal) return null;
+  if (!fecha || !producto || !isUsableBranchLocation(sucursal)) return null;
   const cantidad = Math.max(0, Math.round(toNumber(raw.cantidad ?? raw.stock ?? raw.piezas)));
   return {
     fecha,
@@ -1435,37 +1435,127 @@ function looksLikeProductHeader(value) {
   return p === "PRODUCTO" || p === "SKU" || p === "PRODUCT" || p.startsWith("PRODUCTO");
 }
 
-function looksLikeColdRoomHeader(value) {
+function looksLikeBareRestanteHeader(value) {
+  const p = norm(value);
+  return p === "RESTANTE" || p.startsWith("RESTANTE ");
+}
+
+function looksLikeTargetOrIdealName(value) {
+  const p = norm(value);
+  if (!p) return false;
+  return p.includes("A TENER") || p.includes("IDEAL") || p.includes("OBJETIVO") || p.includes("TARGET");
+}
+
+function looksLikeRegionalRollupName(value) {
+  const p = norm(value);
+  if (!p) return false;
+  return p.includes("LOCALES") || p.includes("FORANEAS") || p.includes("FORANEOS");
+}
+
+// Totales, metas y recortes RAIZ (TOTAL A TENER, Suma suc+CF, TOTAL LOCALES…)
+// no son sucursales. Si se sube el workbook completo no deben colarse al inventario.
+function looksLikeRollupOrTargetName(value) {
+  const p = norm(value);
+  if (!p) return false;
+  if (looksLikeTargetOrIdealName(p) || looksLikeRegionalRollupName(p)) return true;
+  if (p.includes("SUMA")) return true;
+  if (p.includes("GRAL") || p.includes("GENERAL")) return true;
+  if (p === "TOTAL" || p.startsWith("TOTAL ") || p.includes("TOTAL")) return true;
+  if (p.includes("STOCK") && p.includes("SUCURSAL")) return true;
+  return false;
+}
+
+function looksLikeColdRoomHeader(value, context = {}) {
   const p = norm(value);
   if (!p) return false;
   if (["CF", "C.F", "C.F.", "C F"].includes(p)) return true;
   if (p.includes("CUARTO")) return true;
   if (p.includes("RESTANTE") && (p.includes("CF") || p.includes("C.F") || p.includes("FRIO"))) return true;
   if (p.includes("DISPONIBLE") && p.includes("PLANTA")) return true;
+  if (context.treatRestanteAsCold && looksLikeBareRestanteHeader(p)) return true;
   return false;
 }
 
+function looksLikeMixedSucursalesCfSheet(name) {
+  const p = norm(name);
+  if (!p) return false;
+  const hasSucursales = p.includes("SUCURSAL") || p.includes("EXIST");
+  const hasColdHint = p.includes("CF") || p.includes("C.F") || p.includes("CUARTO") || p.includes("FRIO") || p.includes("RESTANTE");
+  return hasSucursales && hasColdHint;
+}
+
 function looksLikeColdRoomLocation(value) {
-  return looksLikeColdRoomHeader(value);
+  const p = norm(value);
+  if (!p || looksLikeMixedSucursalesCfSheet(p)) return false;
+  if (looksLikeColdRoomHeader(p)) return true;
+  // Hoja RESTANTE (sin "CF" en el nombre) es el restante de planta / cuarto frío.
+  if (p === "RESTANTE" || (p.startsWith("RESTANTE") && !p.includes("SUC"))) return true;
+  return false;
+}
+
+function sheetHasColdRoomContext(sheetName) {
+  const p = norm(sheetName);
+  if (!p) return false;
+  if (looksLikeColdRoomLocation(sheetName)) return true;
+  if (p.includes("RESTANTE") && (p.includes("CF") || p.includes("C.F") || p.includes("FRIO") || p.includes("CUARTO"))) return true;
+  if ((p.includes("CF") || p.includes("C.F") || p.includes("CUARTO") || p.includes("FRIO")) && !p.includes("SUCURSAL")) return true;
+  return false;
 }
 
 function looksLikeTotalSucursalesHeader(value) {
   const p = norm(value);
   if (!p || p.includes("SUMA")) return false;
-  return (p.includes("TOTAL") && (p.includes("SUC") || p.includes("GRAL"))) || p === "TOTAL SUCURSALES";
+  if (looksLikeTargetOrIdealName(p) || looksLikeRegionalRollupName(p)) return false;
+  if (p === "TOTAL SUCURSALES" || p === "TOTAL SUC" || p === "TOTAL SUC.") return true;
+  return p.includes("TOTAL") && p.includes("SUC");
 }
 
 function isReservedDailyStockHeader(value) {
   const p = norm(value);
   if (!p) return true;
   if (looksLikeStockQtyHeader(p) || looksLikeDateHeader(p) || looksLikeBranchHeader(p) || looksLikeProductHeader(p)) return true;
-  if (looksLikeColdRoomHeader(p) || looksLikeTotalSucursalesHeader(p)) return true;
-  return p === "TOTAL" || p === "SUMA" || p === "CF" || p === "C.F." || p.includes("CUARTO") || p.includes("TOTAL") || p.includes("SUMA") || p.includes("RESTANTE");
+  if (looksLikeColdRoomHeader(p) || looksLikeBareRestanteHeader(p) || looksLikeTotalSucursalesHeader(p)) return true;
+  if (looksLikeRollupOrTargetName(p)) return true;
+  return p === "CF" || p === "C.F." || p.includes("CUARTO") || p.includes("RESTANTE");
 }
 
 function isGenericSheetName(name) {
   const p = norm(name);
   return !p || /^HOJA\s*\d*$/.test(p) || /^SHEET\s*\d*$/.test(p) || p === "INVENTARIO" || p === "STOCK" || p === "DATOS";
+}
+
+function looksLikeDateOnlySheetName(name) {
+  const raw = String(name || "").trim();
+  if (!raw) return false;
+  return /^\d{4}[/-]\d{1,2}[/-]\d{1,2}$/.test(raw) || /^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$/.test(raw);
+}
+
+function looksLikeLayoutOrCatalogSheet(name) {
+  const p = norm(name);
+  if (!p || isGenericSheetName(name)) return true;
+  if (p === "RAIZ" || p.includes("CATALOGO")) return true;
+  if (p.includes("EXIST") && (p.includes("SUCURSAL") || p.includes("CF") || p.includes("RESTANTE"))) return true;
+  if (p.includes("STOCK") && p.includes("SUCURSAL")) return true;
+  if (looksLikeDateOnlySheetName(name)) return true;
+  return false;
+}
+
+function sheetNameUsableAsBranch(name) {
+  if (!String(name || "").trim()) return false;
+  if (isGenericSheetName(name) || looksLikeColdRoomLocation(name)) return false;
+  if (looksLikeRollupOrTargetName(name) || looksLikeLayoutOrCatalogSheet(name)) return false;
+  return true;
+}
+
+function isUsableBranchLocation(value) {
+  const sucursal = String(value ?? "").trim();
+  if (!sucursal) return false;
+  if (looksLikeColdRoomLocation(sucursal) || looksLikeBareRestanteHeader(sucursal)) return false;
+  if (looksLikeRollupOrTargetName(sucursal)) return false;
+  if (looksLikeStockQtyHeader(sucursal) || looksLikeDateHeader(sucursal) || looksLikeProductHeader(sucursal)) return false;
+  const p = norm(sucursal);
+  if (p === "SUCURSAL" || p === "TIENDA" || p === "BRANCH" || p === "CANAL") return false;
+  return true;
 }
 
 function inferDateFromSheetRows(rows, sheetName = "", fallbackDate = "") {
@@ -1506,17 +1596,24 @@ function parseDailyInventory(workbook, fallbackDate = "") {
       const qtyIdx = row.findIndex((cell) => looksLikeStockQtyHeader(cell));
       const dateIdx = row.findIndex((cell) => looksLikeDateHeader(cell));
       const branchIdx = row.findIndex((cell) => looksLikeBranchHeader(cell));
-      const totalIdx = row.findIndex((cell) => looksLikeTotalSucursalesHeader(cell));
+      let totalIdx = row.findIndex((cell) => looksLikeTotalSucursalesHeader(cell));
+      const hasBareRestante = row.some((cell, index) => index !== productIdx && looksLikeBareRestanteHeader(cell));
+      const treatRestanteAsCold = sheetHasColdRoomContext(sheetName)
+        || looksLikeMixedSucursalesCfSheet(sheetName)
+        || (totalIdx >= 0 && hasBareRestante);
       const coldIdxs = row
         .map((cell, index) => ({ cell, index }))
-        .filter(({ cell, index }) => index !== productIdx && looksLikeColdRoomHeader(cell));
+        .filter(({ cell, index }) => index !== productIdx && looksLikeColdRoomHeader(cell, { treatRestanteAsCold }));
+      if (totalIdx < 0 && looksLikeMixedSucursalesCfSheet(sheetName) && qtyIdx >= 0 && coldIdxs.length) {
+        totalIdx = qtyIdx;
+      }
       const branchNameCols = row
         .map((cell, index) => ({ cell, index }))
-        .filter(({ cell, index }) => index !== productIdx && String(cell ?? "").trim() && !isReservedDailyStockHeader(cell));
+        .filter(({ cell, index }) => index !== productIdx && String(cell ?? "").trim() && !isReservedDailyStockHeader(cell) && isUsableBranchLocation(cell));
 
       const hasLong = qtyIdx >= 0 && branchIdx >= 0;
       const hasWide = branchNameCols.length >= 1;
-      const hasQtySheet = qtyIdx >= 0 && !isGenericSheetName(sheetName);
+      const hasQtySheet = qtyIdx >= 0 && (sheetNameUsableAsBranch(sheetName) || looksLikeColdRoomLocation(sheetName));
       const hasCold = coldIdxs.length >= 1;
       const hasTotalOnly = totalIdx >= 0 && !hasWide && !hasLong;
 
@@ -1540,7 +1637,7 @@ function parseDailyInventory(workbook, fallbackDate = "") {
 
     if (headerIndex < 0) continue;
     const sheetFallbackDate = inferDateFromSheetRows(rows.slice(0, headerIndex + 1), sheetName, fallbackDate);
-    const sheetBranch = isGenericSheetName(sheetName) ? "" : String(sheetName).trim();
+    const sheetBranch = sheetNameUsableAsBranch(sheetName) ? String(sheetName).trim() : "";
     const sheetIsCold = looksLikeColdRoomLocation(sheetName);
 
     for (let i = headerIndex + 1; i < rows.length; i++) {
@@ -1556,6 +1653,7 @@ function parseDailyInventory(workbook, fallbackDate = "") {
 
       if (wideBranchCols.length) {
         for (const branch of wideBranchCols) {
+          if (!isUsableBranchLocation(branch.sucursal)) continue;
           const raw = row[branch.index];
           if (String(raw ?? "").trim() === "") continue;
           branchParsed.push({
@@ -1567,7 +1665,12 @@ function parseDailyInventory(workbook, fallbackDate = "") {
           });
           emittedBranch = true;
         }
-      } else if (qtyCol >= 0 && String(row[qtyCol] ?? "").trim() !== "") {
+      } else if (
+        qtyCol >= 0
+        && qtyCol !== totalSucCol
+        && !coldCols.includes(qtyCol)
+        && String(row[qtyCol] ?? "").trim() !== ""
+      ) {
         const sucursal = branchCol >= 0 ? String(row[branchCol] ?? "").trim() : sheetBranch;
         if (sucursal && looksLikeColdRoomLocation(sucursal)) {
           coldParsed.push({
@@ -1576,7 +1679,7 @@ function parseDailyInventory(workbook, fallbackDate = "") {
             productoOriginal,
             cantidad: toNumber(row[qtyCol]),
           });
-        } else if (sucursal) {
+        } else if (isUsableBranchLocation(sucursal)) {
           branchParsed.push({
             fecha,
             sucursal,
@@ -5794,7 +5897,7 @@ function Dashboard({ session, onLogout }) {
     const workbook = await readWorkbook(file);
     const parsed = parseDailyInventory(workbook, stockCaptureDate);
     if (!parsed.branchStock.length && !parsed.coldRoom.length) {
-      setToast({ tone: "warning", message: "No se reconocieron filas de inventario. Usa sucursales y/o Cuarto frío (RAIZ: Total suc + C.F.), o un cruce Producto × sucursal." });
+      setToast({ tone: "warning", message: "No se reconocieron filas de inventario. Usa sucursales y/o Cuarto frío (RAIZ: Total suc + Restante CF). TOTAL A TENER y sumas no entran como sucursal." });
       return;
     }
     if (parsed.branchStock.length) {
@@ -8330,7 +8433,7 @@ function Dashboard({ session, onLogout }) {
             </div>
             {files.dailyBranchStock && <span className="file-name">Último Excel: {files.dailyBranchStock}</span>}
             {knownSucursales.length === 0 && !officialProducts.length && !coldRowsForDate.length ? (
-              <div className="empty">Agrega una sucursal o importa un Excel RAIZ (sucursales y/o Cuarto frío / C.F.) para capturar el inventario del día.</div>
+              <div className="empty">Agrega una sucursal o importa un Excel RAIZ (sucursales y/o Cuarto frío / Restante CF). Las metas TOTAL A TENER no se importan como sucursal.</div>
             ) : !stockGridProducts.length ? (
               <div className="empty">
                 {officialProducts.length
