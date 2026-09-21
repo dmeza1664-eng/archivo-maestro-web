@@ -4568,8 +4568,6 @@ function withForecastDisplayDefaults(row) {
     promedioViernes: 0,
     promedioSabado: 0,
     promedioDomingo: 0,
-    demandaPronosticada: pronosticoVenta,
-    pronosticoVenta,
     tasaBajas: 0,
     bajasEsperadas: 0,
     colchonOperativo: 0,
