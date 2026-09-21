@@ -18,6 +18,8 @@ assert.match(app, /Paso 3 · Planta/, "La tabla diaria es el tercer paso visible
 assert.match(app, /className="daily-stock-panel"/, "El inventario diario vive en Planta, no enterrado en Más archivos.");
 assert.match(app, /Inventario del día/, "La captura de stock diario usa etiqueta en español.");
 assert.match(app, /Pedido planta/, "La tabla de planta muestra el pedido neto.");
+assert.match(app, /A producir/, "La tabla de planta muestra la sugerencia de fabricación.");
+assert.match(app, /Cuarto frío/, "El inventario del día captura cuarto frío.");
 assert.doesNotMatch(
   app,
   /<FreezeReadinessStrip[\s\S]*<\/header>/,

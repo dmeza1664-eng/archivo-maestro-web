@@ -794,7 +794,7 @@ label select {
 }
 
 .validation-daily-table {
-  min-width: 1540px;
+  min-width: 1760px;
 }
 
 .formula-cell {
@@ -858,7 +858,7 @@ table {
 }
 
 .daily-table {
-  min-width: 1080px;
+  min-width: 1320px;
 }
 
 .homologation-table {
@@ -3793,6 +3793,15 @@ tbody tr:hover {
 .daily-stock-qty {
   max-width: 88px;
   min-width: 72px;
+}
+
+.daily-stock-table th.daily-stock-cf,
+.daily-stock-table td.daily-stock-cf {
+  background: #f7f1ea;
+}
+
+.daily-stock-table thead th.daily-stock-cf {
+  background: #3d3228;
 }
 
 .daily-stock-hint {
