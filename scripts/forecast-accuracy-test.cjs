@@ -534,6 +534,168 @@ async function main() {
   assert(deactivatedDay.produccionSugeridaDia < paletaDayPromo.produccionSugeridaDia, "desactivar quita el multiplicador diario");
   assert(!deactivatedDay.promoActiva, "desactivar no debe marcar el día como promo");
 
+  // Residual post-#12: alias que #12 no cubrió (INDIVIDUAL, CHEESE CAKE,
+  // TRES LECHES, DE), gelatinas $150 con hueco may–jun y pico julio, e
+  // impulso por SKU en Mini/MED. Magnitudes de CONTROL / julio congelado.
+  const leftoverStock = [
+    { producto: "FRUTAS GDE", stock: 40, orden: 1 },
+    { producto: "MOKA GDE", stock: 40, orden: 2 },
+    { producto: "PAY DE GUAYABA GDE", stock: 20, orden: 3 },
+    { producto: "DURAZNO GDE", stock: 20, orden: 4 },
+    { producto: "CHOCOLATE GDE", stock: 20, orden: 5 },
+    { producto: "DUO DURAZNO GDE", stock: 20, orden: 6 },
+    { producto: "3 LECHES GDE", stock: 20, orden: 7 },
+    { producto: "RED VELVET CHEESE CAKE GDE", stock: 20, orden: 8 },
+    { producto: "GELATINA IND FRESA", stock: 40, orden: 9 },
+    { producto: "GELATINA IND MOSAICO", stock: 40, orden: 10 },
+    { producto: "GELATINA DE PINA IND", stock: 20, orden: 11 },
+    { producto: "MINI MEDIANO CHOCOLATE", stock: 40, orden: 12 },
+    { producto: "MINI MEDIANO PINERO", stock: 40, orden: 13 },
+    { producto: "MOKA MED", stock: 30, orden: 14 },
+    { producto: "TRES LECHES MEDIANO", stock: 20, orden: 15 },
+    { producto: "GELATINA FRESA $150", stock: 20, orden: 16 },
+    { producto: "FRUTAS MED", stock: 30, orden: 17 },
+  ];
+  const leftoverSeries = {
+    "FRUTAS GDE": {
+      "2025-04": 500, "2025-05": 658, "2025-06": 519, "2025-07": 475, "2025-08": 524,
+      "2026-04": 500, "2026-05": 660, "2026-07": 580, "2026-08": 541,
+    },
+    "MOKA GDE": {
+      "2025-04": 605, "2025-05": 755, "2025-06": 624, "2025-07": 612, "2025-08": 639,
+      "2026-04": 600, "2026-05": 720, "2026-07": 697, "2026-08": 619,
+    },
+    "PAY DE GUAYABA GRANDE": {
+      "2025-04": 340, "2025-05": 420, "2025-06": 360, "2025-07": 330, "2025-08": 350,
+      "2026-04": 338, "2026-05": 418, "2026-07": 413, "2026-08": 352,
+    },
+    "DURAZNO GRANDE": {
+      "2025-04": 240, "2025-05": 310, "2025-06": 250, "2025-07": 230, "2025-08": 245,
+      "2026-04": 238, "2026-05": 308, "2026-07": 322, "2026-08": 248,
+    },
+    "CHOCOLATE GDE": {
+      "2025-04": 350, "2025-05": 430, "2025-06": 360, "2025-07": 340, "2025-08": 355,
+      "2026-04": 348, "2026-05": 428, "2026-07": 390, "2026-08": 360,
+    },
+    "DUO DURAZNO GDE": {
+      "2025-04": 290, "2025-05": 360, "2025-06": 300, "2025-07": 280, "2025-08": 295,
+      "2026-04": 288, "2026-05": 358, "2026-07": 340, "2026-08": 300,
+    },
+    "TRES LECHES GDE": {
+      "2025-04": 250, "2025-05": 320, "2025-06": 260, "2025-07": 240, "2025-08": 255,
+      "2026-04": 248, "2026-05": 318, "2026-07": 290, "2026-08": 258,
+    },
+    "RED VELVET CHEESECAKE GDE": {
+      "2025-04": 170, "2025-05": 220, "2025-06": 180, "2025-07": 165, "2025-08": 175,
+      "2026-04": 168, "2026-05": 218, "2026-07": 205, "2026-08": 178,
+    },
+    "GELATINA INDIVIDUAL FRESA": {
+      "2025-04": 790, "2025-05": 980, "2025-06": 800, "2025-07": 810, "2025-08": 805,
+      "2026-04": 795, "2026-05": 990, "2026-07": 820, "2026-08": 812,
+    },
+    "GELATINA INDIVIDUAL MOSAICO": {
+      "2025-04": 690, "2025-05": 860, "2025-06": 700, "2025-07": 705, "2025-08": 698,
+      "2026-04": 692, "2026-05": 870, "2026-06": 710, "2026-07": 708, "2026-08": 702,
+    },
+    "GELATINA PINA IND": {
+      "2025-04": 55, "2025-05": 70, "2025-06": 58, "2025-07": 56, "2025-08": 57,
+      "2026-04": 54, "2026-05": 68, "2026-06": 59, "2026-07": 60, "2026-08": 58,
+    },
+    "MINI MEDIANO CHOCOLATE": {
+      "2025-04": 1080, "2025-05": 1320, "2025-06": 1100, "2025-07": 1085, "2025-08": 1110,
+      "2026-04": 1075, "2026-05": 1310, "2026-07": 1240, "2026-08": 1120,
+    },
+    "MINI MEDIANO PINERO": {
+      "2025-04": 1000, "2025-05": 1240, "2025-06": 1020, "2025-07": 1010, "2025-08": 1030,
+      "2026-04": 998, "2026-05": 1230, "2026-07": 1160, "2026-08": 1040,
+    },
+    "MOKA MEDIANO": {
+      "2025-04": 590, "2025-05": 730, "2025-06": 600, "2025-07": 580, "2025-08": 595,
+      "2026-04": 588, "2026-05": 725, "2026-07": 680, "2026-08": 600,
+    },
+    "3 LECHES MEDIANO": {
+      "2025-04": 290, "2025-05": 360, "2025-06": 300, "2025-07": 285, "2025-08": 295,
+      "2026-04": 288, "2026-05": 358, "2026-06": 302, "2026-07": 320, "2026-08": 298,
+    },
+    "GELATINA FRESA $150": {
+      "2025-04": 400, "2025-05": 0, "2025-06": 0, "2025-07": 420, "2025-08": 80,
+      "2026-04": 410, "2026-05": 0, "2026-06": 0, "2026-07": 438, "2026-08": 70,
+    },
+    "FRUTAS MED": {
+      "2025-04": 510, "2025-05": 640, "2025-06": 520, "2025-07": 500, "2025-08": 530,
+      "2026-04": 512, "2026-05": 642, "2026-06": 522, "2026-07": 530, "2026-08": 528,
+    },
+  };
+  const leftoverVentas = [];
+  for (const [product, months] of Object.entries(leftoverSeries)) {
+    for (const [month, qty] of Object.entries(months)) leftoverVentas.push(monthClose(month, product, qty));
+  }
+  leftoverVentas.push(...juneDaily("FRUTAS GDE", 223, 296));
+  leftoverVentas.push(...juneDaily("MOKA GDE", 276, 341));
+  leftoverVentas.push(...juneDaily("PAY DE GUAYABA GRANDE", 155, 205));
+  leftoverVentas.push(...juneDaily("DURAZNO GRANDE", 108, 148));
+  leftoverVentas.push(...juneDaily("CHOCOLATE GDE", 155, 205));
+  leftoverVentas.push(...juneDaily("DUO DURAZNO GDE", 128, 172));
+  leftoverVentas.push(...juneDaily("TRES LECHES GDE", 112, 150));
+  leftoverVentas.push(...juneDaily("RED VELVET CHEESECAKE GDE", 78, 104));
+  leftoverVentas.push(...juneDaily("MINI MEDIANO CHOCOLATE", 470, 640));
+  leftoverVentas.push(...juneDaily("MINI MEDIANO PINERO", 440, 590));
+  leftoverVentas.push(...juneDaily("MOKA MEDIANO", 255, 345));
+  leftoverVentas.push(...juneDaily("GELATINA INDIVIDUAL FRESA", 350, 466));
+
+  const leftoverJune = evaluateMonth(app, leftoverStock, leftoverVentas, "2026-06");
+  const leftoverJuly = evaluateMonth(app, leftoverStock, leftoverVentas, "2026-07");
+  const leftoverAugust = evaluateMonth(app, leftoverStock, leftoverVentas, "2026-08");
+  const leftoverPick = (analysis, name) => analysis.rows.find((row) => app.normalizeProduct(row.producto) === app.normalizeProduct(name));
+  const leftoverWeighted = (() => {
+    const months = [leftoverJune, leftoverJuly, leftoverAugust];
+    const actual = months.reduce((sum, row) => sum + row.actual, 0);
+    const abs = months.reduce((sum, row) => sum + row.rows.reduce((inner, item) => inner + item.absoluteError, 0), 0);
+    return actual > 0 ? (abs / actual) * 100 : null;
+  })();
+
+  const leftGelatinaJuly = leftoverPick(leftoverJuly, "GELATINA IND FRESA");
+  const leftMosaicoJuly = leftoverPick(leftoverJuly, "GELATINA IND MOSAICO");
+  const leftPinaJuly = leftoverPick(leftoverJuly, "GELATINA DE PINA IND");
+  const leftTresJuly = leftoverPick(leftoverJuly, "3 LECHES GDE");
+  const leftVelvetJuly = leftoverPick(leftoverJuly, "RED VELVET CHEESE CAKE GDE");
+  const leftTresMedJuly = leftoverPick(leftoverJuly, "TRES LECHES MEDIANO");
+  const leftDollarJuly = leftoverPick(leftoverJuly, "GELATINA FRESA $150");
+  const leftDollarAugust = leftoverPick(leftoverAugust, "GELATINA FRESA $150");
+  const leftMiniChocJuly = leftoverPick(leftoverJuly, "MINI MEDIANO CHOCOLATE");
+  const leftMiniPinJuly = leftoverPick(leftoverJuly, "MINI MEDIANO PINERO");
+  const leftMokaMedJuly = leftoverPick(leftoverJuly, "MOKA MED");
+  const leftFrutasMedJuly = leftoverPick(leftoverJuly, "FRUTAS MED");
+  const leftFrutasGdeJuly = leftoverPick(leftoverJuly, "FRUTAS GDE");
+
+  assert(leftoverJune.wape < 6, `junio residual no debe romperse (WAPE ${leftoverJune.wape.toFixed(2)}%)`);
+  assert(leftoverJuly.wape < 8, `julio residual debe bajar del ~14.2% silencioso / peor con alias (WAPE ${leftoverJuly.wape.toFixed(2)}%)`);
+  assert(leftoverAugust.wape < 10, `agosto residual debe bajar del ~17.4% (WAPE ${leftoverAugust.wape.toFixed(2)}%)`);
+  assert(leftoverWeighted < 6.5, `WAPE ponderado residual jun-ago debe bajar del ~11.7% (${leftoverWeighted.toFixed(2)}%)`);
+
+  assert(leftGelatinaJuly.actual > 700, "GELATINA INDIVIDUAL debe contar en el actual de IND FRESA");
+  assert(leftGelatinaJuly.forecast > 700, `julio GELATINA IND FRESA no puede quedar en 0 por alias (fc ${leftGelatinaJuly.forecast.toFixed(1)})`);
+  assert(leftMosaicoJuly.forecast > 500, `julio MOSAICO INDIVIDUAL debe empatar (fc ${leftMosaicoJuly.forecast.toFixed(1)})`);
+  assert(leftPinaJuly.forecast > 40, `julio GELATINA DE PINA / PINA IND debe empatar (fc ${leftPinaJuly.forecast.toFixed(1)})`);
+  assert(leftTresJuly.forecast > 200, `julio TRES LECHES debe empatar con 3 LECHES (fc ${leftTresJuly.forecast.toFixed(1)})`);
+  assert(leftVelvetJuly.forecast > 140, `julio CHEESE CAKE debe empatar con CHEESECAKE (fc ${leftVelvetJuly.forecast.toFixed(1)})`);
+  assert(leftTresMedJuly.forecast > 200, `julio 3 LECHES MEDIANO debe empatar con TRES LECHES MED (fc ${leftTresMedJuly.forecast.toFixed(1)})`);
+
+  assert(leftDollarJuly.forecast > 300, `julio GELATINA $150 no es baja: debe usar julio 2025 (fc ${leftDollarJuly.forecast.toFixed(1)})`);
+  assert(leftDollarJuly.absoluteError < 80, `julio $150 debe acercarse a 438 (abs ${leftDollarJuly.absoluteError.toFixed(1)})`);
+  assert(leftDollarAugust.forecast < 150, `agosto $150 no debe corregir el fade 80 como dip (fc ${leftDollarAugust.forecast.toFixed(1)})`);
+  assert(leftDollarAugust.absoluteError < 80, `agosto $150 debe quedar cerca de 70 (abs ${leftDollarAugust.absoluteError.toFixed(1)})`);
+
+  assert(leftMiniChocJuly.forecast > 1150, `julio MINI CHOCOLATE debe impulsarse (fc ${leftMiniChocJuly.forecast.toFixed(1)})`);
+  assert(leftMiniChocJuly.absoluteError < 90, `julio MINI CHOCOLATE debe bajar del faltante 141 (abs ${leftMiniChocJuly.absoluteError.toFixed(1)})`);
+  assert(leftMiniPinJuly.forecast > 1080, `julio MINI PINERO debe impulsarse (fc ${leftMiniPinJuly.forecast.toFixed(1)})`);
+  assert(leftMokaMedJuly.forecast > 620, `julio MOKA MED debe impulsarse por su propio diario (fc ${leftMokaMedJuly.forecast.toFixed(1)})`);
+  assert(/impulso reciente/i.test(leftMiniChocJuly.metodo || ""), "MINI CHOCOLATE debe anotar impulso reciente");
+  assert(/impulso reciente/i.test(leftMokaMedJuly.metodo || ""), "MOKA MED debe anotar impulso reciente");
+  assert(!/impulso reciente/i.test(leftFrutasMedJuly.metodo || ""), "FRUTAS MED sin diario no hereda impulso");
+  assert(leftFrutasMedJuly.absoluteError < 45, `FRUTAS MED sigue acotado (abs ${leftFrutasMedJuly.absoluteError.toFixed(1)})`);
+  assert(leftFrutasGdeJuly.forecast > 540, `el impulso GDE de julio debe seguir (fc ${leftFrutasGdeJuly.forecast.toFixed(1)})`);
+
   console.log("forecast-accuracy-test ok");
   console.log(
     JSON.stringify(
@@ -571,6 +733,17 @@ async function main() {
           nutelaJuneAbs: Number(heavyNutelaJune.absoluteError.toFixed(1)),
           mmMedJuneAbs: Number(heavyMmMedJune.absoluteError.toFixed(1)),
           frutasJuly: Number(heavyFrutasJuly.forecast.toFixed(1)),
+        },
+        leftoverSkus: {
+          june: Number(leftoverJune.wape.toFixed(2)),
+          july: Number(leftoverJuly.wape.toFixed(2)),
+          august: Number(leftoverAugust.wape.toFixed(2)),
+          weighted: Number(leftoverWeighted.toFixed(2)),
+          gelatinaIndJuly: Number(leftGelatinaJuly.forecast.toFixed(1)),
+          dollarJuly: Number(leftDollarJuly.forecast.toFixed(1)),
+          dollarAugust: Number(leftDollarAugust.forecast.toFixed(1)),
+          miniChocJuly: Number(leftMiniChocJuly.forecast.toFixed(1)),
+          mokaMedJuly: Number(leftMokaMedJuly.forecast.toFixed(1)),
         },
         promoActiva: {
           paletaJuly: Number(paletaPromoRow.pronosticoVenta.toFixed(1)),

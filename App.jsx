@@ -344,15 +344,21 @@ function normalizeProduct(value) {
     .replace(/[.,/\\_-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    // El catalogo escribe CHESSECAKE; las ventas usan ambas grafias.
+    // El catalogo escribe CHESSECAKE y CHEESE CAKE; las ventas mezclan ambas.
+    .replace(/\bCHEESE\s+CAKE\b/g, "CHESSECAKE")
     .replace(/CHE{1,2}S{1,2}ECAKE/g, "CHESSECAKE")
     .replace(/\bNUTELLA\b/g, "NUTELA")
     .replace(/\bM\s*&\s*M\b/g, "M & M")
     .replace(/\bM\s+Y\s+M\b/g, "M & M")
     .replace(/\bMYM\b/g, "M & M")
+    .replace(/\bINDIVIDUAL\b/g, "IND")
+    .replace(/\bTRES\s+LECHES?\b/g, "3 LECHES")
+    .replace(/\b3\s+LECHES?\b/g, "3 LECHES")
     .replace(/\bGRANDE\b/g, "GDE")
     .replace(/\bMEDIANO\b/g, "MED")
-    .replace(/\bCHICO\b/g, "CH");
+    .replace(/\bCHICO\b/g, "CH")
+    // "GELATINA DE PINA" vs "GELATINA PINA"; no se toca PAY/PASTEL.
+    .replace(/\bDE\b/g, " ");
   const compact = normalized.replace(/[^A-Z0-9]/g, "");
   if (compact === "PINAGDE" || compact === "PINAGRANDE") return "PINA GDE";
   if (compact === "MMGDE" || compact === "MYMGDE") return "M & M GDE";
@@ -2256,6 +2262,25 @@ function groupByProduct(records) {
   return map;
 }
 
+// Empata ventas y catálogo por nombre oficial o alias ya homologado.
+// Evita el 0/0 silencioso en WAPE cuando la venta usa otra grafía.
+function collectProductRecords(byProduct, product, original, officialProducts = []) {
+  const official = findOfficialProduct(product, officialProducts)
+    || findOfficialProduct(original, officialProducts)
+    || "";
+  const wanted = new Set(
+    [product, original, official]
+      .filter(Boolean)
+      .map((name) => normalizeProduct(name))
+      .filter(Boolean)
+  );
+  const merged = [];
+  for (const [key, rows] of byProduct || []) {
+    if (wanted.has(normalizeProduct(key))) merged.push(...rows);
+  }
+  return merged;
+}
+
 function filterIncompleteHistoricalMonths(records) {
   const coverage = new Map();
   for (const row of records) {
@@ -2315,6 +2340,7 @@ function calculateForecast({
   const completeHistoricalMonths = [...new Set(
     usableHistoricalVentas.map((row) => monthKeyFromRecord(row)).filter(Boolean)
   )].sort();
+  const officialProducts = getOfficialProducts(stockRows);
   const ventasByProduct = groupByProduct(usableHistoricalVentas);
   const bajasByProduct = groupByProduct(bajas);
   const existMap = new Map(existencias.map((e) => [e.producto, e]));
@@ -2323,8 +2349,11 @@ function calculateForecast({
 
   return stockRows.filter((s) => !isSliceProduct(s.producto) && !isPromotionalProduct(s.producto)).map((s) => {
     const product = normalizeProduct(s.producto);
-    const v = fillCompleteZeroMonths(ventasByProduct.get(product) || ventasByProduct.get(s.producto) || [], completeHistoricalMonths);
-    const b = bajasByProduct.get(product) || bajasByProduct.get(s.producto) || [];
+    const v = fillCompleteZeroMonths(
+      collectProductRecords(ventasByProduct, product, s.producto, officialProducts),
+      completeHistoricalMonths
+    );
+    const b = collectProductRecords(bajasByProduct, product, s.producto, officialProducts);
     const activePromo = findActivePromoForProductInMonth(activePromos, s.producto || product, selectedMonth);
     const rawForecastModel = calculateForecastModelForVersion(v, selectedMonth, product, modelVersion);
     const forecastModel = activePromo
@@ -2482,7 +2511,7 @@ function resolvePriorYearSeasonal(monthlyData, targetMonth, options = {}) {
     (previousOfPriorTotal > 0 && priorTotal < previousOfPriorTotal * dipRatio)
   );
 
-  if (priorTotal > 0 && !isDip) {
+  if (priorTotal > 0 && (!isDip || priorYearLooksLikeUnconfirmedFade(monthlyData, targetMonth))) {
     return {
       monthKey: priorYearMonth,
       levelFactor: 1,
@@ -2771,6 +2800,17 @@ function priorYearLooksLikeSeasonalFade(monthlyData, targetMonth) {
   return priorTotal < prevTotal * 0.85 && nextTotal > 0 && nextTotal < prevTotal * 0.9;
 }
 
+// Caída fuerte sin mes siguiente en muestra: GELATINA FRESA $150 ago 2025
+// (80 vs jul 420) no es un dip atípico a "corregir" hacia el vecino.
+function priorYearLooksLikeUnconfirmedFade(monthlyData, targetMonth) {
+  const prior = sameMonthPreviousYear(targetMonth);
+  if (!prior) return false;
+  const priorTotal = monthTotalFromData(monthlyData, prior);
+  const prevTotal = monthTotalFromData(monthlyData, previousMonthKey(prior));
+  const nextTotal = monthTotalFromData(monthlyData, nextMonthKey(prior));
+  return priorTotal > 0 && prevTotal > 0 && nextTotal <= 0 && priorTotal < prevTotal * 0.5;
+}
+
 // Impulso por SKU: si el último mes completo con diario ya corre más fuerte
 // en la segunda quincena que en la primera, el mes siguiente suele subir.
 // Junio 2026 GDE: segunda/primera ~1.12–1.34 y julio quedó corto. Agosto no
@@ -2850,16 +2890,20 @@ function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
   const median6 = median(recent6);
   const priceTagged = isPriceTaggedProduct(product);
   const regularCake = isOperationalCakeProduct(product);
-  const intermittent = !regularCake && (zeroRate6 >= 0.4 || (cv6 >= 1.2 && mean6 < 350));
   const nearZero = (value) => value <= 0.5;
+  // GELATINA FRESA $150: mayo/junio en 0 y julio vuelve (420 en 2025, 438 en 2026).
+  // No es baja: es reactivación del mismo mes del año anterior.
+  const priorYearTotal = monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
+  const seasonalReactivation = priorYearTotal > 40 && nearZero(last) && (prev == null || nearZero(prev));
+  const intermittent = !regularCake && !seasonalReactivation && (zeroRate6 >= 0.4 || (cv6 >= 1.2 && mean6 < 350));
 
   let targetTotal = modelTotal;
   let reason = "";
 
-  if (recent3.length >= 2 && nearZero(last) && nearZero(prev)) {
+  if (recent3.length >= 2 && nearZero(last) && nearZero(prev) && !seasonalReactivation) {
     targetTotal = 0;
     reason = "sin venta en 2 meses";
-  } else if (nearZero(last) && modelTotal > 10) {
+  } else if (nearZero(last) && modelTotal > 10 && !seasonalReactivation) {
     const softCap = prev != null && prev > 0 ? Math.min(prev * 0.25, 25) : 0;
     targetTotal = Math.min(modelTotal, softCap);
     reason = "último mes en cero";
@@ -2937,8 +2981,11 @@ function actualFromMap(actualMap, product, original) {
   if (!actualMap || typeof actualMap.entries !== "function") return null;
   let sum = 0;
   let found = false;
+  const productNorm = normalizeProduct(product);
+  const originalNorm = original ? normalizeProduct(original) : "";
   for (const [key, value] of actualMap.entries()) {
-    if (normalizeProduct(key) === product || key === product || (original && key === original)) {
+    const keyNorm = normalizeProduct(key);
+    if (keyNorm === productNorm || key === product || (original && (key === original || keyNorm === originalNorm))) {
       sum += toNumber(value);
       found = true;
     }
@@ -3509,7 +3556,25 @@ function calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, 
   const candidates = buildForecastCandidates(buildMonthlyForecastData(records), selectedMonth, forecastOptions);
   const seasonal = candidates.get("Estacional-reciente") || candidates.get("Mismo mes año anterior");
   const recent = candidates.get("Último mes por día") || candidates.get("Último total mensual");
-  if (!seasonal || !recent || recent.total <= 0 || Math.abs(seasonal.total - recent.total) / recent.total < 0.08) {
+  if (!seasonal) return legacy;
+  // Hueco reciente (GELATINA FRESA $150 may–jun = 0) no debe tirar el
+  // mismo mes del año anterior si ESE mes sí vendió. Un proxy de vecinos
+  // no cuenta: CAJITA FELIZ no tiene julio 2025 y debe seguir en 0.
+  if (!recent || recent.total <= 0.5) {
+    const monthlyData = buildMonthlyForecastData(records);
+    const priorYearTotal = monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
+    const sameMonth = candidates.get("Mismo mes año anterior") || seasonal;
+    if (priorYearTotal > 40 && sameMonth.total > 10) {
+      return {
+        ...legacy,
+        averages: sameMonth.averages,
+        method: "Reactivación estacional",
+        recentMonths: [...new Set([...legacy.recentMonths, ...sameMonth.sourceMonths])],
+      };
+    }
+    return legacy;
+  }
+  if (Math.abs(seasonal.total - recent.total) / recent.total < 0.08) {
     return legacy;
   }
   let weight = seasonalWeight;
@@ -3580,7 +3645,7 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
     const options = forecastTuningOptions(version);
     const category = productCategory(product);
     const seasonalWeight = ["Otros", "Mini medianos"].includes(category) ? 0.5 : 0.75;
-    if (category === "Pasteles grandes" || category === "Pasteles medianos" || category === "Pasteles chicos") {
+    if (category === "Pasteles grandes" || category === "Pasteles medianos" || category === "Pasteles chicos" || category === "Mini medianos") {
       const monthlyData = buildMonthlyForecastData(records);
       const latest = previousMonthKey(selectedMonth);
       const latestData = latest ? monthlyData.get(latest) : null;
@@ -3591,16 +3656,19 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
         latest &&
         !String(latest).endsWith("-05")
       );
+      const seasonalFade = priorYearLooksLikeSeasonalFade(monthlyData, selectedMonth);
+      // Impulso por SKU si ESE producto aceleró en la 2ª quincena. No es un
+      // empuje de categoría: FRUTAS MED sin diario no se mueve. Gelatinas
+      // quedan fuera: en jun–ago el diario aceleró y julio quedó plano.
+      const allowMomentum = (
+        category === "Pasteles grandes"
+        || category === "Pasteles medianos"
+        || category === "Mini medianos"
+      ) && hasRecentDaily && !seasonalFade;
       const cakeOptions = {
         ...options,
         dipRatio: 0.92,
-        // Impulso de 2ª quincena solo en GDE (PR #5). MED/CH heredan el umbral
-        // de caída atípica pero no el impulso, para no disparar FRUTAS MED.
-        dampenDecline: category === "Pasteles grandes"
-          && hasRecentDaily
-          && !priorYearLooksLikeSeasonalFade(monthlyData, selectedMonth)
-          ? 0.4
-          : undefined,
+        dampenDecline: category === "Pasteles grandes" && allowMomentum ? 0.4 : undefined,
         momentumStrength: 0.4,
         momentumCap: 1.12,
         momentumTrigger: 1.1,
@@ -3613,7 +3681,7 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
             cakeOptions
           )
         : calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, cakeOptions);
-      return category === "Pasteles grandes"
+      return allowMomentum
         ? applyRecentMomentum(model, records, selectedMonth, cakeOptions)
         : model;
     }
@@ -8894,6 +8962,7 @@ export {
   computeEventCarryoverScale,
   calendarEventForMonth,
   normalizeProduct,
+  productMatchKey,
   isPriceTaggedProduct,
   isPromotionalProduct,
   isOperationalCakeProduct,
