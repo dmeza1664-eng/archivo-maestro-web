@@ -3384,6 +3384,38 @@ function computeEventCarryoverScale(monthlyData, sourceMonth, targetMonth) {
   return clamp(neighborMed / sourceTotal, 0.72, 1);
 }
 
+// El impulso de 2ª quincena solo vale para el mes siguiente. Si junio
+// aceleró y julio saltó, agosto no debe copiar ese salto como piso nuevo
+// cuando el mismo mes del año anterior ya estaba en el nivel pre-impulso.
+// M & M GDE julio 324 ≈ agosto 2025 324: es el piso estacional, no un pico.
+function computeImpulseCarryoverScale(monthlyData, sourceMonth, targetMonth) {
+  if (!sourceMonth || !targetMonth) return 1;
+  if (nextMonthKey(sourceMonth) !== targetMonth) return 1;
+  if (calendarEventForMonth(sourceMonth)) return 1;
+
+  const accelMonth = previousMonthKey(sourceMonth);
+  if (!accelMonth || String(accelMonth).endsWith("-05")) return 1;
+  const accelData = monthlyData.get(accelMonth);
+  if (!accelData || accelData.filledFromMonthlyTotal) return 1;
+  if ((accelData.valuesByDate?.size || 0) < 20) return 1;
+  const { first, second, firstDays, secondDays } = monthHalfTotals(accelData);
+  if (firstDays < 8 || secondDays < 8 || first < 20 || second < 20) return 1;
+  if (!(second / first >= 1.1)) return 1;
+
+  const sourceTotal = monthTotalFromData(monthlyData, sourceMonth);
+  const accelTotal = monthTotalFromData(monthlyData, accelMonth);
+  const targetPriorYear = monthTotalFromData(monthlyData, sameMonthPreviousYear(targetMonth));
+  if (!(sourceTotal > 0) || !(accelTotal > 0)) return 1;
+  if (sourceTotal <= accelTotal * 1.08) return 1;
+  if (targetPriorYear > 0 && sourceTotal <= targetPriorYear * 1.08) return 1;
+
+  const baseline = targetPriorYear > 0
+    ? median([accelTotal, targetPriorYear].filter((value) => value > 0))
+    : accelTotal;
+  if (!(baseline > 0) || sourceTotal <= baseline * 1.08) return 1;
+  return clamp(baseline / sourceTotal, 0.82, 1);
+}
+
 function monthlyDataWithoutEventCarryover(monthlyData, targetMonth) {
   const adjusted = new Map();
   for (const [monthKey, monthData] of monthlyData.entries()) {
@@ -3391,8 +3423,9 @@ function monthlyDataWithoutEventCarryover(monthlyData, targetMonth) {
       adjusted.set(monthKey, monthData);
       continue;
     }
-    const scale = computeEventCarryoverScale(monthlyData, monthKey, targetMonth);
-    adjusted.set(monthKey, scaleMonthDataForCarryover(monthData, scale));
+    const eventScale = computeEventCarryoverScale(monthlyData, monthKey, targetMonth);
+    const impulseScale = computeImpulseCarryoverScale(monthlyData, monthKey, targetMonth);
+    adjusted.set(monthKey, scaleMonthDataForCarryover(monthData, Math.min(eventScale, impulseScale)));
   }
   return adjusted;
 }
@@ -3407,6 +3440,7 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
   const latestMonth = recentMonths.at(-1);
   const targetDays = datesForMonth(targetMonth).length;
   // Nivel reciente: si mayo (Madres) es un pico, no copiarlo a junio.
+  // Tampoco copiar a agosto un julio que solo saltó por el impulso de junio.
   // Crecimiento YoY y "mismo mes año anterior" siguen en crudo.
   const recentData = monthlyDataWithoutEventCarryover(monthlyData, targetMonth);
   const candidates = new Map();
@@ -8960,6 +8994,7 @@ export {
   resolvePriorYearSeasonal,
   computeRecentMomentumFactor,
   computeEventCarryoverScale,
+  computeImpulseCarryoverScale,
   calendarEventForMonth,
   normalizeProduct,
   productMatchKey,
