@@ -341,6 +341,13 @@ async function main() {
   assert(normalizeProduct("M&M MEDIANO") === "M & M MED", "M&M MEDIANO empata con M & M MED");
   assert(normalizeProduct("M Y M GRANDE") === "M & M GDE", "M Y M GRANDE empata con M & M GDE");
   assert(normalizeProduct("PINA GRANDE") === "PINA GDE", "PINA GRANDE sigue siendo PINA GDE");
+  assert(normalizeProduct("GELATINA INDIVIDUAL FRESA") === normalizeProduct("GELATINA IND FRESA"), "INDIVIDUAL empata con IND");
+  assert(normalizeProduct("GELATINA DE PINA IND") === normalizeProduct("GELATINA PINA IND"), "GELATINA DE PINA empata sin DE");
+  assert(normalizeProduct("RED VELVET CHEESE CAKE GDE") === normalizeProduct("RED VELVET CHEESECAKE GDE"), "CHEESE CAKE empata con CHEESECAKE");
+  assert(normalizeProduct("TRES LECHES GDE") === normalizeProduct("3 LECHES GDE"), "TRES LECHES empata con 3 LECHES");
+  assert(normalizeProduct("TRES LECHES MEDIANO") === normalizeProduct("3 LECHES MED"), "TRES LECHES MEDIANO empata con 3 LECHES MED");
+  assert(normalizeProduct("PAY DE FRESA GDE") === normalizeProduct("PAY FRESA GDE"), "PAY DE FRESA no se parte al quitar DE");
+  assert(normalizeProduct("ZANAHORIA TRES LECHE MINI MEDIANO") === normalizeProduct("ZANAHORIA 3 LECHES MINI MED"), "TRES LECHE singular empata");
   assert(calendarEventForMonth("2026-05")?.id === "madres", "mayo es Día de las Madres");
   assert(calendarEventForMonth("2026-06")?.id === "padre", "junio es Día del Padre");
   assert(!calendarEventForMonth("2026-07"), "julio no es mes de evento de pastelería");
@@ -535,6 +542,28 @@ async function main() {
   });
   assert(cheesecakeForecast[0].pronosticoVenta > 0, "CHEESECAKE del catálogo debe empatar con las ventas homologadas a CHESSECAKE");
 
+  const individualGelatina = calculateForecast({
+    stockRows: [{ producto: "GELATINA IND FRESA", stock: 40, orden: 1 }],
+    historicalVentas: [monthClose("2026-06", "GELATINA INDIVIDUAL FRESA", 816)],
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 10,
+  });
+  assert(individualGelatina[0].pronosticoVenta > 400, `INDIVIDUAL debe alimentar GELATINA IND FRESA (fc ${individualGelatina[0].pronosticoVenta.toFixed(1)})`);
+
+  const cheeseCakeVelvet = calculateForecast({
+    stockRows: [{ producto: "RED VELVET CHEESE CAKE GDE", stock: 20, orden: 1 }],
+    historicalVentas: [monthClose("2026-06", "RED VELVET CHEESECAKE GDE", 180)],
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 10,
+  });
+  assert(cheeseCakeVelvet[0].pronosticoVenta > 80, `CHEESE CAKE del catálogo debe empatar con CHEESECAKE de ventas (fc ${cheeseCakeVelvet[0].pronosticoVenta.toFixed(1)})`);
+
   const rankedErrors = analyzeForecastProductErrors([
     { producto: "FRUTAS GDE", forecast: 400, actual: 520 },
     { producto: "GELATINA IND FRESA", forecast: 200, actual: 205 },
@@ -675,6 +704,38 @@ async function main() {
     dailyBufferPct: 0,
   });
   assert(cajitaJuly[0].pronosticoVenta <= 5, `CAJITA FELIZ con junio en cero no debe inventar volumen (fc ${cajitaJuly[0].pronosticoVenta.toFixed(1)})`);
+
+  const dollarGelatinaHistory = [
+    monthClose("2025-04", "GELATINA FRESA $150", 400),
+    monthClose("2025-05", "GELATINA FRESA $150", 0),
+    monthClose("2025-06", "GELATINA FRESA $150", 0),
+    monthClose("2025-07", "GELATINA FRESA $150", 420),
+    monthClose("2025-08", "GELATINA FRESA $150", 80),
+    monthClose("2026-04", "GELATINA FRESA $150", 410),
+    monthClose("2026-05", "GELATINA FRESA $150", 0),
+    monthClose("2026-06", "GELATINA FRESA $150", 0),
+    monthClose("2026-07", "GELATINA FRESA $150", 438),
+  ];
+  const dollarJuly = calculateForecast({
+    stockRows: [{ producto: "GELATINA FRESA $150", stock: 20, orden: 5 }],
+    historicalVentas: dollarGelatinaHistory.filter((row) => monthKey(row) < "2026-07"),
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-07",
+    dailyBufferPct: 0,
+  });
+  const dollarAugust = calculateForecast({
+    stockRows: [{ producto: "GELATINA FRESA $150", stock: 20, orden: 5 }],
+    historicalVentas: dollarGelatinaHistory,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-08",
+    dailyBufferPct: 0,
+  });
+  assert(dollarJuly[0].pronosticoVenta > 300, `GELATINA $150 debe reactivar con julio 2025, no ir a 0 (fc ${dollarJuly[0].pronosticoVenta.toFixed(1)})`);
+  assert(dollarAugust[0].pronosticoVenta < 150, `GELATINA $150 agosto no debe inflar el fade de 80 (fc ${dollarAugust[0].pronosticoVenta.toFixed(1)})`);
 
   const dormantHistory = [
     monthClose("2026-02", "RAMO FLORAL 12CM 3 CAPAS", 84),
