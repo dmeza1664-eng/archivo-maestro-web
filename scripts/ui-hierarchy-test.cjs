@@ -14,6 +14,12 @@ assert.match(app, /Más opciones/, "Usuarios y filtros del Excel mensual viven e
 assert.match(app, /secondary-tools-heading/, "El seguimiento queda agrupado como secundario.");
 assert.match(app, /Paso 1 · Datos/, "La carga de datos es el primer paso visible.");
 assert.match(app, /Paso 2 · Salud/, "La salud del pronóstico es el segundo paso visible.");
+assert.match(app, /Control del pronóstico/, "El WAPE automático vive en Salud, no en un script.");
+assert.match(app, /WAPE de meses cerrados/, "El control muestra WAPE por mes cerrado.");
+assert.match(app, /WAPE ponderado/, "El WAPE ponderado tipo jun–ago es visible para el operador.");
+assert.match(app, /ForecastAccuracyPanel/, "La tabla de WAPE está en el Paso 2.");
+assert.match(app, /Mes congelado|está congelado/, "Un mes congelado se declara en la UI.");
+assert.match(app, /no cambian si cargas más datos/, "El freeze avisa que planta no deriva en silencio.");
 assert.match(app, /Paso 3 · Planta/, "La tabla diaria es el tercer paso visible.");
 assert.match(app, /className="daily-stock-panel"/, "El inventario diario vive en Planta, no enterrado en Más archivos.");
 assert.match(app, /Inventario del día/, "La captura de stock diario usa etiqueta en español.");

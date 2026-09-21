@@ -3074,10 +3074,33 @@ function summarizeForecastAccuracy(rows) {
     products: rows.length,
     actual,
     forecast,
+    absoluteError,
     wape: actual > 0 ? (absoluteError / actual) * 100 : null,
     mae: rows.length ? absoluteError / rows.length : null,
     inside15: rows.filter((row) => Math.abs(row.actual - row.forecast) <= 15).length,
   };
+}
+
+function backtestAbsoluteError(row) {
+  if (Number.isFinite(row?.absoluteError)) return Number(row.absoluteError);
+  if (Number.isFinite(row?.wape) && Number(row?.actual) > 0) {
+    return (Number(row.wape) / 100) * Number(row.actual);
+  }
+  return 0;
+}
+
+function weightedWapeFromBacktests(backtests = []) {
+  const usable = (backtests || []).filter((row) => Number(row?.actual) > 0);
+  const actual = usable.reduce((sum, row) => sum + toNumber(row.actual), 0);
+  const absoluteError = usable.reduce((sum, row) => sum + backtestAbsoluteError(row), 0);
+  return actual > 0 ? (absoluteError / actual) * 100 : null;
+}
+
+function describeAccuracyWindow(backtests = []) {
+  const months = [...new Set((backtests || []).map((row) => row.month).filter(Boolean))].sort();
+  if (!months.length) return "";
+  if (months.length === 1) return displayMonthLabel(months[0]);
+  return `${shortMonthLabel(months[0])}–${shortMonthLabel(months[months.length - 1])}`;
 }
 
 function actualFromMap(actualMap, product, original) {
@@ -4532,6 +4555,144 @@ function buildOperationalForecastScenario(forecastRows, marginPct = OPERATIONAL_
   });
 }
 
+function withForecastDisplayDefaults(row) {
+  const pronosticoVenta = toNumber(row.pronosticoVenta ?? row.pronosticoBase);
+  return {
+    promedioHistorico: 0,
+    promedioDiario: 0,
+    registrosHistoricos: 0,
+    promedioLunes: 0,
+    promedioMartes: 0,
+    promedioMiercoles: 0,
+    promedioJueves: 0,
+    promedioViernes: 0,
+    promedioSabado: 0,
+    promedioDomingo: 0,
+    tasaBajas: 0,
+    bajasEsperadas: 0,
+    colchonOperativo: 0,
+    baseConColchon: pronosticoVenta,
+    reglaOperativa: "",
+    produccionSugerida: 0,
+    inventarioObjetivo: 0,
+    produccionBalanceada: 0,
+    totalSuc: 0,
+    cf: 0,
+    sumaSucCf: 0,
+    produccionRecomendada: 0,
+    tendenciaAplicada: row.tendenciaAplicada,
+    mesesUsados: row.mesesUsados || "",
+    metodoPronostico: row.metodoPronostico || "",
+    catalogCleanup: "",
+    promoActiva: false,
+    promoEtiqueta: "",
+    produccionReal: 0,
+    hasRealData: false,
+    diferenciaReal: 0,
+    precision: null,
+    confianza: 0,
+    estatus: "Sin dato real",
+    ...row,
+    pronosticoVenta,
+    demandaPronosticada: toNumber(row.demandaPronosticada ?? pronosticoVenta),
+  };
+}
+
+function snapshotForecastRowsForFreeze(forecastRows) {
+  return (forecastRows || []).map((row) => ({
+    producto: row.producto,
+    orden: row.orden,
+    promedioHistorico: toNumber(row.promedioHistorico),
+    promedioDiario: toNumber(row.promedioDiario),
+    registrosHistoricos: toNumber(row.registrosHistoricos),
+    promedioLunes: toNumber(row.promedioLunes),
+    promedioMartes: toNumber(row.promedioMartes),
+    promedioMiercoles: toNumber(row.promedioMiercoles),
+    promedioJueves: toNumber(row.promedioJueves),
+    promedioViernes: toNumber(row.promedioViernes),
+    promedioSabado: toNumber(row.promedioSabado),
+    promedioDomingo: toNumber(row.promedioDomingo),
+    demandaPronosticada: toNumber(row.demandaPronosticada ?? row.pronosticoVenta),
+    pronosticoVenta: toNumber(row.pronosticoVenta),
+    tasaBajas: toNumber(row.tasaBajas),
+    bajasEsperadas: toNumber(row.bajasEsperadas),
+    colchonOperativo: toNumber(row.colchonOperativo),
+    baseConColchon: toNumber(row.baseConColchon),
+    reglaOperativa: row.reglaOperativa || "",
+    produccionSugerida: toNumber(row.produccionSugerida),
+    inventarioObjetivo: toNumber(row.inventarioObjetivo),
+    tendenciaAplicada: row.tendenciaAplicada,
+    mesesUsados: row.mesesUsados,
+    metodoPronostico: row.metodoPronostico,
+    catalogCleanup: row.catalogCleanup || "",
+    promoActiva: Boolean(row.promoActiva),
+    promoEtiqueta: row.promoEtiqueta || "",
+  }));
+}
+
+function hydrateForecastFromOperationalRows(operationalRows, selectedMonth) {
+  const days = datesForMonth(selectedMonth).length || 1;
+  return (operationalRows || []).map((row) => {
+    const pronosticoVenta = toNumber(row.pronosticoBase ?? row.pronosticoVenta);
+    const daily = days > 0 ? pronosticoVenta / days : 0;
+    return withForecastDisplayDefaults({
+      producto: row.producto,
+      orden: row.orden,
+      promedioLunes: daily,
+      promedioMartes: daily,
+      promedioMiercoles: daily,
+      promedioJueves: daily,
+      promedioViernes: daily,
+      promedioSabado: daily,
+      promedioDomingo: daily,
+      promedioDiario: daily,
+      demandaPronosticada: pronosticoVenta,
+      pronosticoVenta,
+      baseConColchon: pronosticoVenta,
+      produccionSugerida: toNumber(row.produccionSugerida) || getProduccionSugerida(row.producto, pronosticoVenta * (1 + 10 / 100)),
+      metodoPronostico: row.metodoPronostico,
+      tendenciaAplicada: row.tendenciaAplicada,
+      mesesUsados: row.mesesUsados,
+    });
+  });
+}
+
+function resolveEffectiveForecast({ liveForecast = [], frozenSnapshot = null, selectedMonth = "" } = {}) {
+  const period = frozenSnapshot?.periodo || frozenSnapshot?.contenido?.selectedMonth || "";
+  const version = frozenSnapshot?.version || null;
+  if (!frozenSnapshot || !selectedMonth || period !== selectedMonth) {
+    return {
+      rows: liveForecast,
+      source: "live",
+      frozenVersion: null,
+      label: "pronóstico vigente",
+    };
+  }
+  const content = frozenSnapshot.contenido || {};
+  if (Array.isArray(content.forecastRows) && content.forecastRows.length) {
+    return {
+      rows: content.forecastRows.map((row) => withForecastDisplayDefaults(row)),
+      source: "frozen",
+      frozenVersion: version,
+      label: version ? `pronóstico congelado v${version}` : "pronóstico congelado",
+    };
+  }
+  if (Array.isArray(content.rows) && content.rows.length) {
+    return {
+      rows: hydrateForecastFromOperationalRows(content.rows, selectedMonth),
+      source: "frozen-operational",
+      frozenVersion: version,
+      label: version ? `pronóstico congelado v${version}` : "pronóstico congelado",
+    };
+  }
+  return {
+    rows: liveForecast,
+    source: "live",
+    frozenVersion: version,
+    label: "pronóstico vigente",
+  };
+}
+
 const MONTHLY_REVIEW_STATUSES = ["ACTIVO", "BAJA", "BAJO PEDIDO", "ESTACIONAL"];
 
 function countCapturedProductStatuses(inputs) {
@@ -5318,6 +5479,98 @@ function FreezeReadinessStrip({ readiness, selectedMonth }) {
       </div>
       {alert && (
         <p className={`freeze-strip-alert ${readiness.canFreeze ? "warn" : "blocked"}`}>{alert.message}</p>
+      )}
+    </section>
+  );
+}
+
+function FrozenMonthBanner({ forecastLock, selectedMonth }) {
+  if (!selectedMonth || !forecastLock || forecastLock.source === "live") return null;
+  return (
+    <p className="freeze-strip-alert ok month-frozen-banner">
+      {displayMonthLabel(selectedMonth)} está congelado{forecastLock.frozenVersion ? ` (v${forecastLock.frozenVersion})` : ""}.
+      El pronóstico y las sugerencias de planta de este mes no cambian si cargas más datos.
+    </p>
+  );
+}
+
+function ForecastAccuracyPanel({ health, selectedMonth }) {
+  const backtests = health?.backtests || [];
+  const [focusMonth, setFocusMonth] = useState("");
+  const selected = backtests.find((row) => row.month === focusMonth) || health?.latestBacktest || null;
+  const weighted = weightedWapeFromBacktests(backtests);
+  const windowLabel = describeAccuracyWindow(backtests);
+  const weightedTone = forecastAccuracyTone(weighted);
+  if (!selectedMonth) return null;
+
+  return (
+    <section className="forecast-accuracy-panel">
+      <div className="forecast-accuracy-heading">
+        <div>
+          <span className="eyebrow">Control del pronóstico</span>
+          <strong>WAPE de meses cerrados</strong>
+          <p>Misma cuenta que las pruebas de exactitud: oculta el mes, pronostica y compara contra la venta cargada.</p>
+        </div>
+        <div className={`forecast-accuracy-weighted ${weightedTone}`}>
+          <strong>{weighted == null ? "Sin cierre" : `${weighted.toFixed(1)}%`}</strong>
+          <span>{windowLabel ? `WAPE ponderado ${windowLabel}` : "WAPE ponderado"}</span>
+        </div>
+      </div>
+      {backtests.length ? (
+        <>
+          <div className="forecast-accuracy-months" role="tablist" aria-label="Mes cerrado">
+            {backtests.map((row) => {
+              const active = selected?.month === row.month;
+              return (
+                <button
+                  key={row.month}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={`forecast-accuracy-month ${forecastAccuracyTone(row.wape)}${active ? " active" : ""}`}
+                  onClick={() => setFocusMonth(row.month)}
+                >
+                  <strong>{row.wape == null ? "—" : `${row.wape.toFixed(1)}%`}</strong>
+                  <span>{shortMonthLabel(row.month)}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="forecast-accuracy-table-wrap">
+            <table className="forecast-accuracy-table">
+              <thead>
+                <tr>
+                  <th>Mes</th>
+                  <th>Venta real</th>
+                  <th>Pronóstico</th>
+                  <th>WAPE</th>
+                  <th>MAE</th>
+                  <th>±15</th>
+                  <th>Peor producto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {backtests.map((row) => {
+                  const worst = row.topErrors?.[0];
+                  const active = selected?.month === row.month;
+                  return (
+                    <tr key={row.month} className={active ? "is-selected" : undefined}>
+                      <td>{displayMonthLabel(row.month)}</td>
+                      <td>{formatNumber(row.actual, 0)}</td>
+                      <td>{formatNumber(row.forecast, 0)}</td>
+                      <td>{row.wape == null ? "—" : formatPercent(row.wape, 1)}</td>
+                      <td>{row.mae == null ? "—" : formatNumber(row.mae, 1)}</td>
+                      <td>{`${row.inside15 || 0}/${row.products || 0}`}</td>
+                      <td>{worst ? `${worst.producto} (${worst.error > 0 ? "+" : ""}${Math.round(worst.error)})` : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <p className="forecast-accuracy-empty">Carga ventas de meses anteriores para ver el WAPE automático. No hace falta correr scripts.</p>
       )}
     </section>
   );
@@ -6485,7 +6738,7 @@ function Dashboard({ session, onLogout }) {
     return [...keys].sort();
   }, [historicalVentas]);
 
-  const forecast = useMemo(
+  const liveForecast = useMemo(
     () =>
       calculateForecast({
         stockRows,
@@ -6508,6 +6761,16 @@ function Dashboard({ session, onLogout }) {
       activePromos,
     ]
   );
+  const effectiveForecastState = useMemo(
+    () =>
+      resolveEffectiveForecast({
+        liveForecast,
+        frozenSnapshot: monthlyReviewSource,
+        selectedMonth,
+      }),
+    [liveForecast, monthlyReviewSource, selectedMonth]
+  );
+  const forecast = effectiveForecastState.rows;
   const operationalScenario = useMemo(
     () => buildOperationalForecastScenario(forecast),
     [forecast]
@@ -6560,13 +6823,13 @@ function Dashboard({ session, onLogout }) {
   const monthlyReviewRows = useMemo(
     () => buildMonthlyReviewRows({
       sourceRows: monthlyReviewSourceRows,
-      forecastRows: forecast,
+      forecastRows: liveForecast,
       historicalVentas,
       loadedExistencias: effectiveExistencias,
       inputs: monthlyReview.inputs,
       inventoryUsable: inventoryCutoff.status === "fresh",
     }),
-    [monthlyReviewSourceRows, forecast, historicalVentas, effectiveExistencias, monthlyReview.inputs, inventoryCutoff.status]
+    [monthlyReviewSourceRows, liveForecast, historicalVentas, effectiveExistencias, monthlyReview.inputs, inventoryCutoff.status]
   );
   const filteredMonthlyReviewRows = useMemo(
     () => monthlyReviewRows.filter((row) => {
@@ -6730,7 +6993,7 @@ function Dashboard({ session, onLogout }) {
   }
 
   async function freezeAndExportForecast() {
-    if (!operationalScenario.length || forecastFreezing) return;
+    if (!liveForecast.length || forecastFreezing) return;
     if (!freezeReadiness.canFreeze) {
       setToast({
         tone: "warning",
@@ -6747,14 +7010,16 @@ function Dashboard({ session, onLogout }) {
         workspaceVersion = saved.version;
       }
       const frozenAt = new Date().toISOString();
+      const operationalRows = buildOperationalForecastScenario(liveForecast);
       const frozenContent = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         frozenAt,
         selectedMonth,
         modelVersion: FORECAST_MODEL_VERSION,
         operationalMarginPct: OPERATIONAL_MARGIN_PCT,
         source: { workspaceVersion, files },
-        rows: operationalScenario,
+        rows: operationalRows,
+        forecastRows: snapshotForecastRowsForFreeze(liveForecast),
       };
       const response = await apiRequest("/api/snapshots/forecast-frozen", {
         token: session.token,
@@ -6772,7 +7037,7 @@ function Dashboard({ session, onLogout }) {
         contenido: frozenContent,
       });
       exportFrozenForecast({
-        rows: operationalScenario,
+        rows: operationalRows,
         selectedMonth,
         frozenAt,
         snapshotVersion: response.version,
@@ -7029,7 +7294,7 @@ function Dashboard({ session, onLogout }) {
       <main className="main">
         <header className="top">
           <div>
-            <span className="eyebrow">Archivo Maestro</span>
+              <span className="eyebrow">Archivo Maestro</span>
             <h2>Decisión de planta</h2>
             <p>Carga datos, revisa la salud del pronóstico y congela la producción sugerida del mes.</p>
           </div>
@@ -7045,6 +7310,11 @@ function Dashboard({ session, onLogout }) {
                   setHasUnsavedChanges(true);
                 }}
               />
+              {effectiveForecastState.source !== "live" && (
+                <span className="pill ok month-frozen-chip">
+                  Congelado{effectiveForecastState.frozenVersion ? ` v${effectiveForecastState.frozenVersion}` : ""}
+                </span>
+              )}
             </label>
             <div className="top-actions">
               <div className="session-user">
@@ -7632,7 +7902,7 @@ function Dashboard({ session, onLogout }) {
             {!monthlyCloseMatchesSelectedMonth && monthlyClosePeriod
               ? `El cierre cargado corresponde a ${monthlyClosePeriod}. Selecciona ese mes o carga los archivos de ${selectedMonth}.`
               : monthlyClose.salesLoaded
-                ? `Cierre ${selectedMonth}: ${formatNumber(monthlyClose.summary.productos)} productos comparados contra el pronóstico vigente.`
+                ? `Cierre ${selectedMonth}: ${formatNumber(monthlyClose.summary.productos)} productos comparados contra el ${effectiveForecastState.label}.`
                 : "Carga las ventas mensuales para activar WAPE, MAE y cumplimiento. La producción es complementaria."}
           </p>
 
@@ -8151,12 +8421,14 @@ function Dashboard({ session, onLogout }) {
             <div>
               <span className="eyebrow">Paso 2 · Salud</span>
               <h3>Pronóstico listo para planta</h3>
-              <p>Revisa WAPE, sync y el total sugerido antes de congelar. El detalle de error queda un clic abajo.</p>
+              <p>Revisa el WAPE de meses cerrados, el sync y el total sugerido antes de congelar. Un mes congelado ya no se recalcula en silencio.</p>
             </div>
             <strong className="decision-month-chip">{selectedMonth || "Sin mes"} · margen {dailyBufferPct}%</strong>
           </div>
 
           <ForecastHealthStrip health={forecastHealth} selectedMonth={selectedMonth} />
+          <ForecastAccuracyPanel health={forecastHealth} selectedMonth={selectedMonth} />
+          <FrozenMonthBanner forecastLock={effectiveForecastState} selectedMonth={selectedMonth} />
           <FreezeReadinessStrip readiness={freezeReadiness} selectedMonth={selectedMonth} />
 
           <section className="executive-summary-kpis decision-kpis">
@@ -8170,7 +8442,9 @@ function Dashboard({ session, onLogout }) {
               icon={BarChart3}
               label="Pronóstico de venta mensual"
               value={formatNumber(dailySummary.pronosticoVentaMensual, 0)}
-              caption="Suma de pronósticos diarios"
+              caption={effectiveForecastState.source === "live"
+                ? "Suma de pronósticos diarios"
+                : `Fijado: ${effectiveForecastState.label}`}
             />
             <KpiCard
               icon={ShieldCheck}
@@ -9054,6 +9328,12 @@ export {
   buildForecastHealth,
   buildMonthlyCloseSummary,
   buildOperationalForecastScenario,
+  describeAccuracyWindow,
+  hydrateForecastFromOperationalRows,
+  resolveEffectiveForecast,
+  snapshotForecastRowsForFreeze,
+  summarizeForecastAccuracy,
+  weightedWapeFromBacktests,
   buildSalesMonthCoverage,
   buildWeeklyProgress,
   calculateForecast,
