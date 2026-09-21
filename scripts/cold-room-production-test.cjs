@@ -147,6 +147,88 @@ async function main() {
   assert(locationCold.branchStock.find((row) => row.sucursal === "Centro")?.cantidad === 3, "la sucursal real sigue en sucursales");
   assert(!locationCold.branchStock.some((row) => /cuarto/i.test(row.sucursal)), "CF no contamina el pedido de sucursales");
 
+  const fullRaiz = parseDailyInventory(workbookFromSheets({
+    "TOTAL A TENER SUC.(EXIST.+DIST)": [
+      ["PRODUCTO", "SUC", "STOCK"],
+      ["FRUTAS GDE", 2, 40],
+      ["GELATINA IND FRESA", 2, 80],
+    ],
+    "STOCK DE SUCURSALES": [
+      ["PRODUCTO", "STOCK"],
+      ["FRUTAS GDE", 40],
+    ],
+    "EXIST. SUCURSALES Y RESTANTE CF": [
+      ["PRODUCTO", "Centro", "Norte", "RESTANTE"],
+      ["FRUTAS GDE", 8, 2, 5],
+      ["GELATINA IND FRESA", 0, 6, 0],
+    ],
+    "TOTAL LOCALES": [
+      ["PRODUCTO", "STOCK"],
+      ["FRUTAS GDE", 99],
+    ],
+    "TOTAL FORANEAS": [
+      ["PRODUCTO", "CANTIDAD"],
+      ["FRUTAS GDE", 77],
+    ],
+    "TOTAL GRAL": [
+      ["PRODUCTO", "TOTAL GRAL"],
+      ["FRUTAS GDE", 120],
+    ],
+  }), "2026-09-21");
+  assert(!fullRaiz.branchStock.some((row) => /total|tener|locales|forane|gral|suma|stock/i.test(row.sucursal)), "TOTAL A TENER, TOTAL GRAL, LOCALES/FORANEAS y sumas no son sucursal");
+  assert(fullRaiz.branchStock.find((row) => row.producto === "FRUTAS GDE" && row.sucursal === "Centro")?.cantidad === 8, "el workbook RAIZ sigue leyendo sucursales reales");
+  assert(fullRaiz.branchStock.find((row) => row.producto === "FRUTAS GDE" && row.sucursal === "Norte")?.cantidad === 2, "Norte del cruce RAIZ no se pierde");
+  assert(fullRaiz.coldRoom.find((row) => row.producto === "FRUTAS GDE")?.cantidad === 5, "RESTANTE sin CF en EXIST. SUCURSALES entra a cuarto frío");
+  assert(fullRaiz.coldRoom.find((row) => row.producto === "GELATINA IND FRESA")?.cantidad === 0, "RESTANTE 0 de la hoja CF se conserva");
+  assert(!fullRaiz.branchStock.some((row) => row.cantidad === 40 || row.cantidad === 99 || row.cantidad === 77 || row.cantidad === 120), "las metas y rollups no se cuelan como inventario");
+
+  const restanteSheet = parseDailyColdRoom(workbookFromSheets({
+    RESTANTE: [
+      ["Producto", "Cantidad"],
+      ["BOLILLO", 4],
+    ],
+  }), "2026-09-21");
+  assert(restanteSheet.find((row) => row.producto === "BOLILLO")?.cantidad === 4, "hoja RESTANTE sin CF entra a cuarto frío");
+  assert(parseDailyBranchStock(workbookFromSheets({
+    RESTANTE: [
+      ["Producto", "Cantidad"],
+      ["BOLILLO", 4],
+    ],
+  }), "2026-09-21").length === 0, "la hoja RESTANTE no se guarda como sucursal");
+
+  const restanteCfCol = parseDailyInventory(workbookFromSheets({
+    "EXIST. SUCURSALES Y RESTANTE CF": [
+      ["Producto", "Centro", "Norte", "RESTANTE CF"],
+      ["MOKA GDE", 3, 1, 7],
+    ],
+  }), "2026-09-20");
+  assert(restanteCfCol.branchStock.find((row) => row.sucursal === "Centro")?.cantidad === 3, "sucursales de EXIST. SUCURSALES siguen en el cruce");
+  assert(restanteCfCol.coldRoom.find((row) => row.producto === "MOKA GDE")?.cantidad === 7, "columna Restante CF de esa hoja va a cuarto frío");
+  assert(!restanteCfCol.branchStock.some((row) => /restante|exist/i.test(row.sucursal)), "ni RESTANTE ni el nombre de hoja se vuelven sucursal");
+
+  const totalSucRestante = parseDailyInventory(workbookFromSheets({
+    Inventario: [
+      ["PRODUCTO", "TOTAL GRAL SUC", "RESTANTE"],
+      ["BOLILLO", 10, 2],
+    ],
+  }), "2026-09-21");
+  assert(totalSucRestante.branchStock.find((row) => row.producto === "BOLILLO")?.cantidad === 10, "patrón total suc + RESTANTE lee sucursales");
+  assert(totalSucRestante.branchStock[0].sucursal === "Sucursales", "sin cruce de tiendas el total vive como Sucursales");
+  assert(totalSucRestante.coldRoom.find((row) => row.producto === "BOLILLO")?.cantidad === 2, "RESTANTE junto a total sucursales es cuarto frío");
+
+  const catalogOnly = parseDailyInventory(workbookFromSheets({
+    "TOTAL A TENER SUC.(EXIST.+DIST)": [
+      ["PRODUCTO", "STOCK"],
+      ["BOLILLO", 113],
+    ],
+    "EXIST. SUCURSALES Y RESTANTE CF": [
+      ["PRODUCTO", "STOCK"],
+      ["BOLILLO", 80],
+    ],
+  }), "2026-09-21");
+  assert(catalogOnly.branchStock.length === 0, "fotos de catálogo TOTAL A TENER / STOCK no se importan como inventario del día");
+  assert(catalogOnly.coldRoom.length === 0, "STOCK de catálogo no se toma como restante de CF");
+
   const coldMap = mapDailyColdRoomByProductDate([
     { fecha: "2026-09-20", producto: "FRUTAS GDE", cantidad: 5 },
     { fecha: "2026-09-21", producto: "FRUTAS GDE", cantidad: 1 },
