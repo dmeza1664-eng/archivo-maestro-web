@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/parser-test.cjs && node scripts/forecast-accuracy-test.cjs && node scripts/daily-branch-stock-test.cjs && node backend/auth-security-test.js && node backend/helpers-test.js && node scripts/ui-hierarchy-test.cjs",
+    "test": "node scripts/parser-test.cjs && node scripts/forecast-accuracy-test.cjs && node scripts/daily-branch-stock-test.cjs && node scripts/cold-room-production-test.cjs && node backend/auth-security-test.js && node backend/helpers-test.js && node scripts/ui-hierarchy-test.cjs",
     "test:wape": "node scripts/run-real-wape.cjs"
   },
   "dependencies": {
