@@ -3591,6 +3591,8 @@ tbody tr:hover {
 }
 
 .month-control {
+  display: grid;
+  gap: 4px;
   min-width: 148px;
 }
 
@@ -3684,6 +3686,149 @@ tbody tr:hover {
 
 .forecast-health-more .forecast-health-errors {
   margin-top: 8px;
+}
+
+.forecast-accuracy-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+  margin: 8px 0 0;
+  padding: 12px;
+}
+
+.forecast-accuracy-heading {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.forecast-accuracy-heading p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 4px 0 0;
+}
+
+.forecast-accuracy-heading strong {
+  display: block;
+  font-size: 15px;
+}
+
+.forecast-accuracy-weighted {
+  background: var(--paper, #fff);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 132px;
+  padding: 8px 10px;
+  text-align: right;
+}
+
+.forecast-accuracy-weighted strong {
+  display: block;
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.forecast-accuracy-weighted span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.forecast-accuracy-weighted.ok strong {
+  color: var(--green);
+}
+
+.forecast-accuracy-weighted.warn strong {
+  color: #e0c36b;
+}
+
+.forecast-accuracy-weighted.blocked strong {
+  color: var(--danger);
+}
+
+.forecast-accuracy-months {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.forecast-accuracy-month {
+  background: var(--paper, #fff);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  min-width: 88px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.forecast-accuracy-month strong {
+  font-size: 15px;
+  line-height: 1.1;
+}
+
+.forecast-accuracy-month span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.forecast-accuracy-month.ok strong {
+  color: var(--green);
+}
+
+.forecast-accuracy-month.warn strong {
+  color: #e0c36b;
+}
+
+.forecast-accuracy-month.blocked strong {
+  color: var(--danger);
+}
+
+.forecast-accuracy-month.active {
+  border-color: var(--copper, #b87333);
+  box-shadow: inset 0 0 0 1px var(--copper, #b87333);
+}
+
+.forecast-accuracy-table-wrap {
+  overflow-x: auto;
+}
+
+.forecast-accuracy-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.forecast-accuracy-table th,
+.forecast-accuracy-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.forecast-accuracy-table th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.forecast-accuracy-table tr.is-selected td {
+  background: rgba(184, 115, 51, 0.08);
+}
+
+.forecast-accuracy-empty,
+.month-frozen-banner {
+  margin: 0;
+}
+
+.month-frozen-chip {
+  margin-top: 6px;
 }
 
 .required-uploads {

@@ -350,6 +350,16 @@ async function main() {
   assert(heavyJuly.wape < 6.5, `julio de SKU pesados debe bajar del ~12.4% (WAPE ${heavyJuly.wape.toFixed(2)}%)`);
   assert(heavyAugust.wape < 6, `agosto de SKU pesados no debe dispararse (WAPE ${heavyAugust.wape.toFixed(2)}%)`);
   assert(heavyWeighted < 5.5, `WAPE ponderado jun-ago debe bajar del ~8.9% (${heavyWeighted.toFixed(2)}%)`);
+  const sharedWeighted = app.weightedWapeFromBacktests([heavyJune, heavyJuly, heavyAugust]);
+  assert(
+    sharedWeighted != null && Math.abs(sharedWeighted - heavyWeighted) < 1e-9,
+    `Salud debe usar la misma suma de errores que las pruebas (${sharedWeighted} vs ${heavyWeighted})`
+  );
+  assert(app.describeAccuracyWindow([
+    { month: "2026-06" },
+    { month: "2026-07" },
+    { month: "2026-08" },
+  ]).includes("–"), "la ventana jun–ago debe etiquetarse con el primer y último mes");
 
   const heavyCheeseJune = heavyPick(heavyJune, "CHEESECAKE GDE");
   const heavyNutelaJune = heavyPick(heavyJune, "NUTELA GDE");

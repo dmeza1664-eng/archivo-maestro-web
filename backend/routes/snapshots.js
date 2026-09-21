@@ -65,6 +65,15 @@ function validateFrozenContent(contenido, periodo) {
     if (!row || typeof row !== 'object') throw httpError(400, 'Hay una fila de congelado inválida');
     assertFiniteNumber(row.pronosticoBase ?? row.pronosticoVenta ?? 0, `Pronóstico de ${row.producto || 'producto'}`);
   }
+  if (contenido.forecastRows !== undefined) {
+    if (!Array.isArray(contenido.forecastRows) || !contenido.forecastRows.length) {
+      throw httpError(400, 'El pronóstico congelado debe incluir las filas del modelo o omitir forecastRows');
+    }
+    for (const row of contenido.forecastRows) {
+      if (!row || typeof row !== 'object') throw httpError(400, 'Hay una fila de pronóstico congelado inválida');
+      assertFiniteNumber(row.pronosticoVenta ?? row.pronosticoBase ?? 0, `Pronóstico de ${row.producto || 'producto'}`);
+    }
+  }
 }
 
 function validateMonthlyReviewContent(contenido, periodo, user) {
