@@ -716,6 +716,82 @@ async function main() {
   assert(leftDuraznoAugust.absoluteError < 60, `agosto DURAZNO no hereda el salto de julio (abs ${leftDuraznoAugust.absoluteError.toFixed(1)})`);
   assert(!/impulso reciente/i.test(leftMiniChocAugust.metodo || ""), "agosto Mini no vuelve a aplicar impulso");
 
+  // Backtest parcial 2025 (Mar–Nov, sin año anterior): los picos de un mes
+  // se copiaban al siguiente. CAJITA FELIZ abril→mayo, PETIT 3 LECHES y el
+  // kilo de galleta de Día de las Madres. Marzo de PETIT se recupera del
+  // pronóstico de abril (un mes de historia, último mes por día, calibración 1):
+  // 343.55 * 31/30 = 355. El resto son actuals publicados en el top de error.
+  const spikeStock = [
+    { producto: "MINI MEDIANO CHOCOLATE", stock: 40, orden: 1 },
+    { producto: "FRUTAS CH", stock: 30, orden: 2 },
+    { producto: "CAJITA FELIZ", stock: 10, orden: 3 },
+    { producto: "1 2 KG DE GALLETA", stock: 20, orden: 4 },
+    { producto: "PETIT 3 LECHES CHOCOLATE", stock: 20, orden: 5 },
+  ];
+  const spikeSeries = {
+    "MINI MEDIANO CHOCOLATE": {
+      "2025-03": 1143, "2025-04": 1030, "2025-05": 1268, "2025-06": 1348,
+      "2025-07": 1107, "2025-08": 1204, "2025-09": 1226, "2025-10": 1192, "2025-11": 1245,
+    },
+    "FRUTAS CH": {
+      "2025-03": 410, "2025-04": 450, "2025-05": 656, "2025-06": 529, "2025-07": 451, "2025-08": 519,
+    },
+    "CAJITA FELIZ": {
+      "2025-04": 599, "2025-05": 37, "2025-06": 0, "2025-07": 0,
+    },
+    "1 2 KG DE GALLETA": {
+      "2025-04": 226, "2025-05": 619, "2025-06": 375, "2025-07": 263, "2025-08": 285,
+    },
+    "PETIT 3 LECHES CHOCOLATE": {
+      "2025-03": 355, "2025-04": 895, "2025-05": 525,
+    },
+  };
+  const spikeVentas = [];
+  for (const [product, months] of Object.entries(spikeSeries)) {
+    for (const [month, qty] of Object.entries(months)) spikeVentas.push(monthClose(month, product, qty));
+  }
+  const spikeMonths = ["2025-05", "2025-06", "2025-07", "2025-08"];
+  const spikeByMonth = Object.fromEntries(
+    [...spikeMonths, "2025-11"].map((month) => [month, evaluateMonth(app, spikeStock, spikeVentas, month)])
+  );
+  const spikePick = (month, name) => spikeByMonth[month].rows.find((row) => row.producto === name);
+  const cajitaMay = spikePick("2025-05", "CAJITA FELIZ");
+  const petitMay = spikePick("2025-05", "PETIT 3 LECHES CHOCOLATE");
+  const galletaJune = spikePick("2025-06", "1 2 KG DE GALLETA");
+  const frutasJune = spikePick("2025-06", "FRUTAS CH");
+  const miniJuly = spikePick("2025-07", "MINI MEDIANO CHOCOLATE");
+  const miniNov = spikePick("2025-11", "MINI MEDIANO CHOCOLATE");
+  assert(cajitaMay.forecast <= 250, `mayo CAJITA FELIZ no debe copiar abril 599 (fc ${cajitaMay.forecast.toFixed(1)})`);
+  assert(cajitaMay.absoluteError < 400, `mayo CAJITA debe bajar del |e| 582 (abs ${cajitaMay.absoluteError.toFixed(1)})`);
+  assert(/pico sin soporte/i.test(cajitaMay.metodo || ""), "CAJITA mayo debe anotar el recorte de pico");
+  assert(petitMay.forecast < 650, `mayo PETIT no debe copiar abril 895 (fc ${petitMay.forecast.toFixed(1)})`);
+  assert(petitMay.forecast > 300, `mayo PETIT no debe apagarse (fc ${petitMay.forecast.toFixed(1)})`);
+  assert(petitMay.absoluteError < 250, `mayo PETIT debe bajar del |e| 504 (abs ${petitMay.absoluteError.toFixed(1)})`);
+  assert(galletaJune.forecast < 420, `junio 1/2 kg no debe arrastrar mayo 619 (fc ${galletaJune.forecast.toFixed(1)})`);
+  assert(galletaJune.absoluteError < 120, `junio 1/2 kg debe bajar del |e| 185 (abs ${galletaJune.absoluteError.toFixed(1)})`);
+  assert(frutasJune.absoluteError < 80, `junio FRUTAS CH no debe perder el resguardo de Madres (abs ${frutasJune.absoluteError.toFixed(1)})`);
+  assert(miniJuly.absoluteError < 200, `julio MINI no debe volver al overshoot 373 (abs ${miniJuly.absoluteError.toFixed(1)})`);
+  assert(miniNov.absoluteError < 80, `noviembre MINI en régimen no debe empeorar (abs ${miniNov.absoluteError.toFixed(1)})`);
+
+  const scored = [];
+  for (const month of spikeMonths) {
+    for (const row of spikeByMonth[month].rows) {
+      if ((spikeSeries[row.producto] || {})[month] == null) continue;
+      scored.push(row);
+    }
+  }
+  const spikeActual = scored.reduce((sum, row) => sum + row.actual, 0);
+  const spikeAbs = scored.reduce((sum, row) => sum + row.absoluteError, 0);
+  const spikeWape = spikeActual > 0 ? (spikeAbs / spikeActual) * 100 : null;
+  // |e| publicado en f923484 para estos mismos meses/SKU (top de error; junio
+  // MINI se recupera del acumulado: fc 1343, |e| 4.8).
+  const publishedAbs = 286.17 + 4.84 + 372.94 + 139.95
+    + 162.1 + 201.06 + 109.18 + 149.38
+    + 581.97
+    + 423.54 + 185.19 + 110.81 + 106.16
+    + 504.25;
+  assert(spikeAbs < publishedAbs - 400, `la canasta May–Ago debe bajar el |e| publicado ${publishedAbs.toFixed(0)} (ahora ${spikeAbs.toFixed(0)})`);
+
   console.log("forecast-accuracy-test ok");
   console.log(
     JSON.stringify(
@@ -753,6 +829,17 @@ async function main() {
           nutelaJuneAbs: Number(heavyNutelaJune.absoluteError.toFixed(1)),
           mmMedJuneAbs: Number(heavyMmMedJune.absoluteError.toFixed(1)),
           frutasJuly: Number(heavyFrutasJuly.forecast.toFixed(1)),
+        },
+        spike2025: {
+          wapeMayAug: spikeWape != null ? Number(spikeWape.toFixed(2)) : null,
+          absMayAug: Number(spikeAbs.toFixed(1)),
+          publishedAbs: Number(publishedAbs.toFixed(1)),
+          cajitaMay: Number(cajitaMay.forecast.toFixed(1)),
+          petitMay: Number(petitMay.forecast.toFixed(1)),
+          galletaJune: Number(galletaJune.forecast.toFixed(1)),
+          frutasJuneAbs: Number(frutasJune.absoluteError.toFixed(1)),
+          miniJulyAbs: Number(miniJuly.absoluteError.toFixed(1)),
+          miniNovAbs: Number(miniNov.absoluteError.toFixed(1)),
         },
         leftoverSkus: {
           june: Number(leftoverJune.wape.toFixed(2)),
