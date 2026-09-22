@@ -2960,6 +2960,39 @@ function monthIsInferredZero(records, monthKey) {
   return rows.length > 0 && rows.every((row) => row.inferredZeroMonth);
 }
 
+// Pico de un solo mes sin el mismo mes del año anterior: CAJITA FELIZ
+// (abril 599 → mayo 37), PETIT 3 LECHES (abril 895 → mayo 525) y el kilo
+// de galleta en Día de las Madres (mayo ~620 → junio ~375). No se copia
+// entero al mes siguiente. Una subida de pastel ~1.3× (Madres sobre el
+// mes previo) no entra: el umbral es 1.85× la mediana reciente.
+function unsupportedRecentSpikeCap({ modelTotal, last, observedHistory, monthlyData, selectedMonth, product }) {
+  if (!(modelTotal > 20) || !(last > 80) || !observedHistory?.length) return null;
+  // Si el mes que estamos pronosticando ya vendió parecido el año pasado,
+  // el nivel lo sostiene la estacionalidad y no es un pico suelto.
+  const targetLastYear = monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
+  if (targetLastYear > modelTotal * 0.75) return null;
+
+  const prior = observedHistory
+    .slice(-6, -1)
+    .map((month) => monthlyData.get(month)?.total || 0);
+  const priorPositive = prior.filter((value) => value > 0.5);
+
+  if (!priorPositive.length) {
+    // Sin línea base solo se recorta un estreno enorme de "Otros"
+    // (CAJITA FELIZ). Gelatinas, kilos de galleta y pasteles que arrancan
+    // en su nivel normal no se apagan.
+    if (productCategory(product) !== "Otros" || last < 400) return null;
+    if (!(modelTotal > last * 0.5)) return null;
+    return last * 0.35;
+  }
+
+  const priorMed = median(priorPositive);
+  if (!(priorMed > 0)) return null;
+  const spiked = last > Math.max(priorMed * 1.85, priorMed + 80);
+  if (!spiked || !(modelTotal > Math.max(priorMed * 1.35, 40))) return null;
+  return Math.max(priorMed * 1.25, Math.min(last * 0.55, priorMed * 1.9));
+}
+
 function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
   if (!model?.averages) return model;
   const modelTotal = forecastTotalFromAverages(model.averages, selectedMonth);
@@ -3053,6 +3086,19 @@ function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
         reason = reason || "venta intermitente";
       }
     }
+  }
+
+  const unsupportedCap = unsupportedRecentSpikeCap({
+    modelTotal: targetTotal,
+    last,
+    observedHistory,
+    monthlyData,
+    selectedMonth,
+    product,
+  });
+  if (unsupportedCap != null && unsupportedCap < targetTotal) {
+    targetTotal = unsupportedCap;
+    reason = reason || "no extrapolar pico sin soporte";
   }
 
   if (!(targetTotal < modelTotal * 0.98)) return model;
