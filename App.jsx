@@ -2950,6 +2950,28 @@ function applyRecentMomentum(model, records, selectedMonth, options = {}) {
   };
 }
 
+// Mayo sin el mismo mes del año anterior copia abril y, si abril quedó
+// por encima, la calibración (0.85–1.15) recorta todavía más. En minis y
+// gelatinas eso cae justo en Día de las Madres, que sube frente a abril.
+// Solo se quita el recorte; no se agrega un factor de Madres encima.
+// Con mayo del año pasado presente, la estacionalidad ya trae el evento.
+function liftColdStartMadresCalibration(model, records, selectedMonth, product) {
+  if (!model?.averages) return model;
+  if (calendarEventForMonth(selectedMonth)?.id !== "madres") return model;
+  const category = productCategory(product);
+  if (category !== "Mini medianos" && category !== "Gelatinas") return model;
+  const monthlyData = buildMonthlyForecastData(records || []);
+  if (monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth)) > 40) return model;
+  const trend = Number(model.trend);
+  if (!Number.isFinite(trend) || trend <= 0 || trend >= 0.995) return model;
+  return {
+    ...model,
+    averages: scaleForecastAverages(model.averages, 1 / trend),
+    trend: 1,
+    method: `${model.method || "Modelo"} · sin recorte pre-Madres`,
+  };
+}
+
 // Limpieza de outliers de catálogo: no inventar volumen para SKUs dormidos,
 // amortiguar caídas hacia cero y evitar extrapolar picos de productos con
 // etiqueta de precio / venta intermitente (p. ej. PALETA GALLETA $35).
@@ -2958,6 +2980,14 @@ function monthIsInferredZero(records, monthKey) {
   if (!monthKey) return false;
   const rows = (records || []).filter((row) => monthKeyFromRecord(row) === monthKey);
   return rows.length > 0 && rows.every((row) => row.inferredZeroMonth);
+}
+
+// Petit, cheesecake y 3 leches se venden todo el año. Si el archivo
+// empieza en marzo, ese primer mes es su nivel normal (~400–450), no un
+// estreno tipo CAJITA FELIZ (599 y al mes siguiente 37).
+function isYearRoundDessertLine(product) {
+  const value = normalizeProduct(product);
+  return /\b(PETIT|CHESSECAKE|3 LECHES)\b/.test(value);
 }
 
 // Pico de un solo mes sin el mismo mes del año anterior: CAJITA FELIZ
@@ -2979,9 +3009,11 @@ function unsupportedRecentSpikeCap({ modelTotal, last, observedHistory, monthlyD
 
   if (!priorPositive.length) {
     // Sin línea base solo se recorta un estreno enorme de "Otros"
-    // (CAJITA FELIZ). Gelatinas, kilos de galleta y pasteles que arrancan
-    // en su nivel normal no se apagan.
+    // (CAJITA FELIZ). Gelatinas, kilos de galleta, pasteles y las líneas
+    // de todo el año (petit / cheesecake / 3 leches) arrancan en su nivel
+    // normal y no se apagan.
     if (productCategory(product) !== "Otros" || last < 400) return null;
+    if (isYearRoundDessertLine(product)) return null;
     if (!(modelTotal > last * 0.5)) return null;
     return last * 0.35;
   }
@@ -3887,11 +3919,17 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
             cakeOptions
           )
         : calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, cakeOptions);
+      const lifted = liftColdStartMadresCalibration(model, records, selectedMonth, product);
       return allowMomentum
-        ? applyRecentMomentum(model, records, selectedMonth, cakeOptions)
-        : model;
+        ? applyRecentMomentum(lifted, records, selectedMonth, cakeOptions)
+        : lifted;
     }
-    return calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, options);
+    return liftColdStartMadresCalibration(
+      calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, options),
+      records,
+      selectedMonth,
+      product
+    );
   }
   if (version.startsWith("seasonal")) {
     return calculateForecastModelSeasonal(records, selectedMonth, Number(version.replace("seasonal", "")) / 100);

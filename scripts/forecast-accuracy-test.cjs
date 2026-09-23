@@ -773,6 +773,58 @@ async function main() {
   assert(miniJuly.absoluteError < 200, `julio MINI no debe volver al overshoot 373 (abs ${miniJuly.absoluteError.toFixed(1)})`);
   assert(miniNov.absoluteError < 80, `noviembre MINI en régimen no debe empeorar (abs ${miniNov.absoluteError.toFixed(1)})`);
 
+  const miniMay = spikePick("2025-05", "MINI MEDIANO CHOCOLATE");
+  assert(miniMay.forecast > 1040, `mayo MINI no debe heredar el recorte de abril (fc ${miniMay.forecast.toFixed(1)})`);
+  assert(miniMay.absoluteError < 240, `mayo MINI debe bajar del |e| 286 (abs ${miniMay.absoluteError.toFixed(1)})`);
+  assert(/sin recorte pre-Madres/i.test(miniMay.metodo || ""), "mayo MINI sin año anterior debe quitar el recorte");
+
+  const madresAnchored = evaluateMonth(
+    app,
+    [{ producto: "MINI MEDIANO CHOCOLATE", stock: 40, orden: 1 }],
+    [
+      monthClose("2025-03", "MINI MEDIANO CHOCOLATE", 1143),
+      monthClose("2025-04", "MINI MEDIANO CHOCOLATE", 1080),
+      monthClose("2025-05", "MINI MEDIANO CHOCOLATE", 1320),
+      monthClose("2026-04", "MINI MEDIANO CHOCOLATE", 1030),
+    ],
+    "2026-05"
+  );
+  const miniMayAnchored = madresAnchored.rows.find((row) => row.producto === "MINI MEDIANO CHOCOLATE");
+  assert(
+    !/sin recorte pre-Madres/i.test(miniMayAnchored.metodo || ""),
+    "mayo con el mismo mes del año anterior no usa el resguardo de arranque en frío"
+  );
+
+  const debutStock = [
+    { producto: "CHESSECAKE PETIT", stock: 20, orden: 1 },
+    { producto: "CAJITA 3 LECHES", stock: 20, orden: 2 },
+    { producto: "GELATINA IND MOSAICO", stock: 30, orden: 3 },
+  ];
+  const debutVentas = [
+    monthClose("2025-03", "CHESSECAKE PETIT", 438),
+    monthClose("2025-04", "CHESSECAKE PETIT", 439),
+    monthClose("2025-03", "CAJITA 3 LECHES", 410),
+    monthClose("2025-04", "CAJITA 3 LECHES", 328),
+    monthClose("2025-03", "GELATINA IND MOSAICO", 610),
+    monthClose("2025-04", "GELATINA IND MOSAICO", 532),
+    monthClose("2025-05", "GELATINA IND MOSAICO", 685),
+  ];
+  const debutApril = evaluateMonth(app, debutStock, debutVentas, "2025-04");
+  const debutMay = evaluateMonth(app, debutStock, debutVentas, "2025-05");
+  const debutPick = (analysis, name) => analysis.rows.find((row) => row.producto === name);
+  const cheeseApril = debutPick(debutApril, "CHESSECAKE PETIT");
+  const cajita3April = debutPick(debutApril, "CAJITA 3 LECHES");
+  const mosaicoMay = debutPick(debutMay, "GELATINA IND MOSAICO");
+  assert(cheeseApril.forecast > 350, `abril CHESSECAKE PETIT no debe caer a 35% de marzo (fc ${cheeseApril.forecast.toFixed(1)})`);
+  assert(cheeseApril.absoluteError < 80, `abril CHESSECAKE PETIT debe acercarse a 439 (abs ${cheeseApril.absoluteError.toFixed(1)})`);
+  assert(!/pico sin soporte/i.test(cheeseApril.metodo || ""), "CHESSECAKE PETIT de marzo es nivel, no estreno");
+  assert(cajita3April.forecast > 320, `abril CAJITA 3 LECHES no debe caer a 35% de marzo (fc ${cajita3April.forecast.toFixed(1)})`);
+  assert(cajita3April.absoluteError < 120, `abril CAJITA 3 LECHES debe bajar del |e| 185 (abs ${cajita3April.absoluteError.toFixed(1)})`);
+  assert(!/pico sin soporte/i.test(cajita3April.metodo || ""), "CAJITA 3 LECHES de marzo es nivel, no estreno");
+  assert(mosaicoMay.forecast > 530, `mayo MOSAICO no debe heredar el recorte de abril (fc ${mosaicoMay.forecast.toFixed(1)})`);
+  assert(mosaicoMay.absoluteError < 170, `mayo MOSAICO debe bajar del |e| 192 (abs ${mosaicoMay.absoluteError.toFixed(1)})`);
+  assert(/sin recorte pre-Madres/i.test(mosaicoMay.metodo || ""), "mayo MOSAICO sin año anterior debe quitar el recorte");
+
   const scored = [];
   for (const month of spikeMonths) {
     for (const row of spikeByMonth[month].rows) {
@@ -840,6 +892,14 @@ async function main() {
           frutasJuneAbs: Number(frutasJune.absoluteError.toFixed(1)),
           miniJulyAbs: Number(miniJuly.absoluteError.toFixed(1)),
           miniNovAbs: Number(miniNov.absoluteError.toFixed(1)),
+          miniMay: Number(miniMay.forecast.toFixed(1)),
+          miniMayAbs: Number(miniMay.absoluteError.toFixed(1)),
+          cheeseApril: Number(cheeseApril.forecast.toFixed(1)),
+          cheeseAprilAbs: Number(cheeseApril.absoluteError.toFixed(1)),
+          cajita3April: Number(cajita3April.forecast.toFixed(1)),
+          cajita3AprilAbs: Number(cajita3April.absoluteError.toFixed(1)),
+          mosaicoMay: Number(mosaicoMay.forecast.toFixed(1)),
+          mosaicoMayAbs: Number(mosaicoMay.absoluteError.toFixed(1)),
         },
         leftoverSkus: {
           june: Number(leftoverJune.wape.toFixed(2)),
