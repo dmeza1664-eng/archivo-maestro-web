@@ -896,7 +896,7 @@ async function main() {
   for (const [product, months] of Object.entries(pepesSeries)) {
     for (const [month, qty] of Object.entries(months)) pepesVentas.push(monthClose(month, product, qty));
   }
-  const pepesMonths = ["2025-04", "2025-05", "2025-09", "2025-11", "2025-12"];
+  const pepesMonths = ["2025-04", "2025-05", "2025-06", "2025-09", "2025-11", "2025-12"];
   const pepesByMonth = Object.fromEntries(
     pepesMonths.map((month) => [month, evaluateMonth(app, pepesStock, pepesVentas, month)])
   );
@@ -912,6 +912,9 @@ async function main() {
   const pepesHalfMay = pepesPick("2025-05", "1 2 KG GALLETA");
   const pepesQuarterDec = pepesPick("2025-12", "1 4 KG GALLETA");
   const pepesHalfDec = pepesPick("2025-12", "1 2 KG GALLETA");
+  const pepesMiniJun = pepesPick("2025-06", "MINI MED CHOCOLATE");
+  const pepesPinJun = pepesPick("2025-06", "MINI MED PINERO");
+  const pepesGelJun = pepesPick("2025-06", "GELATINA IND FRESA");
   const pepesMiniSep = pepesPick("2025-09", "MINI MED CHOCOLATE");
   const pepesMiniNov = pepesPick("2025-11", "MINI MED PINERO");
   const pepesGelNov = pepesPick("2025-11", "GELATINA IND FRESA");
@@ -938,6 +941,12 @@ async function main() {
   assert(pepesHalfDec.absoluteError < 450, `diciembre 1/2 KG debe bajar del |e| 538 (abs ${pepesHalfDec.absoluteError.toFixed(1)}, fc ${pepesHalfDec.forecast.toFixed(1)})`);
   assert(/kilo Navidad/i.test(pepesHalfDec.metodo || ""), "diciembre kilo debe anotar Navidad");
 
+  assert(pepesMiniJun.forecast > 2500, `junio MINI MED CHOCOLATE debe subir del hombro post-Madres (fc ${pepesMiniJun.forecast.toFixed(1)})`);
+  assert(pepesMiniJun.forecast <= 2614, `junio MINI no debe pasar el mayo observado (fc ${pepesMiniJun.forecast.toFixed(1)})`);
+  assert(/Día del Padre/i.test(pepesMiniJun.metodo || ""), "junio MINI debe anotar el impulso frío de Padre");
+  assert(/Día del Padre/i.test(pepesPinJun.metodo || ""), "junio MINI PINERO debe anotar el impulso");
+  assert(pepesPinJun.absoluteError < 120, `junio MINI PINERO debe acercarse a 2509 (abs ${pepesPinJun.absoluteError.toFixed(1)})`);
+  assert(!/Día del Padre/i.test(pepesGelJun.metodo || ""), "junio gelatina no hereda el impulso de Padre");
   assert(!/impulso frío/i.test(pepesMiniSep.metodo || ""), "septiembre no debe llevar impulso de evento");
   assert(pepesMiniSep.absoluteError < 180, `septiembre MINI en régimen no debe empeorar (abs ${pepesMiniSep.absoluteError.toFixed(1)})`);
   assert(pepesMiniNov.absoluteError < 200, `noviembre MINI PINERO no debe empeorar (abs ${pepesMiniNov.absoluteError.toFixed(1)})`);
@@ -1026,6 +1035,10 @@ async function main() {
           quarterDecAbs: Number(pepesQuarterDec.absoluteError.toFixed(1)),
           halfDecAbs: Number(pepesHalfDec.absoluteError.toFixed(1)),
           miniSepAbs: Number(pepesMiniSep.absoluteError.toFixed(1)),
+          miniJun: Number(pepesMiniJun.forecast.toFixed(1)),
+          miniJunAbs: Number(pepesMiniJun.absoluteError.toFixed(1)),
+          pinJun: Number(pepesPinJun.forecast.toFixed(1)),
+          pinJunAbs: Number(pepesPinJun.absoluteError.toFixed(1)),
         },
         leftoverSkus: {
           june: Number(leftoverJune.wape.toFixed(2)),

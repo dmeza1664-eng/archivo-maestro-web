@@ -3052,6 +3052,14 @@ function coldStartEventUplift(records, selectedMonth, product) {
     return { factor: 1.18, label: "impulso frío Día de las Madres" };
   }
 
+  // Junio sin el mismo mes del año anterior: el arrastre de Madres baja mayo
+  // y el mini se queda corto en Día del Padre. No pasa del mayo observado.
+  // Gelatinas y petit no entran: en junio ya no dominaban el error. Sep–Nov
+  // no es junio.
+  if (event?.id === "padre" && category === "Mini medianos") {
+    return { factor: 1.1, label: "impulso frío Día del Padre", capAtLast: true };
+  }
+
   if (monthContainsSemanaSanta(selectedMonth) && isPetitTresLeches(product)) {
     if (last > priorMed * 1.25) return null;
     return { factor: 1.5, label: "impulso frío Semana Santa" };
@@ -3072,10 +3080,17 @@ function applyColdStartEventUplift(model, records, selectedMonth, product) {
   if (!uplift) return model;
   const modelTotal = forecastTotalFromAverages(model.averages, selectedMonth);
   if (!(modelTotal > 40)) return model;
+  let factor = uplift.factor;
+  if (uplift.capAtLast) {
+    const { last } = recentLevelBeforeTarget(records, selectedMonth);
+    if (!(last > modelTotal * 1.02)) return model;
+    factor = Math.min(factor, last / modelTotal);
+  }
+  if (!(factor > 1.001)) return model;
   return {
     ...model,
-    averages: scaleForecastAverages(model.averages, uplift.factor),
-    trend: (model.trend || 1) * uplift.factor,
+    averages: scaleForecastAverages(model.averages, factor),
+    trend: (model.trend || 1) * factor,
     method: `${model.method || "Modelo"} · ${uplift.label}`,
   };
 }
