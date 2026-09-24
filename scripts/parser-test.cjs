@@ -66,6 +66,7 @@ async function main() {
     findOfficialProduct,
     resolveOfficialProduct,
     countSameYearConsecutiveRecentMonths,
+    forecastHidesPriorYearMonths,
     prepareProductForecastHistory,
     isPriceTaggedProduct,
     applyCatalogOutlierCleanup,
@@ -1076,6 +1077,74 @@ async function main() {
   assert(
     /impulso frío Día de las Madres/i.test(miniMay[0].metodoPronostico || ""),
     `con 2 meses de 2025 las reglas de calendario #20–#22 siguen activas (${miniMay[0].metodoPronostico})`
+  );
+
+  const gelatinaDecStock = [{ producto: "GELATINA IND FRESA", stock: 40, orden: 1 }];
+  const gelatina2025 = [
+    monthClose("2025-01", "GELATINA IND FRESA", 2200),
+    monthClose("2025-02", "GELATINA IND FRESA", 2100),
+    monthClose("2025-03", "GELATINA IND FRESA", 2050),
+    monthClose("2025-04", "GELATINA IND FRESA", 2080),
+    monthClose("2025-05", "GELATINA IND FRESA", 2571),
+    monthClose("2025-06", "GELATINA IND FRESA", 2300),
+    monthClose("2025-07", "GELATINA IND FRESA", 2066),
+    monthClose("2025-08", "GELATINA IND FRESA", 2100),
+    monthClose("2025-09", "GELATINA IND FRESA", 2100),
+    monthClose("2025-10", "GELATINA IND FRESA", 2050),
+    monthClose("2025-11", "GELATINA IND FRESA", 1945),
+  ];
+  const decSeasonalRef = resolvePriorYearSeasonal(buildMonthlyForecastData(gelatina2025), "2025-12");
+  assert(
+    decSeasonalRef && (decSeasonalRef.monthKey === "2025-01" || decSeasonalRef.monthKey === "2025-02"),
+    `diciembre sin año anterior debe armar la referencia con ene/feb 2025 (ref ${decSeasonalRef?.monthKey || "null"})`
+  );
+  const decOnly2025 = calculateForecast({
+    stockRows: gelatinaDecStock,
+    historicalVentas: gelatina2025,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-12",
+    dailyBufferPct: 10,
+  });
+  const decWithHarmless2024 = calculateForecast({
+    stockRows: gelatinaDecStock,
+    historicalVentas: [
+      monthClose("2024-01", "GELATINA IND FRESA", 900),
+      monthClose("2024-11", "GELATINA IND FRESA", 800),
+      monthClose("2024-12", "GELATINA IND FRESA", 400),
+      ...gelatina2025,
+    ],
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-12",
+    dailyBufferPct: 10,
+  });
+  assert(
+    forecastHidesPriorYearMonths([...gelatina2025, monthClose("2024-12", "GELATINA IND FRESA", 400)], "2025-12"),
+    "con 2024 y un mes cerrado de 2025 se oculta el año anterior"
+  );
+  assert(
+    !forecastHidesPriorYearMonths(gelatina2025, "2025-12"),
+    "sin 2024 no se activa el ocultamiento: el modelo es el de main"
+  );
+  assert(
+    Math.abs(decWithHarmless2024[0].pronosticoVenta - decOnly2025[0].pronosticoVenta) < 0.01,
+    `diciembre con trayectoria 2025 no debe cambiar al meter 2024 (${decWithHarmless2024[0].pronosticoVenta.toFixed(1)} vs ${decOnly2025[0].pronosticoVenta.toFixed(1)})`
+  );
+  const decOnlyNovember = calculateForecast({
+    stockRows: gelatinaDecStock,
+    historicalVentas: [monthClose("2025-11", "GELATINA IND FRESA", 1945)],
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-12",
+    dailyBufferPct: 10,
+  });
+  assert(
+    decOnly2025[0].pronosticoVenta > decOnlyNovember[0].pronosticoVenta + 40,
+    `diciembre debe subir con ene/feb 2025, no copiar solo noviembre (${decOnly2025[0].pronosticoVenta.toFixed(1)} vs ${decOnlyNovember[0].pronosticoVenta.toFixed(1)})`
   );
 
   const historyPrep = prepareProductForecastHistory(

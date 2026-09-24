@@ -1,6 +1,6 @@
 /**
- * Walk-forward 2025 con historia 2024. Compara contra post22 (main a050fa9).
- * Catálogo = SKUs mapeados + extras de stock en mapeo-sin-match (sin stock_ideal.xlsx).
+ * Walk-forward 2025. Compara contra post22 (main a050fa9).
+ * Catálogo = SKUs de ventas + extras de stock en mapeo-sin-match.
  */
 const fs = require("fs");
 const path = require("path");
@@ -17,6 +17,29 @@ const TARGET_MONTHS = [
   "2025-01", "2025-02", "2025-03", "2025-04", "2025-05", "2025-06",
   "2025-07", "2025-08", "2025-09", "2025-10", "2025-11", "2025-12",
 ];
+
+const POST22_EXPECTED = {
+  cuts: {
+    "Ene–Dic": 20.58,
+    "Sin enero": 13.96,
+    "Mar–Nov": 12.75,
+    "Sep–Nov": 9.17,
+  },
+  monthly: {
+    "2025-01": 100,
+    "2025-02": 13.39,
+    "2025-03": 20.14,
+    "2025-04": 12.89,
+    "2025-05": 17.16,
+    "2025-06": 8.47,
+    "2025-07": 18.45,
+    "2025-08": 10.43,
+    "2025-09": 8.08,
+    "2025-10": 10.55,
+    "2025-11": 8.82,
+    "2025-12": 23.09,
+  },
+};
 
 async function loadAppFunctions() {
   const built = await esbuild.build({
@@ -95,18 +118,22 @@ function weightedOverall(monthResults, filterFn) {
   };
 }
 
-async function main() {
+function salesInputsExist() {
+  return fs.existsSync(SALES_JSON) && fs.existsSync(POST22_JSON);
+}
+
+async function runPepes2025Backtest() {
   const app = await loadAppFunctions();
   const { filterVentasBeforeMonth, calculateForecast, analyzeForecastProductErrors } = app;
   const salesPayload = JSON.parse(fs.readFileSync(SALES_JSON, "utf8"));
   const post22 = JSON.parse(fs.readFileSync(POST22_JSON, "utf8"));
   const ventas = hydrateSalesRows(salesPayload);
   const stockRows = buildStockRows(ventas);
-
   const ventas2025 = ventas.filter((row) => String(monthKeyOf(row) || "").startsWith("2025"));
 
   function runWalkForward(historicalVentas) {
     const monthResults = {};
+    const reactivations = [];
     for (const hideMonth of TARGET_MONTHS) {
       const historical = filterVentasBeforeMonth(historicalVentas, hideMonth);
       const forecastRows = calculateForecast({
@@ -125,55 +152,76 @@ async function main() {
       const analysis = analyzeForecastProductErrors(forecastRows, actualMap, { topN: 8 });
       const absErr = analysis.rows.reduce((s, r) => s + r.absoluteError, 0);
       const post = post22.monthly[hideMonth];
+      const gapRows = analysis.rows.filter((row) => /reactivación estacional/i.test(row.metodo || ""));
+      for (const row of gapRows) {
+        reactivations.push({
+          month: hideMonth,
+          producto: row.producto,
+          forecast: Number(row.forecast.toFixed(2)),
+          actual: Number(row.actual.toFixed(2)),
+          method: row.metodo,
+        });
+      }
       monthResults[hideMonth] = {
         wape: analysis.wape != null ? Number(Number(analysis.wape).toFixed(2)) : null,
         actualTotal: Number(Number(analysis.actual).toFixed(2)),
         forecastTotal: Number(Number(analysis.forecast).toFixed(2)),
         absoluteErrorTotal: Number(Number(absErr).toFixed(2)),
-        post22: post ? post.post22 : null,
+        post22: post ? post.post22 : POST22_EXPECTED.monthly[hideMonth],
         deltaPts: post && analysis.wape != null ? Number((analysis.wape - post.post22).toFixed(2)) : null,
+        gapReactivations: gapRows.length,
       };
     }
-    return monthResults;
+    return { monthResults, reactivations };
   }
 
-  const monthResults = runWalkForward(ventas);
-  const sameCatalogNo2024 = runWalkForward(ventas2025);
+  const with2024 = runWalkForward(ventas);
+  const without2024 = runWalkForward(ventas2025);
   for (const hideMonth of TARGET_MONTHS) {
-    const with2024 = monthResults[hideMonth];
-    const without = sameCatalogNo2024[hideMonth];
-    with2024.sameCatalogNo2024 = without ? without.wape : null;
-    with2024.sameCatalogDeltaPts = without && with2024.wape != null
-      ? Number((with2024.wape - without.wape).toFixed(2))
+    const row = with2024.monthResults[hideMonth];
+    const baseline = without2024.monthResults[hideMonth];
+    row.sin2024 = baseline ? baseline.wape : null;
+    row.deltaVsSin2024 = baseline && row.wape != null
+      ? Number((row.wape - baseline.wape).toFixed(2))
       : null;
   }
 
-  const cuts = {
+  const cutsOf = (monthResults) => ({
     "Ene–Dic": weightedOverall(monthResults, () => true),
     "Sin enero": weightedOverall(monthResults, (m) => m !== "2025-01"),
     "Mar–Nov": weightedOverall(monthResults, (m) => m >= "2025-03" && m <= "2025-11"),
     "Sep–Nov": weightedOverall(monthResults, (m) => ["2025-09", "2025-10", "2025-11"].includes(m)),
-  };
-  const sameCatalogCuts = {
-    "Ene–Dic": weightedOverall(sameCatalogNo2024, () => true),
-    "Sin enero": weightedOverall(sameCatalogNo2024, (m) => m !== "2025-01"),
-    "Mar–Nov": weightedOverall(sameCatalogNo2024, (m) => m >= "2025-03" && m <= "2025-11"),
-    "Sep–Nov": weightedOverall(sameCatalogNo2024, (m) => ["2025-09", "2025-10", "2025-11"].includes(m)),
-  };
+  });
 
-  const report = {
+  return {
     stockProducts: stockRows.length,
     salesRows: ventas.length,
-    cuts,
-    sameCatalogNo2024Cuts: sameCatalogCuts,
-    monthly: monthResults,
+    cutsSin2024: cutsOf(without2024.monthResults),
+    cutsCon2024: cutsOf(with2024.monthResults),
+    monthlySin2024: without2024.monthResults,
+    monthlyCon2024: with2024.monthResults,
+    gapReactivationCon2024: with2024.reactivations,
+    gapReactivationSin2024: without2024.reactivations,
   };
+}
+
+async function main() {
+  const report = await runPepes2025Backtest();
   const outPath = path.join(ROOT, "scripts", "backtest-2025-cold-start-2024.json");
   fs.writeFileSync(outPath, JSON.stringify(report, null, 2), "utf8");
   console.log(JSON.stringify(report, null, 2));
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+module.exports = {
+  POST22_EXPECTED,
+  TARGET_MONTHS,
+  salesInputsExist,
+  runPepes2025Backtest,
+};
+
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

@@ -2571,40 +2571,48 @@ function buildColdStartPriorYearModel(records, selectedMonth) {
   };
 }
 
+function forecastHidesPriorYearMonths(records, selectedMonth) {
+  // Si no hay año anterior, el modelo debe ser bit-idéntico a main.
+  // Solo se ocultan meses de un calendario previo cuando ya hay un mes
+  // cerrado del año en curso (si no, enero en frío sí puede leerlos).
+  return yearHasClosedMonthBefore(selectedMonth) && hasPriorYearHistory(records, selectedMonth);
+}
+
 function forecastAllowsYearOverYear(records, selectedMonth) {
-  // El año anterior solo entra en arranque en frío real: el año en curso
-  // todavía no tiene un mes cerrado y el SKU no trae meses de este año.
-  // Con un mes cerrado, un umbral de 2 meses reabriría 2024 en febrero
-  // (crecimiento irregular de aperturas) y reviviría SKUs que ya no venden.
-  if (yearHasClosedMonthBefore(selectedMonth)) return false;
+  if (forecastHidesPriorYearMonths(records, selectedMonth)) return false;
   const recentCount = countSameYearConsecutiveRecentMonths(records, selectedMonth);
   return recentCount === 0 && hasPriorYearHistory(records, selectedMonth);
 }
 
-function prepareProductForecastHistory(observed, selectedMonth, completeHistoricalMonths) {
-  const year = String(selectedMonth || "").slice(0, 4);
-  const beforeTarget = (completeHistoricalMonths || []).filter((month) => month < selectedMonth);
-  const sameYearComplete = beforeTarget.filter((month) => month.slice(0, 4) === year);
-  const sameYearObserved = sameYearObservedRecords(observed, selectedMonth);
-  const sameYearFilled = fillCompleteZeroMonths(sameYearObserved, sameYearComplete);
-  const recentCount = countSameYearConsecutiveRecentMonths(
-    sameYearFilled.length ? sameYearFilled : sameYearObserved,
-    selectedMonth
-  );
-  const allowYearOverYear = forecastAllowsYearOverYear(observed, selectedMonth);
+function monthlyDataWithoutPriorYear(monthlyData, targetMonth) {
+  const year = String(targetMonth || "").slice(0, 4);
+  const filtered = new Map();
+  for (const [key, value] of monthlyData || []) {
+    if (String(key).slice(0, 4) >= year) filtered.set(key, value);
+  }
+  return filtered;
+}
 
-  if (allowYearOverYear) {
+function prepareProductForecastHistory(observed, selectedMonth, completeHistoricalMonths) {
+  const beforeTarget = (completeHistoricalMonths || []).filter((month) => month < selectedMonth);
+  const hidePriorYear = forecastHidesPriorYearMonths(observed, selectedMonth);
+  if (!hidePriorYear) {
+    const records = fillCompleteZeroMonths(observed || [], beforeTarget);
     return {
-      mode: "prior-year",
-      recentCount,
+      mode: forecastAllowsYearOverYear(observed, selectedMonth) ? "prior-year" : "recent",
+      recentCount: countSameYearConsecutiveRecentMonths(records, selectedMonth),
       allowYearOverYear: true,
-      records: fillCompleteZeroMonths(observed || [], beforeTarget),
+      records,
     };
   }
 
+  const year = String(selectedMonth || "").slice(0, 4);
+  const sameYearComplete = beforeTarget.filter((month) => month.slice(0, 4) === year);
+  const sameYearObserved = sameYearObservedRecords(observed, selectedMonth);
+  const sameYearFilled = fillCompleteZeroMonths(sameYearObserved, sameYearComplete);
   return {
     mode: "recent",
-    recentCount,
+    recentCount: countSameYearConsecutiveRecentMonths(sameYearFilled, selectedMonth),
     allowYearOverYear: false,
     records: [...sameYearFilled, ...priorYearActualRecords(observed, selectedMonth)],
   };
@@ -3387,8 +3395,8 @@ function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
   const recentCount = countSameYearConsecutiveRecentMonths(records || [], selectedMonth);
   const targetYear = String(selectedMonth || "").slice(0, 4);
   const sameYearObserved = allObserved.filter((month) => month.slice(0, 4) === targetYear);
-  const allowYearOverYear = forecastAllowsYearOverYear(records || [], selectedMonth);
-  const observedHistory = !allowYearOverYear && sameYearObserved.length
+  const hidePriorYear = forecastHidesPriorYearMonths(records || [], selectedMonth);
+  const observedHistory = hidePriorYear && sameYearObserved.length
     ? sameYearObserved
     : allObserved;
   if (!allObserved.length) {
@@ -3482,7 +3490,7 @@ function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
     monthlyData,
     selectedMonth,
     product,
-    ignorePriorYear: !allowYearOverYear,
+    ignorePriorYear: hidePriorYear,
   });
   if (unsupportedCap != null && unsupportedCap < targetTotal) {
     targetTotal = unsupportedCap;
@@ -3979,15 +3987,18 @@ function computeImpulseCarryoverScale(monthlyData, sourceMonth, targetMonth) {
   return clamp(baseline / sourceTotal, 0.82, 1);
 }
 
-function monthlyDataWithoutEventCarryover(monthlyData, targetMonth) {
+function monthlyDataWithoutEventCarryover(monthlyData, targetMonth, forecastOptions = {}) {
+  const source = forecastOptions.allowYearOverYear === false
+    ? monthlyDataWithoutPriorYear(monthlyData, targetMonth)
+    : monthlyData;
   const adjusted = new Map();
-  for (const [monthKey, monthData] of monthlyData.entries()) {
+  for (const [monthKey, monthData] of source.entries()) {
     if (monthKey >= targetMonth) {
       adjusted.set(monthKey, monthData);
       continue;
     }
-    const eventScale = computeEventCarryoverScale(monthlyData, monthKey, targetMonth);
-    const impulseScale = computeImpulseCarryoverScale(monthlyData, monthKey, targetMonth);
+    const eventScale = computeEventCarryoverScale(source, monthKey, targetMonth);
+    const impulseScale = computeImpulseCarryoverScale(source, monthKey, targetMonth);
     adjusted.set(monthKey, scaleMonthDataForCarryover(monthData, Math.min(eventScale, impulseScale)));
   }
   return adjusted;
@@ -4009,7 +4020,11 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
   // Nivel reciente: si mayo (Madres) es un pico, no copiarlo a junio.
   // Tampoco copiar a agosto un julio que solo saltó por el impulso de junio.
   // Crecimiento YoY y "mismo mes año anterior" siguen en crudo.
-  const recentData = monthlyDataWithoutEventCarryover(monthlyData, targetMonth);
+  const hidePriorYear = forecastOptions.allowYearOverYear === false;
+  const seasonalData = hidePriorYear
+    ? monthlyDataWithoutPriorYear(monthlyData, targetMonth)
+    : monthlyData;
+  const recentData = monthlyDataWithoutEventCarryover(monthlyData, targetMonth, forecastOptions);
   const candidates = new Map();
   const addCandidate = (name, averages, sourceMonths = recentMonths) => {
     if (!averages?.size) return;
@@ -4067,14 +4082,14 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
     [latestMonth]
   );
 
-  const seasonalRef = forecastOptions.allowYearOverYear === false
-    ? null
-    : resolvePriorYearSeasonal(monthlyData, targetMonth, forecastOptions);
+  const seasonalRef = resolvePriorYearSeasonal(seasonalData, targetMonth, forecastOptions);
   if (seasonalRef) {
     const previousTargetMonth = previousMonthKey(targetMonth);
-    const previousYearReference = sameMonthPreviousYear(previousTargetMonth);
-    const growth = computeAnnualGrowthFactor(monthlyData, targetMonth, growthLookback, forecastOptions);
-    const seasonalBase = weightedWeekdayAverages(monthlyData, [seasonalRef.monthKey], [1]);
+    const previousYearReference = hidePriorYear ? "" : sameMonthPreviousYear(previousTargetMonth);
+    const growth = hidePriorYear
+      ? 1
+      : computeAnnualGrowthFactor(monthlyData, targetMonth, growthLookback, forecastOptions);
+    const seasonalBase = weightedWeekdayAverages(seasonalData, [seasonalRef.monthKey], [1]);
     const adjustedSeasonal = scaleForecastAverages(seasonalBase, growth * seasonalRef.levelFactor);
     addCandidate(
       "Mismo mes año anterior",
@@ -4164,23 +4179,32 @@ function calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, 
   // mismo mes del año anterior si ESE mes sí vendió. Un proxy de vecinos
   // no cuenta: CAJITA FELIZ no tiene julio 2025 y debe seguir en 0.
   if (!recent || recent.total <= 0.5) {
+    const priorMonth = sameMonthPreviousYear(selectedMonth);
+    const priorYearTotal = monthTotalFromData(monthlyData, priorMonth);
     const targetYear = String(selectedMonth || "").slice(0, 4);
     const sameYearMonths = [...monthlyData.keys()].filter((month) => month.slice(0, 4) === targetYear && month < selectedMonth);
-    // Sin meses del año en curso no es un hueco: es arranque o SKU inactivo.
-    // La reactivación ($150) pide evidencia reciente en cero, no copiar el año anterior.
-    if (!sameYearMonths.length && forecastOptions.allowYearOverYear === false) {
+    // Hueco honesto: hay meses del año en curso en cero y el MISMO mes del
+    // año anterior sí vendió. Nunca se usa el mes pronosticado.
+    if (forecastOptions.allowYearOverYear === false && !sameYearMonths.length) {
       return legacy;
     }
-    const priorYearTotal = monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
-    let sameMonth = candidates.get("Mismo mes año anterior") || seasonal;
-    if ((!sameMonth || !(sameMonth.total > 10)) && priorYearTotal > 40) {
+    let sameMonth = candidates.get("Mismo mes año anterior");
+    if ((!sameMonth || !(sameMonth.total > 10) || !(sameMonth.sourceMonths || []).includes(priorMonth)) && priorYearTotal > 40) {
       const priorYearCandidates = buildForecastCandidates(monthlyData, selectedMonth, {
         ...forecastOptions,
         allowYearOverYear: true,
       });
-      sameMonth = priorYearCandidates.get("Mismo mes año anterior") || priorYearCandidates.get("Estacional-reciente");
+      sameMonth = priorYearCandidates.get("Mismo mes año anterior");
     }
-    if (priorYearTotal > 40 && sameMonth && sameMonth.total > 10) {
+    const usedSamePriorMonth = Boolean(
+      priorMonth
+      && priorMonth < selectedMonth
+      && priorYearTotal > 40
+      && sameMonth
+      && sameMonth.total > 10
+      && (sameMonth.sourceMonths || []).includes(priorMonth)
+    );
+    if (usedSamePriorMonth) {
       return {
         ...legacy,
         averages: sameMonth.averages,
@@ -4265,7 +4289,7 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
   if (version === "categorySeasonal" || version.startsWith("csG")) {
     const options = {
       ...forecastTuningOptions(version),
-      allowYearOverYear: forecastAllowsYearOverYear(records, selectedMonth),
+      allowYearOverYear: !forecastHidesPriorYearMonths(records, selectedMonth),
     };
     const category = productCategory(product);
     const seasonalWeight = ["Otros", "Mini medianos"].includes(category) ? 0.5 : 0.75;
@@ -9866,6 +9890,7 @@ export {
   resolveOfficialProduct,
   lookupBuiltinProductAlias,
   countSameYearConsecutiveRecentMonths,
+  forecastHidesPriorYearMonths,
   prepareProductForecastHistory,
   buildColdStartPriorYearModel,
   isPriceTaggedProduct,
