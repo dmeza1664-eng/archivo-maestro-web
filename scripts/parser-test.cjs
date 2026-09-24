@@ -351,7 +351,9 @@ async function main() {
   assert(normalizeProduct("ZANAHORIA TRES LECHE MINI MEDIANO") === normalizeProduct("ZANAHORIA 3 LECHES MINI MED"), "TRES LECHE singular empata");
   assert(calendarEventForMonth("2026-05")?.id === "madres", "mayo es Día de las Madres");
   assert(calendarEventForMonth("2026-06")?.id === "padre", "junio es Día del Padre");
+  assert(calendarEventForMonth("2025-12")?.id === "navidad", "diciembre es Navidad / fin de año");
   assert(!calendarEventForMonth("2026-07"), "julio no es mes de evento de pastelería");
+  assert(!calendarEventForMonth("2025-09"), "septiembre no es mes de evento");
 
   const madresPeak = new Map([
     ["2026-03", { total: 524 }],

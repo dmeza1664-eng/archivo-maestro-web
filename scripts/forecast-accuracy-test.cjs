@@ -856,6 +856,13 @@ async function main() {
     { producto: "1 4 KG GALLETA", stock: 20, orden: 6 },
     { producto: "1 2 KG GALLETA", stock: 20, orden: 7 },
     { producto: "MINI MED PINERO", stock: 40, orden: 8 },
+    { producto: "MOKA CH", stock: 30, orden: 9 },
+    { producto: "FRUTAS CH", stock: 30, orden: 10 },
+    { producto: "MOKA MED", stock: 30, orden: 11 },
+    { producto: "FRUTAS GDE", stock: 40, orden: 12 },
+    { producto: "PAY GUAYABA GDE", stock: 30, orden: 13 },
+    { producto: "GELATINA FRESA GDE", stock: 30, orden: 14 },
+    { producto: "PINA MED", stock: 20, orden: 15 },
   ];
   const pepesSeries = {
     "MINI MED CHOCOLATE": {
@@ -891,6 +898,34 @@ async function main() {
       "2025-06": 500, "2025-07": 490, "2025-08": 510, "2025-09": 500, "2025-10": 505,
       "2025-11": 520, "2025-12": 1148,
     },
+    "MOKA CH": {
+      "2025-02": 960, "2025-03": 950, "2025-04": 940, "2025-05": 1405,
+      "2025-06": 980, "2025-07": 970, "2025-08": 965, "2025-09": 970, "2025-10": 960, "2025-11": 960,
+    },
+    "FRUTAS CH": {
+      "2025-02": 910, "2025-03": 900, "2025-04": 890, "2025-05": 1326,
+      "2025-06": 920, "2025-07": 910, "2025-08": 905, "2025-09": 910, "2025-10": 900, "2025-11": 900,
+    },
+    "MOKA MED": {
+      "2025-02": 1070, "2025-03": 1060, "2025-04": 1050, "2025-05": 1479,
+      "2025-06": 1080, "2025-07": 1070, "2025-08": 1065, "2025-09": 1070, "2025-10": 1060, "2025-11": 1060,
+    },
+    "FRUTAS GDE": {
+      "2025-02": 1020, "2025-03": 1010, "2025-04": 1000, "2025-05": 1180,
+      "2025-06": 1020, "2025-07": 1015, "2025-08": 1010, "2025-09": 1010, "2025-10": 1020, "2025-11": 1015, "2025-12": 1453,
+    },
+    "PAY GUAYABA GDE": {
+      "2025-02": 660, "2025-03": 650, "2025-04": 640, "2025-05": 750,
+      "2025-06": 650, "2025-07": 645, "2025-08": 640, "2025-09": 640, "2025-10": 650, "2025-11": 655, "2025-12": 1221,
+    },
+    "GELATINA FRESA GDE": {
+      "2025-02": 470, "2025-03": 460, "2025-04": 450, "2025-05": 520,
+      "2025-06": 460, "2025-07": 455, "2025-08": 450, "2025-09": 450, "2025-10": 455, "2025-11": 460, "2025-12": 897,
+    },
+    "PINA MED": {
+      "2025-02": 510, "2025-03": 500, "2025-04": 495, "2025-05": 580,
+      "2025-06": 500, "2025-07": 505, "2025-08": 500, "2025-09": 505, "2025-10": 500, "2025-11": 498, "2025-12": 75,
+    },
   };
   const pepesVentas = [];
   for (const [product, months] of Object.entries(pepesSeries)) {
@@ -918,6 +953,17 @@ async function main() {
   const pepesMiniSep = pepesPick("2025-09", "MINI MED CHOCOLATE");
   const pepesMiniNov = pepesPick("2025-11", "MINI MED PINERO");
   const pepesGelNov = pepesPick("2025-11", "GELATINA IND FRESA");
+  const pepesMokaChMay = pepesPick("2025-05", "MOKA CH");
+  const pepesFrutasChMay = pepesPick("2025-05", "FRUTAS CH");
+  const pepesMokaMedMay = pepesPick("2025-05", "MOKA MED");
+  const pepesFrutasGdeMay = pepesPick("2025-05", "FRUTAS GDE");
+  const pepesFrutasGdeDec = pepesPick("2025-12", "FRUTAS GDE");
+  const pepesPayDec = pepesPick("2025-12", "PAY GUAYABA GDE");
+  const pepesGelGdeDec = pepesPick("2025-12", "GELATINA FRESA GDE");
+  const pepesPinaDec = pepesPick("2025-12", "PINA MED");
+  const pepesMokaSep = pepesPick("2025-09", "MOKA CH");
+  const pepesFrutasGdeSep = pepesPick("2025-09", "FRUTAS GDE");
+  const pepesMokaJun = pepesPick("2025-06", "MOKA CH");
 
   assert(pepesMiniMay.absoluteError < 400, `mayo MINI MED CHOCOLATE debe bajar del |e| 557 (abs ${pepesMiniMay.absoluteError.toFixed(1)}, fc ${pepesMiniMay.forecast.toFixed(1)})`);
   assert(/impulso frío Día de las Madres/i.test(pepesMiniMay.metodo || ""), "mayo MINI debe anotar el impulso frío");
@@ -951,6 +997,30 @@ async function main() {
   assert(pepesMiniSep.absoluteError < 180, `septiembre MINI en régimen no debe empeorar (abs ${pepesMiniSep.absoluteError.toFixed(1)})`);
   assert(pepesMiniNov.absoluteError < 200, `noviembre MINI PINERO no debe empeorar (abs ${pepesMiniNov.absoluteError.toFixed(1)})`);
   assert(pepesGelNov.absoluteError < 220, `noviembre GELATINA no debe empeorar (abs ${pepesGelNov.absoluteError.toFixed(1)})`);
+
+  assert(/pastel Madres/i.test(pepesMokaChMay.metodo || ""), "mayo MOKA CH debe anotar el impulso de pastel");
+  assert(pepesMokaChMay.forecast > 1050, `mayo MOKA CH debe subir del hombro (~940) (fc ${pepesMokaChMay.forecast.toFixed(1)})`);
+  assert(pepesMokaChMay.absoluteError < 380, `mayo MOKA CH debe bajar del |e| 444 (abs ${pepesMokaChMay.absoluteError.toFixed(1)})`);
+  assert(/pastel Madres/i.test(pepesFrutasChMay.metodo || ""), "mayo FRUTAS CH debe anotar el impulso de pastel");
+  assert(pepesFrutasChMay.absoluteError < 360, `mayo FRUTAS CH debe bajar del |e| 413 (abs ${pepesFrutasChMay.absoluteError.toFixed(1)})`);
+  assert(/pastel Madres/i.test(pepesMokaMedMay.metodo || ""), "mayo MOKA MED debe anotar el impulso de pastel");
+  assert(pepesMokaMedMay.absoluteError < 360, `mayo MOKA MED debe bajar del |e| 409 (abs ${pepesMokaMedMay.absoluteError.toFixed(1)})`);
+  assert(/pastel Madres/i.test(pepesFrutasGdeMay.metodo || ""), "mayo FRUTAS GDE también entra en Madres");
+  assert(!/pastel Madres|Navidad/i.test(pepesMokaJun.metodo || ""), "junio MOKA no hereda el impulso de Madres");
+  assert(!/impulso frío/i.test(pepesMokaSep.metodo || ""), "septiembre MOKA no lleva impulso de evento");
+  assert(pepesMokaSep.absoluteError < 80, `septiembre MOKA en régimen no debe empeorar (abs ${pepesMokaSep.absoluteError.toFixed(1)})`);
+  assert(!/impulso frío/i.test(pepesFrutasGdeSep.metodo || ""), "septiembre FRUTAS GDE no lleva impulso de evento");
+  assert(pepesFrutasGdeSep.absoluteError < 80, `septiembre FRUTAS GDE en régimen no debe empeorar (abs ${pepesFrutasGdeSep.absoluteError.toFixed(1)})`);
+
+  assert(/pastel Navidad/i.test(pepesFrutasGdeDec.metodo || ""), "diciembre FRUTAS GDE debe anotar Navidad");
+  assert(pepesFrutasGdeDec.forecast > 1100, `diciembre FRUTAS GDE debe subir del hombro (fc ${pepesFrutasGdeDec.forecast.toFixed(1)})`);
+  assert(pepesFrutasGdeDec.absoluteError < 380, `diciembre FRUTAS GDE debe bajar del |e| 432 (abs ${pepesFrutasGdeDec.absoluteError.toFixed(1)})`);
+  assert(/pastel Navidad/i.test(pepesPayDec.metodo || ""), "diciembre PAY GUAYABA debe anotar Navidad");
+  assert(pepesPayDec.absoluteError < 520, `diciembre PAY GUAYABA debe bajar del |e| 564 (abs ${pepesPayDec.absoluteError.toFixed(1)})`);
+  assert(/gelatina Navidad/i.test(pepesGelGdeDec.metodo || ""), "diciembre gelatina GDE debe anotar Navidad");
+  assert(pepesGelGdeDec.absoluteError < 400, `diciembre gelatina GDE debe bajar del |e| 430 (abs ${pepesGelGdeDec.absoluteError.toFixed(1)})`);
+  assert(!/Navidad/i.test(pepesPinaDec.metodo || ""), "diciembre PINA MED no hereda el impulso de GDE");
+  assert(!/Navidad/i.test(pepesMiniSep.metodo || ""), "septiembre no es Navidad");
 
   const focusRows = [
     pepesMiniMay, pepesGelMay, pepesPetitPinApr, pepesPetitChocApr, pepesPetitPinMay,
@@ -1039,6 +1109,17 @@ async function main() {
           miniJunAbs: Number(pepesMiniJun.absoluteError.toFixed(1)),
           pinJun: Number(pepesPinJun.forecast.toFixed(1)),
           pinJunAbs: Number(pepesPinJun.absoluteError.toFixed(1)),
+          mokaChMay: Number(pepesMokaChMay.forecast.toFixed(1)),
+          mokaChMayAbs: Number(pepesMokaChMay.absoluteError.toFixed(1)),
+          frutasChMay: Number(pepesFrutasChMay.forecast.toFixed(1)),
+          frutasChMayAbs: Number(pepesFrutasChMay.absoluteError.toFixed(1)),
+          mokaMedMayAbs: Number(pepesMokaMedMay.absoluteError.toFixed(1)),
+          frutasGdeDec: Number(pepesFrutasGdeDec.forecast.toFixed(1)),
+          frutasGdeDecAbs: Number(pepesFrutasGdeDec.absoluteError.toFixed(1)),
+          payDecAbs: Number(pepesPayDec.absoluteError.toFixed(1)),
+          gelGdeDecAbs: Number(pepesGelGdeDec.absoluteError.toFixed(1)),
+          pinaDecAbs: Number(pepesPinaDec.absoluteError.toFixed(1)),
+          mokaSepAbs: Number(pepesMokaSep.absoluteError.toFixed(1)),
         },
         leftoverSkus: {
           june: Number(leftoverJune.wape.toFixed(2)),

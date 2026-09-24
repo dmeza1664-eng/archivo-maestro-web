@@ -2955,11 +2955,20 @@ function applyRecentMomentum(model, records, selectedMonth, options = {}) {
 // gelatinas eso cae justo en Día de las Madres, que sube frente a abril.
 // Primero se quita el recorte. El impulso de nivel va aparte y solo si
 // abril no venía ya alto. Con mayo del año pasado, la estacionalidad trae el evento.
+function isCakeSizeCategory(category) {
+  return category === "Pasteles grandes" || category === "Pasteles medianos" || category === "Pasteles chicos";
+}
+
+function isLargeGelatina(product) {
+  const value = normalizeProduct(product);
+  return value.includes("GELATINA") && /\bGDE\b/.test(value) && !isPriceTaggedProduct(product);
+}
+
 function liftColdStartMadresCalibration(model, records, selectedMonth, product) {
   if (!model?.averages) return model;
   if (calendarEventForMonth(selectedMonth)?.id !== "madres") return model;
   const category = productCategory(product);
-  if (category !== "Mini medianos" && category !== "Gelatinas") return model;
+  if (category !== "Mini medianos" && category !== "Gelatinas" && !isCakeSizeCategory(category)) return model;
   const monthlyData = buildMonthlyForecastData(records || []);
   if (monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth)) > 40) return model;
   const trend = Number(model.trend);
@@ -3052,6 +3061,14 @@ function coldStartEventUplift(records, selectedMonth, product) {
     return { factor: 1.18, label: "impulso frío Día de las Madres" };
   }
 
+  // Mayo sin año anterior: pasteles GDE/MED/CH también suben por el 10 de mayo.
+  // Mismo factor que minis (1.18), in-sample y por debajo del ~1.4× visto en
+  // MOKA/FRUTAS del informe Pepes. Sep–Nov no es mayo.
+  if (event?.id === "madres" && isCakeSizeCategory(category)) {
+    if (last > priorMed * 1.12) return null;
+    return { factor: 1.18, label: "impulso frío pastel Madres" };
+  }
+
   // Junio sin el mismo mes del año anterior: el arrastre de Madres baja mayo
   // y el mini se queda corto en Día del Padre. No pasa del mayo observado.
   // Gelatinas y petit no entran: en junio ya no dominaban el error. Sep–Nov
@@ -3065,10 +3082,21 @@ function coldStartEventUplift(records, selectedMonth, product) {
     return { factor: 1.5, label: "impulso frío Semana Santa" };
   }
 
-  if (isKiloGalleta(product) && (event?.id === "madres" || String(selectedMonth).endsWith("-12"))) {
+  if (isKiloGalleta(product) && (event?.id === "madres" || event?.id === "navidad")) {
     if (last > priorMed * 1.2) return null;
     const label = event?.id === "madres" ? "impulso frío kilo Madres" : "impulso frío kilo Navidad";
     return { factor: 1.65, label };
+  }
+
+  // Diciembre sin año anterior: Navidad/fin de año sube pasteles grandes y
+  // gelatinas GDE. No MED (PINA MED cae), ni petit (3 leches pinero cae),
+  // ni SKU con precio. Factor 1.18, in-sample, mismo tope de hombro.
+  if (event?.id === "navidad" && (category === "Pasteles grandes" || isLargeGelatina(product))) {
+    if (last > priorMed * 1.12) return null;
+    const label = category === "Pasteles grandes"
+      ? "impulso frío pastel Navidad"
+      : "impulso frío gelatina Navidad";
+    return { factor: 1.18, label };
   }
 
   return null;
@@ -3680,6 +3708,9 @@ function calendarEventForMonth(monthKey) {
   if (month === 6) {
     const sunday = thirdSundayOfJune(year);
     return { id: "padre", label: "Día del Padre", upliftShare: 0.35, peakDays: [sunday - 2, sunday - 1, sunday, sunday + 1] };
+  }
+  if (month === 12) {
+    return { id: "navidad", label: "Navidad / fin de año", upliftShare: 0.7, peakDays: [12, 24, 25, 31] };
   }
   return null;
 }
