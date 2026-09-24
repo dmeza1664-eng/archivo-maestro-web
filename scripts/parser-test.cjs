@@ -63,6 +63,10 @@ async function main() {
     computeImpulseCarryoverScale,
     calendarEventForMonth,
     normalizeProduct,
+    findOfficialProduct,
+    resolveOfficialProduct,
+    countSameYearConsecutiveRecentMonths,
+    prepareProductForecastHistory,
     isPriceTaggedProduct,
     applyCatalogOutlierCleanup,
     assessForecastFreezeReadiness,
@@ -349,6 +353,18 @@ async function main() {
   assert(normalizeProduct("TRES LECHES MEDIANO") === normalizeProduct("3 LECHES MED"), "TRES LECHES MEDIANO empata con 3 LECHES MED");
   assert(normalizeProduct("PAY DE FRESA GDE") === normalizeProduct("PAY FRESA GDE"), "PAY DE FRESA no se parte al quitar DE");
   assert(normalizeProduct("ZANAHORIA TRES LECHE MINI MEDIANO") === normalizeProduct("ZANAHORIA 3 LECHES MINI MED"), "TRES LECHE singular empata");
+  assert(
+    normalizeProduct("CHEESECAKE MMD CORAZON") === normalizeProduct("CHESSECAKE MMD CORAZON"),
+    "CHEESECAKE MMD CORAZON de 2024 empata con CHESSECAKE del catálogo"
+  );
+  assert(
+    findOfficialProduct("CHEESECAKE MMD CORAZON", ["CHESSECAKE MMD CORAZON", "CHESSECAKE GDE"]) === "CHESSECAKE MMD CORAZON",
+    "el alias/mapeo debe devolver el nombre oficial del catálogo"
+  );
+  assert(
+    resolveOfficialProduct("CHEESECAKE MMD CORAZON", {}, ["CHESSECAKE MMD CORAZON"]) === "CHESSECAKE MMD CORAZON",
+    "resolveOfficialProduct aplica el alias builtin del cheesecake corazón"
+  );
   assert(calendarEventForMonth("2026-05")?.id === "madres", "mayo es Día de las Madres");
   assert(calendarEventForMonth("2026-06")?.id === "padre", "junio es Día del Padre");
   assert(calendarEventForMonth("2025-12")?.id === "navidad", "diciembre es Navidad / fin de año");
@@ -770,7 +786,11 @@ async function main() {
     dailyBufferPct: 0,
   });
   assert(dollarJuly[0].pronosticoVenta > 300, `GELATINA $150 debe reactivar con julio 2025, no ir a 0 (fc ${dollarJuly[0].pronosticoVenta.toFixed(1)})`);
-  assert(dollarAugust[0].pronosticoVenta < 150, `GELATINA $150 agosto no debe inflar el fade de 80 (fc ${dollarAugust[0].pronosticoVenta.toFixed(1)})`);
+  assert(dollarAugust[0].pronosticoVenta > 40, `GELATINA $150 agosto no debe apagarse (fc ${dollarAugust[0].pronosticoVenta.toFixed(1)})`);
+  assert(
+    dollarAugust[0].pronosticoVenta < dollarJuly[0].pronosticoVenta,
+    `GELATINA $150 agosto no debe copiar el julio reactivado (${dollarAugust[0].pronosticoVenta.toFixed(1)} vs ${dollarJuly[0].pronosticoVenta.toFixed(1)})`
+  );
 
   const dormantHistory = [
     monthClose("2026-02", "RAMO FLORAL 12CM 3 CAPAS", 84),
@@ -901,6 +921,171 @@ async function main() {
     gelatinaDailyOff.find((row) => row.fecha === "2026-07-01").produccionSugeridaDia === july1Base.produccionSugeridaDia,
     "desactivar la promo quita el impulso de planta"
   );
+
+  const coldStock = [{ producto: "FRUTAS GDE", stock: 40, orden: 1 }];
+  const yearAgoOnly = [
+    monthClose("2024-01", "FRUTAS GDE", 980),
+    monthClose("2024-02", "FRUTAS GDE", 910),
+    monthClose("2024-03", "FRUTAS GDE", 900),
+    monthClose("2024-11", "FRUTAS GDE", 940),
+    monthClose("2024-12", "FRUTAS GDE", 1100),
+  ];
+  const januaryCold = calculateForecast({
+    stockRows: coldStock,
+    historicalVentas: yearAgoOnly,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-01",
+    dailyBufferPct: 10,
+  });
+  assert(januaryCold[0].pronosticoVenta > 700, `enero en frío debe usar 2024, no 0 (fc ${januaryCold[0].pronosticoVenta.toFixed(1)})`);
+  assert(
+    countSameYearConsecutiveRecentMonths(yearAgoOnly, "2025-01") === 0,
+    "enero no tiene meses del año en curso antes de pronosticar"
+  );
+
+  const leakedJanuary = calculateForecast({
+    stockRows: coldStock,
+    historicalVentas: [...yearAgoOnly, monthClose("2025-01", "FRUTAS GDE", 9000)],
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-01",
+    dailyBufferPct: 10,
+  });
+  assert(
+    Math.abs(leakedJanuary[0].pronosticoVenta - januaryCold[0].pronosticoVenta) < 0.01,
+    "nunca se usan ventas del mes pronosticado"
+  );
+
+  const currentYear = [
+    monthClose("2025-01", "FRUTAS GDE", 1020),
+    monthClose("2025-02", "FRUTAS GDE", 1010),
+    monthClose("2025-03", "FRUTAS GDE", 1000),
+  ];
+  const conflictingPriorYear = [
+    monthClose("2024-01", "FRUTAS GDE", 400),
+    monthClose("2024-02", "FRUTAS GDE", 380),
+    monthClose("2024-03", "FRUTAS GDE", 360),
+    monthClose("2024-04", "FRUTAS GDE", 200),
+  ];
+  const februaryWithoutPrior = calculateForecast({
+    stockRows: coldStock,
+    historicalVentas: currentYear,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-02",
+    dailyBufferPct: 10,
+  });
+  const februaryWithPrior = calculateForecast({
+    stockRows: coldStock,
+    historicalVentas: [...conflictingPriorYear, ...currentYear],
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-02",
+    dailyBufferPct: 10,
+  });
+  assert(
+    Math.abs(februaryWithPrior[0].pronosticoVenta - februaryWithoutPrior[0].pronosticoVenta) < 0.01,
+    `con enero cerrado el año anterior no debe cambiar febrero (${februaryWithPrior[0].pronosticoVenta.toFixed(1)} vs ${februaryWithoutPrior[0].pronosticoVenta.toFixed(1)})`
+  );
+
+  const deadSkuMarch = calculateForecast({
+    stockRows: coldStock,
+    historicalVentas: conflictingPriorYear,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-03",
+    dailyBufferPct: 10,
+  });
+  assert(
+    deadSkuMarch[0].pronosticoVenta < 1,
+    `un SKU sin venta en 2025 no debe copiar 2024 todo el año (fc ${deadSkuMarch[0].pronosticoVenta.toFixed(1)})`
+  );
+
+  const aprilWithoutPrior = calculateForecast({
+    stockRows: coldStock,
+    historicalVentas: currentYear,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-04",
+    dailyBufferPct: 10,
+  });
+  const aprilWithPrior = calculateForecast({
+    stockRows: coldStock,
+    historicalVentas: [...conflictingPriorYear, ...currentYear],
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-04",
+    dailyBufferPct: 10,
+  });
+  assert(
+    countSameYearConsecutiveRecentMonths(currentYear, "2025-04") === 3,
+    "abril tiene 3 meses seguidos del año en curso"
+  );
+  assert(
+    Math.abs(aprilWithPrior[0].pronosticoVenta - aprilWithoutPrior[0].pronosticoVenta) < 0.01,
+    `con trayectoria el año anterior no debe cambiar el pronóstico (${aprilWithPrior[0].pronosticoVenta.toFixed(1)} vs ${aprilWithoutPrior[0].pronosticoVenta.toFixed(1)})`
+  );
+  assert(
+    !/año anterior|resguardo estacional|reactivación estacional/i.test(aprilWithPrior[0].metodoPronostico || ""),
+    `con trayectoria no debe usarse el año anterior (${aprilWithPrior[0].metodoPronostico})`
+  );
+
+  const cheeseCatalog = [{ producto: "CHESSECAKE MMD CORAZON", stock: 10, orden: 1 }];
+  const cheese2024Sales = [
+    monthClose("2024-02", "CHEESECAKE MMD CORAZON", 180),
+    monthClose("2024-03", "CHEESECAKE MMD CORAZON", 40),
+    monthClose("2024-04", "CHEESECAKE MMD CORAZON", 30),
+  ];
+  const cheeseJanuary = calculateForecast({
+    stockRows: cheeseCatalog,
+    historicalVentas: cheese2024Sales,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-01",
+    dailyBufferPct: 10,
+  });
+  assert(
+    cheeseJanuary[0].pronosticoVenta > 20,
+    `el cheesecake corazón 2024 debe entrar al catálogo CHESSECAKE (fc ${cheeseJanuary[0].pronosticoVenta.toFixed(1)})`
+  );
+
+  const miniStock = [{ producto: "MINI MED CHOCOLATE", stock: 40, orden: 1 }];
+  const miniWithPriorMay = [
+    monthClose("2024-05", "MINI MED CHOCOLATE", 2500),
+    monthClose("2025-03", "MINI MED CHOCOLATE", 1143),
+    monthClose("2025-04", "MINI MED CHOCOLATE", 1080),
+  ];
+  const miniMay = calculateForecast({
+    stockRows: miniStock,
+    historicalVentas: miniWithPriorMay,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-05",
+    dailyBufferPct: 10,
+  });
+  assert(
+    /impulso frío Día de las Madres/i.test(miniMay[0].metodoPronostico || ""),
+    `con 2 meses de 2025 las reglas de calendario #20–#22 siguen activas (${miniMay[0].metodoPronostico})`
+  );
+
+  const historyPrep = prepareProductForecastHistory(
+    [...conflictingPriorYear, ...currentYear],
+    "2025-04",
+    ["2024-01", "2024-02", "2024-03", "2024-04", "2025-01", "2025-02", "2025-03"]
+  );
+  assert(historyPrep.mode === "recent", "abril con 3 meses de 2025 usa solo historia reciente");
+  assert(historyPrep.allowYearOverYear === false, "con trayectoria no se abre estacionalidad año contra año");
+  assert(historyPrep.recentCount >= 2, "abril debe contar al menos 2 meses seguidos de 2025");
 
   console.log("parser-test ok");
 }

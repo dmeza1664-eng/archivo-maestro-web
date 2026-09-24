@@ -112,6 +112,10 @@ const SESSION_STORAGE_KEY = "archivoMaestroSession";
 const FORECAST_MODEL_VERSION = "categorySeasonal";
 const OPERATIONAL_MARGIN_PCT = 12;
 const MIN_SALES_DAILY_COVERAGE = 0.7;
+// Con 2 meses seguidos del año en curso el modelo ya tiene trayectoria
+// y las reglas de calendario #20–#22 siguen activas. El año anterior
+// solo se abre si además el año en curso aún no tiene un mes cerrado.
+const COLD_START_MIN_RECENT_MONTHS = 2;
 const API_PAGE_SIZE = 4000;
 const API_UPLOAD_BATCH_SIZE = 1500;
 const MAX_SNAPSHOT_BYTES = 3.5 * 1024 * 1024;
@@ -402,9 +406,22 @@ function getOfficialProducts(stockRows) {
     });
 }
 
+function lookupBuiltinProductAlias(product) {
+  const normalized = normalizeProduct(product);
+  if (!normalized) return "";
+  const raw = norm(product).replace(/[.,/\\_-]+/g, " ").replace(/\s+/g, " ").trim();
+  const alias = BUILTIN_PRODUCT_ALIASES[product]
+    || BUILTIN_PRODUCT_ALIASES[raw]
+    || BUILTIN_PRODUCT_ALIASES[normalized]
+    || "";
+  return alias ? normalizeProduct(alias) : "";
+}
+
 function findOfficialProduct(product, officialProducts) {
   const normalized = normalizeProduct(product);
   if (!normalized) return "";
+  const builtin = lookupBuiltinProductAlias(product);
+  if (builtin && officialProducts.includes(builtin)) return builtin;
   if (officialProducts.includes(normalized)) return normalized;
 
   const matchKey = productMatchKey(normalized);
@@ -415,6 +432,8 @@ function findOfficialProduct(product, officialProducts) {
 function resolveOfficialProduct(product, productAliases, officialProducts) {
   const normalized = normalizeProduct(product);
   if (!normalized) return "";
+  const builtin = lookupBuiltinProductAlias(product);
+  if (builtin && officialProducts.includes(builtin)) return builtin;
   const manual = productAliases[normalized];
   if (manual && officialProducts.includes(manual)) return manual;
   return findOfficialProduct(normalized, officialProducts) || normalized;
@@ -526,6 +545,11 @@ const WEEKDAY_BY_NORM = new Map(
 
 const PRODUCT_ALIAS_STORAGE_KEY = "archivoMaestroProductAliases";
 const ACTIVE_PROMOS_STORAGE_KEY = "archivoMaestroActivePromos";
+// Grafías de Pepes/catálogo que normalizeProduct no alcanza por sí solo
+// cuando el mapeo entra por código o por el nombre crudo de 2024.
+const BUILTIN_PRODUCT_ALIASES = {
+  "CHEESECAKE MMD CORAZON": "CHESSECAKE MMD CORAZON",
+};
 const PROMO_DURATION_PRESETS = [
   { value: "hoy", label: "Hoy" },
   { value: "3dias", label: "3 días" },
@@ -2372,7 +2396,7 @@ function collectProductRecords(byProduct, product, original, officialProducts = 
     || findOfficialProduct(original, officialProducts)
     || "";
   const wanted = new Set(
-    [product, original, official]
+    [product, original, official, lookupBuiltinProductAlias(product), lookupBuiltinProductAlias(original)]
       .filter(Boolean)
       .map((name) => normalizeProduct(name))
       .filter(Boolean)
@@ -2428,6 +2452,164 @@ function fillCompleteZeroMonths(records, completeMonths) {
   return missingZeros.length ? [...records, ...missingZeros] : records;
 }
 
+function monthHasHistoryRecord(records, monthKey) {
+  if (!monthKey) return false;
+  return (records || []).some((row) => monthKeyFromRecord(row) === monthKey);
+}
+
+function countSameYearConsecutiveRecentMonths(records, selectedMonth) {
+  const year = String(selectedMonth || "").slice(0, 4);
+  if (!year) return 0;
+  let count = 0;
+  let cursor = previousMonthKey(selectedMonth);
+  while (cursor && cursor.slice(0, 4) === year) {
+    if (!monthHasHistoryRecord(records, cursor)) break;
+    count += 1;
+    cursor = previousMonthKey(cursor);
+  }
+  return count;
+}
+
+function yearHasClosedMonthBefore(selectedMonth) {
+  const previous = previousMonthKey(selectedMonth);
+  return Boolean(previous && previous.slice(0, 4) === String(selectedMonth || "").slice(0, 4));
+}
+
+function priorYearActualRecords(records, selectedMonth) {
+  const year = String(selectedMonth || "").slice(0, 4);
+  return (records || []).filter((row) => {
+    const key = monthKeyFromRecord(row);
+    if (!key || key >= selectedMonth || row.inferredZeroMonth) return false;
+    return key.slice(0, 4) < year && toNumber(row.cantidad) > 0;
+  });
+}
+
+function sameYearObservedRecords(records, selectedMonth) {
+  const year = String(selectedMonth || "").slice(0, 4);
+  return (records || []).filter((row) => {
+    const key = monthKeyFromRecord(row);
+    return key && key.slice(0, 4) === year && key < selectedMonth;
+  });
+}
+
+function hasPriorYearHistory(records, selectedMonth) {
+  const year = String(selectedMonth || "").slice(0, 4);
+  return (records || []).some((row) => {
+    const key = monthKeyFromRecord(row);
+    if (!key || key >= selectedMonth || row.inferredZeroMonth) return false;
+    return key.slice(0, 4) < year && toNumber(row.cantidad) > 0;
+  });
+}
+
+function sameYearRecordsBefore(records, selectedMonth) {
+  const year = String(selectedMonth || "").slice(0, 4);
+  return (records || []).filter((row) => {
+    const key = monthKeyFromRecord(row);
+    return key && key.slice(0, 4) === year && key < selectedMonth;
+  });
+}
+
+function priorYearEquivalentMonths(monthlyData, selectedMonth) {
+  const priorMonth = sameMonthPreviousYear(selectedMonth);
+  const priorTotal = monthTotalFromData(monthlyData, priorMonth);
+  if (priorTotal > 0) {
+    return { monthKeys: [priorMonth], total: priorTotal, usedSameMonth: true };
+  }
+  const priorYear = String(Number(String(selectedMonth || "").slice(0, 4)) - 1);
+  if (!Number.isFinite(Number(priorYear))) return { monthKeys: [], total: 0, usedSameMonth: false };
+  const lastMonths = [...monthlyData.keys()]
+    .filter((key) => key.startsWith(`${priorYear}-`) && key < selectedMonth)
+    .sort()
+    .filter((key) => monthTotalFromData(monthlyData, key) > 0)
+    .slice(-3);
+  if (!lastMonths.length) return { monthKeys: [], total: 0, usedSameMonth: false };
+  const total = lastMonths.reduce((sum, key) => sum + monthTotalFromData(monthlyData, key), 0) / lastMonths.length;
+  return { monthKeys: lastMonths, total, usedSameMonth: false };
+}
+
+function buildColdStartPriorYearModel(records, selectedMonth) {
+  const monthlyData = buildMonthlyForecastData(records || []);
+  const equivalent = priorYearEquivalentMonths(monthlyData, selectedMonth);
+  const growth = computeAnnualGrowthFactor(monthlyData, selectedMonth, 3);
+  const targetDays = Math.max(1, datesForMonth(selectedMonth).length);
+  if (!(equivalent.total > 0)) {
+    return {
+      averages: uniformWeekdayAverages(0),
+      trend: 1,
+      recentMonths: [],
+      method: "Arranque en frío: sin año anterior",
+      backtestMonth: previousMonthKey(selectedMonth),
+      backtestActual: 0,
+      backtestForecast: 0,
+      backtestError: 0,
+    };
+  }
+
+  const sourceKey = equivalent.monthKeys.at(-1);
+  const sourceShape = weightedWeekdayAverages(monthlyData, [sourceKey], [1]);
+  const shapedTotal = forecastTotalFromAverages(sourceShape, selectedMonth);
+  const targetTotal = equivalent.total * growth;
+  const averages = shapedTotal > 0
+    ? scaleForecastAverages(sourceShape, targetTotal / shapedTotal)
+    : uniformWeekdayAverages(targetTotal / targetDays);
+  const baseLabel = equivalent.usedSameMonth
+    ? "Arranque en frío: mismo mes año anterior"
+    : "Arranque en frío: promedio últimos meses año anterior";
+  const method = Math.abs(growth - 1) > 0.001
+    ? `${baseLabel} · nivel ${growth.toFixed(2)}`
+    : baseLabel;
+
+  return {
+    averages,
+    trend: growth,
+    recentMonths: equivalent.monthKeys,
+    method,
+    backtestMonth: previousMonthKey(selectedMonth),
+    backtestActual: monthTotalFromData(monthlyData, previousMonthKey(selectedMonth)),
+    backtestForecast: 0,
+    backtestError: 0,
+  };
+}
+
+function forecastAllowsYearOverYear(records, selectedMonth) {
+  // El año anterior solo entra en arranque en frío real: el año en curso
+  // todavía no tiene un mes cerrado y el SKU no trae meses de este año.
+  // Con un mes cerrado, un umbral de 2 meses reabriría 2024 en febrero
+  // (crecimiento irregular de aperturas) y reviviría SKUs que ya no venden.
+  if (yearHasClosedMonthBefore(selectedMonth)) return false;
+  const recentCount = countSameYearConsecutiveRecentMonths(records, selectedMonth);
+  return recentCount === 0 && hasPriorYearHistory(records, selectedMonth);
+}
+
+function prepareProductForecastHistory(observed, selectedMonth, completeHistoricalMonths) {
+  const year = String(selectedMonth || "").slice(0, 4);
+  const beforeTarget = (completeHistoricalMonths || []).filter((month) => month < selectedMonth);
+  const sameYearComplete = beforeTarget.filter((month) => month.slice(0, 4) === year);
+  const sameYearObserved = sameYearObservedRecords(observed, selectedMonth);
+  const sameYearFilled = fillCompleteZeroMonths(sameYearObserved, sameYearComplete);
+  const recentCount = countSameYearConsecutiveRecentMonths(
+    sameYearFilled.length ? sameYearFilled : sameYearObserved,
+    selectedMonth
+  );
+  const allowYearOverYear = forecastAllowsYearOverYear(observed, selectedMonth);
+
+  if (allowYearOverYear) {
+    return {
+      mode: "prior-year",
+      recentCount,
+      allowYearOverYear: true,
+      records: fillCompleteZeroMonths(observed || [], beforeTarget),
+    };
+  }
+
+  return {
+    mode: "recent",
+    recentCount,
+    allowYearOverYear: false,
+    records: [...sameYearFilled, ...priorYearActualRecords(observed, selectedMonth)],
+  };
+}
+
 function calculateForecast({
   stockRows,
   historicalVentas,
@@ -2452,10 +2634,9 @@ function calculateForecast({
 
   return stockRows.filter((s) => !isSliceProduct(s.producto) && !isPromotionalProduct(s.producto)).map((s) => {
     const product = normalizeProduct(s.producto);
-    const v = fillCompleteZeroMonths(
-      collectProductRecords(ventasByProduct, product, s.producto, officialProducts),
-      completeHistoricalMonths
-    );
+    const observed = collectProductRecords(ventasByProduct, product, s.producto, officialProducts);
+    const history = prepareProductForecastHistory(observed, selectedMonth, completeHistoricalMonths);
+    const v = history.records;
     const b = collectProductRecords(bajasByProduct, product, s.producto, officialProducts);
     const activePromo = findActivePromoForProductInMonth(activePromos, s.producto || product, selectedMonth);
     const rawForecastModel = calculateForecastModelForVersion(v, selectedMonth, product, modelVersion);
@@ -2970,7 +3151,9 @@ function liftColdStartMadresCalibration(model, records, selectedMonth, product) 
   const category = productCategory(product);
   if (category !== "Mini medianos" && category !== "Gelatinas" && !isCakeSizeCategory(category)) return model;
   const monthlyData = buildMonthlyForecastData(records || []);
-  if (monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth)) > 40) return model;
+  const priorYearTotal = monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
+  const recentCount = countSameYearConsecutiveRecentMonths(records || [], selectedMonth);
+  if (priorYearTotal > 40 && recentCount < COLD_START_MIN_RECENT_MONTHS) return model;
   const trend = Number(model.trend);
   if (!Number.isFinite(trend) || trend <= 0 || trend >= 0.995) return model;
   return {
@@ -3031,7 +3214,10 @@ function isKiloGalleta(product) {
 function recentLevelBeforeTarget(records, selectedMonth) {
   const monthlyData = buildMonthlyForecastData(records || []);
   const history = [...monthlyData.keys()].filter((month) => month < selectedMonth).sort();
-  const observed = history.filter((month) => !monthIsInferredZero(records, month));
+  const year = String(selectedMonth || "").slice(0, 4);
+  const allObserved = history.filter((month) => !monthIsInferredZero(records, month));
+  const sameYear = allObserved.filter((month) => month.slice(0, 4) === year);
+  const observed = sameYear.length ? sameYear : allObserved;
   const last = observed.length ? (monthlyData.get(observed.at(-1))?.total || 0) : 0;
   const prior = observed
     .slice(-4, -1)
@@ -3050,7 +3236,8 @@ function coldStartEventUplift(records, selectedMonth, product) {
     buildMonthlyForecastData(records || []),
     sameMonthPreviousYear(selectedMonth)
   );
-  if (priorYear > 40) return null;
+  const recentCount = countSameYearConsecutiveRecentMonths(records || [], selectedMonth);
+  if (priorYear > 40 && recentCount < COLD_START_MIN_RECENT_MONTHS) return null;
   const { last, priorMed } = recentLevelBeforeTarget(records, selectedMonth);
   if (!(last > 40) || !(priorMed > 0)) return null;
   const event = calendarEventForMonth(selectedMonth);
@@ -3146,11 +3333,13 @@ function isYearRoundDessertLine(product) {
 // de galleta en Día de las Madres (mayo ~620 → junio ~375). No se copia
 // entero al mes siguiente. Una subida de pastel ~1.3× (Madres sobre el
 // mes previo) no entra: el umbral es 1.85× la mediana reciente.
-function unsupportedRecentSpikeCap({ modelTotal, last, observedHistory, monthlyData, selectedMonth, product }) {
+function unsupportedRecentSpikeCap({ modelTotal, last, observedHistory, monthlyData, selectedMonth, product, ignorePriorYear = false }) {
   if (!(modelTotal > 20) || !(last > 80) || !observedHistory?.length) return null;
   // Si el mes que estamos pronosticando ya vendió parecido el año pasado,
   // el nivel lo sostiene la estacionalidad y no es un pico suelto.
-  const targetLastYear = monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
+  const targetLastYear = ignorePriorYear
+    ? 0
+    : monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
   if (targetLastYear > modelTotal * 0.75) return null;
 
   const prior = observedHistory
@@ -3194,8 +3383,15 @@ function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
   // Los ceros inferidos (mes cargado para otro SKU, este no apareció / alias
   // partido) no son una baja real. Si se cuentan, CHEESECAKE / NUTELA / M & M
   // MED se marcan intermitentes y dominan el WAPE.
-  const observedHistory = history.filter((month) => !monthIsInferredZero(records, month));
-  if (!observedHistory.length) {
+  const allObserved = history.filter((month) => !monthIsInferredZero(records, month));
+  const recentCount = countSameYearConsecutiveRecentMonths(records || [], selectedMonth);
+  const targetYear = String(selectedMonth || "").slice(0, 4);
+  const sameYearObserved = allObserved.filter((month) => month.slice(0, 4) === targetYear);
+  const allowYearOverYear = forecastAllowsYearOverYear(records || [], selectedMonth);
+  const observedHistory = !allowYearOverYear && sameYearObserved.length
+    ? sameYearObserved
+    : allObserved;
+  if (!allObserved.length) {
     return {
       ...model,
       averages: scaleForecastAverages(model.averages, 0),
@@ -3286,6 +3482,7 @@ function applyCatalogOutlierCleanup(model, records, selectedMonth, product) {
     monthlyData,
     selectedMonth,
     product,
+    ignorePriorYear: !allowYearOverYear,
   });
   if (unsupportedCap != null && unsupportedCap < targetTotal) {
     targetTotal = unsupportedCap;
@@ -3802,7 +3999,11 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
     ? Number(forecastOptions.seasonalSplit)
     : 0.5;
   const historicalMonths = [...monthlyData.keys()].filter((monthKey) => monthKey < targetMonth).sort();
-  const recentMonths = historicalMonths.slice(-3);
+  const targetYear = String(targetMonth || "").slice(0, 4);
+  const recentPool = forecastOptions.allowYearOverYear === false
+    ? historicalMonths.filter((monthKey) => monthKey.slice(0, 4) === targetYear)
+    : historicalMonths;
+  const recentMonths = recentPool.slice(-3);
   const latestMonth = recentMonths.at(-1);
   const targetDays = datesForMonth(targetMonth).length;
   // Nivel reciente: si mayo (Madres) es un pico, no copiarlo a junio.
@@ -3866,7 +4067,9 @@ function buildForecastCandidates(monthlyData, targetMonth, forecastOptions = {})
     [latestMonth]
   );
 
-  const seasonalRef = resolvePriorYearSeasonal(monthlyData, targetMonth, forecastOptions);
+  const seasonalRef = forecastOptions.allowYearOverYear === false
+    ? null
+    : resolvePriorYearSeasonal(monthlyData, targetMonth, forecastOptions);
   if (seasonalRef) {
     const previousTargetMonth = previousMonthKey(targetMonth);
     const previousYearReference = sameMonthPreviousYear(previousTargetMonth);
@@ -3953,18 +4156,31 @@ function calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, 
   const useConservativeBacktest = /\b(GALLETA|BOLLO|PAN)\b/.test(product);
   const legacy = calculateForecastModelLegacy(records, selectedMonth, !useConservativeBacktest, forecastOptions);
   if (useConservativeBacktest) return legacy;
-  const candidates = buildForecastCandidates(buildMonthlyForecastData(records), selectedMonth, forecastOptions);
+  const monthlyData = buildMonthlyForecastData(records);
+  const candidates = buildForecastCandidates(monthlyData, selectedMonth, forecastOptions);
   const seasonal = candidates.get("Estacional-reciente") || candidates.get("Mismo mes año anterior");
   const recent = candidates.get("Último mes por día") || candidates.get("Último total mensual");
-  if (!seasonal) return legacy;
   // Hueco reciente (GELATINA FRESA $150 may–jun = 0) no debe tirar el
   // mismo mes del año anterior si ESE mes sí vendió. Un proxy de vecinos
   // no cuenta: CAJITA FELIZ no tiene julio 2025 y debe seguir en 0.
   if (!recent || recent.total <= 0.5) {
-    const monthlyData = buildMonthlyForecastData(records);
+    const targetYear = String(selectedMonth || "").slice(0, 4);
+    const sameYearMonths = [...monthlyData.keys()].filter((month) => month.slice(0, 4) === targetYear && month < selectedMonth);
+    // Sin meses del año en curso no es un hueco: es arranque o SKU inactivo.
+    // La reactivación ($150) pide evidencia reciente en cero, no copiar el año anterior.
+    if (!sameYearMonths.length && forecastOptions.allowYearOverYear === false) {
+      return legacy;
+    }
     const priorYearTotal = monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
-    const sameMonth = candidates.get("Mismo mes año anterior") || seasonal;
-    if (priorYearTotal > 40 && sameMonth.total > 10) {
+    let sameMonth = candidates.get("Mismo mes año anterior") || seasonal;
+    if ((!sameMonth || !(sameMonth.total > 10)) && priorYearTotal > 40) {
+      const priorYearCandidates = buildForecastCandidates(monthlyData, selectedMonth, {
+        ...forecastOptions,
+        allowYearOverYear: true,
+      });
+      sameMonth = priorYearCandidates.get("Mismo mes año anterior") || priorYearCandidates.get("Estacional-reciente");
+    }
+    if (priorYearTotal > 40 && sameMonth && sameMonth.total > 10) {
       return {
         ...legacy,
         averages: sameMonth.averages,
@@ -3974,6 +4190,7 @@ function calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, 
     }
     return legacy;
   }
+  if (!seasonal) return legacy;
   if (Math.abs(seasonal.total - recent.total) / recent.total < 0.08) {
     return legacy;
   }
@@ -3995,7 +4212,11 @@ function calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, 
 // usando solo informacion anterior a cada mes de validacion.
 function calculateForecastModelSeasonalAdaptive(records, selectedMonth, candidateWeights = [0, 0.25, 0.5, 0.75, 1], forecastOptions = {}) {
   const monthlyData = buildMonthlyForecastData(records);
-  const historicalMonths = [...monthlyData.keys()].filter((month) => month < selectedMonth).sort();
+  const targetYear = String(selectedMonth || "").slice(0, 4);
+  const historicalMonths = [...monthlyData.keys()].filter((month) => {
+    if (!(month < selectedMonth)) return false;
+    return forecastOptions.allowYearOverYear !== false || month.slice(0, 4) === targetYear;
+  }).sort();
   const validationMonths = historicalMonths.slice(-3);
   const fallbackWeight = ["Otros", "Mini medianos"].includes(productCategory(records[0]?.producto || "")) ? 0.5 : 0.75;
   if (validationMonths.length < 2) return calculateForecastModelSeasonal(records, selectedMonth, fallbackWeight, forecastOptions);
@@ -4042,7 +4263,10 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
   const version = String(modelVersion || FORECAST_MODEL_VERSION);
   if (version === "seasonalAdaptive") return calculateForecastModelSeasonalAdaptive(records, selectedMonth);
   if (version === "categorySeasonal" || version.startsWith("csG")) {
-    const options = forecastTuningOptions(version);
+    const options = {
+      ...forecastTuningOptions(version),
+      allowYearOverYear: forecastAllowsYearOverYear(records, selectedMonth),
+    };
     const category = productCategory(product);
     const seasonalWeight = ["Otros", "Mini medianos"].includes(category) ? 0.5 : 0.75;
     if (category === "Pasteles grandes" || category === "Pasteles medianos" || category === "Pasteles chicos" || category === "Mini medianos") {
@@ -4056,7 +4280,8 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
         latest &&
         !String(latest).endsWith("-05")
       );
-      const seasonalFade = priorYearLooksLikeSeasonalFade(monthlyData, selectedMonth);
+      const seasonalFade = options.allowYearOverYear !== false
+        && priorYearLooksLikeSeasonalFade(monthlyData, selectedMonth);
       // Impulso por SKU si ESE producto aceleró en la 2ª quincena. No es un
       // empuje de categoría: FRUTAS MED sin diario no se mueve. Gelatinas
       // quedan fuera: en jun–ago el diario aceleró y julio quedó plano.
@@ -9637,6 +9862,12 @@ export {
   calendarEventForMonth,
   normalizeProduct,
   productMatchKey,
+  findOfficialProduct,
+  resolveOfficialProduct,
+  lookupBuiltinProductAlias,
+  countSameYearConsecutiveRecentMonths,
+  prepareProductForecastHistory,
+  buildColdStartPriorYearModel,
   isPriceTaggedProduct,
   isPromotionalProduct,
   isOperationalCakeProduct,
