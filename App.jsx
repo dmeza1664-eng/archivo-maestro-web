@@ -2953,8 +2953,8 @@ function applyRecentMomentum(model, records, selectedMonth, options = {}) {
 // Mayo sin el mismo mes del año anterior copia abril y, si abril quedó
 // por encima, la calibración (0.85–1.15) recorta todavía más. En minis y
 // gelatinas eso cae justo en Día de las Madres, que sube frente a abril.
-// Solo se quita el recorte; no se agrega un factor de Madres encima.
-// Con mayo del año pasado presente, la estacionalidad ya trae el evento.
+// Primero se quita el recorte. El impulso de nivel va aparte y solo si
+// abril no venía ya alto. Con mayo del año pasado, la estacionalidad trae el evento.
 function liftColdStartMadresCalibration(model, records, selectedMonth, product) {
   if (!model?.averages) return model;
   if (calendarEventForMonth(selectedMonth)?.id !== "madres") return model;
@@ -2969,6 +2969,114 @@ function liftColdStartMadresCalibration(model, records, selectedMonth, product) 
     averages: scaleForecastAverages(model.averages, 1 / trend),
     trend: 1,
     method: `${model.method || "Modelo"} · sin recorte pre-Madres`,
+  };
+}
+
+// Domingo de Pascua (algoritmo gregoriano). Semana Santa cae en ese mes
+// o, si el Viernes Santo queda en el mes anterior, en ambos.
+function easterSunday(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return { year, month, day };
+}
+
+function monthContainsSemanaSanta(monthKey) {
+  const [year, month] = String(monthKey || "").split("-").map(Number);
+  if (!year || !month) return false;
+  const easter = easterSunday(year);
+  if (easter.month === month) return true;
+  const easterDate = new Date(year, easter.month - 1, easter.day);
+  const goodFriday = new Date(easterDate);
+  goodFriday.setDate(easterDate.getDate() - 2);
+  return goodFriday.getMonth() + 1 === month;
+}
+
+function isPetitTresLeches(product) {
+  const value = normalizeProduct(product);
+  return /\bPETIT\b/.test(value) && /\b3 LECHES\b/.test(value);
+}
+
+function isIndividualGelatina(product) {
+  const value = normalizeProduct(product);
+  return value.includes("GELATINA") && /\bIND\b/.test(value);
+}
+
+// "1/4 KG" y "1 2 KG DE GALLETA" quedan como "1 4 KG GALLETA" / "1 2 KG GALLETA".
+function isKiloGalleta(product) {
+  const value = normalizeProduct(product);
+  return value.includes("GALLETA") && /\b1\s*[24]\s*KG\b/.test(value);
+}
+
+function recentLevelBeforeTarget(records, selectedMonth) {
+  const monthlyData = buildMonthlyForecastData(records || []);
+  const history = [...monthlyData.keys()].filter((month) => month < selectedMonth).sort();
+  const observed = history.filter((month) => !monthIsInferredZero(records, month));
+  const last = observed.length ? (monthlyData.get(observed.at(-1))?.total || 0) : 0;
+  const prior = observed
+    .slice(-4, -1)
+    .map((month) => monthlyData.get(month)?.total || 0)
+    .filter((value) => value > 0.5);
+  const priorMed = prior.length ? median(prior) : last;
+  return { monthlyData, last, priorMed };
+}
+
+// Arranque en frío (sin el mismo mes del año anterior): el modelo copia el
+// hombro y se queda corto en el evento. No inventa cierres. No aplica si
+// el mes previo ya venía alto, ni a gelatinas con hueco ($150), ni a petit
+// decorado. Sep–Nov no es ninguno de estos meses.
+function coldStartEventUplift(records, selectedMonth, product) {
+  const priorYear = monthTotalFromData(
+    buildMonthlyForecastData(records || []),
+    sameMonthPreviousYear(selectedMonth)
+  );
+  if (priorYear > 40) return null;
+  const { last, priorMed } = recentLevelBeforeTarget(records, selectedMonth);
+  if (!(last > 40) || !(priorMed > 0)) return null;
+  const event = calendarEventForMonth(selectedMonth);
+  const category = productCategory(product);
+
+  if (event?.id === "madres" && (category === "Mini medianos" || isIndividualGelatina(product))) {
+    if (last > priorMed * 1.12) return null;
+    return { factor: 1.18, label: "impulso frío Día de las Madres" };
+  }
+
+  if (monthContainsSemanaSanta(selectedMonth) && isPetitTresLeches(product)) {
+    if (last > priorMed * 1.25) return null;
+    return { factor: 1.5, label: "impulso frío Semana Santa" };
+  }
+
+  if (isKiloGalleta(product) && (event?.id === "madres" || String(selectedMonth).endsWith("-12"))) {
+    if (last > priorMed * 1.2) return null;
+    const label = event?.id === "madres" ? "impulso frío kilo Madres" : "impulso frío kilo Navidad";
+    return { factor: 1.65, label };
+  }
+
+  return null;
+}
+
+function applyColdStartEventUplift(model, records, selectedMonth, product) {
+  if (!model?.averages) return model;
+  const uplift = coldStartEventUplift(records, selectedMonth, product);
+  if (!uplift) return model;
+  const modelTotal = forecastTotalFromAverages(model.averages, selectedMonth);
+  if (!(modelTotal > 40)) return model;
+  return {
+    ...model,
+    averages: scaleForecastAverages(model.averages, uplift.factor),
+    trend: (model.trend || 1) * uplift.factor,
+    method: `${model.method || "Modelo"} · ${uplift.label}`,
   };
 }
 
@@ -3020,7 +3128,15 @@ function unsupportedRecentSpikeCap({ modelTotal, last, observedHistory, monthlyD
 
   const priorMed = median(priorPositive);
   if (!(priorMed > 0)) return null;
-  const spiked = last > Math.max(priorMed * 1.85, priorMed + 80);
+  // PETIT 3 LECHES en Semana Santa sube ~1.6× (no llega al 1.85× de un
+  // estreno). El mes siguiente no es el evento: no copiar ese hombro.
+  const lastMonth = observedHistory.at(-1);
+  const petitHolidayShoulder = isPetitTresLeches(product)
+    && monthContainsSemanaSanta(lastMonth)
+    && !monthContainsSemanaSanta(selectedMonth);
+  const spikeRatio = petitHolidayShoulder ? 1.45 : 1.85;
+  const spikeGap = petitHolidayShoulder ? 40 : 80;
+  const spiked = last > Math.max(priorMed * spikeRatio, priorMed + spikeGap);
   if (!spiked || !(modelTotal > Math.max(priorMed * 1.35, 40))) return null;
   return Math.max(priorMed * 1.25, Math.min(last * 0.55, priorMed * 1.9));
 }
@@ -3919,13 +4035,23 @@ function calculateForecastModelForVersion(records, selectedMonth, product, model
             cakeOptions
           )
         : calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, cakeOptions);
-      const lifted = liftColdStartMadresCalibration(model, records, selectedMonth, product);
+      const lifted = applyColdStartEventUplift(
+        liftColdStartMadresCalibration(model, records, selectedMonth, product),
+        records,
+        selectedMonth,
+        product
+      );
       return allowMomentum
         ? applyRecentMomentum(lifted, records, selectedMonth, cakeOptions)
         : lifted;
     }
-    return liftColdStartMadresCalibration(
-      calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, options),
+    return applyColdStartEventUplift(
+      liftColdStartMadresCalibration(
+        calculateForecastModelSeasonal(records, selectedMonth, seasonalWeight, options),
+        records,
+        selectedMonth,
+        product
+      ),
       records,
       selectedMonth,
       product

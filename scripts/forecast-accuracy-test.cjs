@@ -844,6 +844,113 @@ async function main() {
     + 504.25;
   assert(spikeAbs < publishedAbs - 400, `la canasta May–Ago debe bajar el |e| publicado ${publishedAbs.toFixed(0)} (ahora ${spikeAbs.toFixed(0)})`);
 
+  // Pepes 2025, arranque sin el mismo mes del año anterior. Magnitudes de
+  // los meses que dominan Σ|e| (informe @ d664fd2). El |e| "antes" es el
+  // publicado en ese backtest; aquí se exige que el guardia lo baje.
+  const pepesStock = [
+    { producto: "MINI MED CHOCOLATE", stock: 40, orden: 1 },
+    { producto: "GELATINA IND FRESA", stock: 40, orden: 2 },
+    { producto: "PETIT 3 LECHES PINERO", stock: 20, orden: 3 },
+    { producto: "PETIT 3 LECHES CHOCOLATE", stock: 20, orden: 4 },
+    { producto: "PETIT DECORADO", stock: 20, orden: 5 },
+    { producto: "1 4 KG GALLETA", stock: 20, orden: 6 },
+    { producto: "1 2 KG GALLETA", stock: 20, orden: 7 },
+    { producto: "MINI MED PINERO", stock: 40, orden: 8 },
+  ];
+  const pepesSeries = {
+    "MINI MED CHOCOLATE": {
+      "2025-02": 2300, "2025-03": 2254, "2025-04": 2054, "2025-05": 2614,
+      "2025-06": 2775, "2025-07": 2400, "2025-08": 2380, "2025-09": 2400, "2025-10": 2417, "2025-11": 2350,
+    },
+    "MINI MED PINERO": {
+      "2025-02": 2200, "2025-03": 2081, "2025-04": 2100, "2025-05": 2480,
+      "2025-06": 2509, "2025-07": 2300, "2025-08": 2241, "2025-09": 2393, "2025-10": 2293, "2025-11": 2300,
+    },
+    "GELATINA IND FRESA": {
+      "2025-02": 2200, "2025-03": 2100, "2025-04": 2080, "2025-05": 2571,
+      "2025-06": 2300, "2025-07": 2066, "2025-08": 2100, "2025-09": 2100, "2025-10": 2050, "2025-11": 1945,
+    },
+    "PETIT 3 LECHES PINERO": {
+      "2025-03": 755, "2025-04": 1206, "2025-05": 857, "2025-06": 800, "2025-07": 780,
+      "2025-08": 934, "2025-09": 820, "2025-10": 800, "2025-11": 819,
+    },
+    "PETIT 3 LECHES CHOCOLATE": {
+      "2025-03": 819, "2025-04": 1824, "2025-05": 900, "2025-06": 850,
+      "2025-07": 819, "2025-08": 984,
+    },
+    "PETIT DECORADO": {
+      "2025-03": 620, "2025-04": 377, "2025-05": 860, "2025-06": 700,
+    },
+    "1 4 KG GALLETA": {
+      "2025-02": 520, "2025-03": 589, "2025-04": 540, "2025-05": 1295,
+      "2025-06": 560, "2025-07": 540, "2025-08": 550, "2025-09": 530, "2025-10": 545,
+      "2025-11": 560, "2025-12": 1565,
+    },
+    "1 2 KG GALLETA": {
+      "2025-02": 500, "2025-03": 540, "2025-04": 510, "2025-05": 1177,
+      "2025-06": 500, "2025-07": 490, "2025-08": 510, "2025-09": 500, "2025-10": 505,
+      "2025-11": 520, "2025-12": 1148,
+    },
+  };
+  const pepesVentas = [];
+  for (const [product, months] of Object.entries(pepesSeries)) {
+    for (const [month, qty] of Object.entries(months)) pepesVentas.push(monthClose(month, product, qty));
+  }
+  const pepesMonths = ["2025-04", "2025-05", "2025-09", "2025-11", "2025-12"];
+  const pepesByMonth = Object.fromEntries(
+    pepesMonths.map((month) => [month, evaluateMonth(app, pepesStock, pepesVentas, month)])
+  );
+  const pepesPick = (month, name) => pepesByMonth[month].rows.find((row) => row.producto === name);
+  const pepesMiniMay = pepesPick("2025-05", "MINI MED CHOCOLATE");
+  const pepesPinMay = pepesPick("2025-05", "MINI MED PINERO");
+  const pepesGelMay = pepesPick("2025-05", "GELATINA IND FRESA");
+  const pepesPetitPinApr = pepesPick("2025-04", "PETIT 3 LECHES PINERO");
+  const pepesPetitChocApr = pepesPick("2025-04", "PETIT 3 LECHES CHOCOLATE");
+  const pepesDecoradoApr = pepesPick("2025-04", "PETIT DECORADO");
+  const pepesPetitPinMay = pepesPick("2025-05", "PETIT 3 LECHES PINERO");
+  const pepesQuarterMay = pepesPick("2025-05", "1 4 KG GALLETA");
+  const pepesHalfMay = pepesPick("2025-05", "1 2 KG GALLETA");
+  const pepesQuarterDec = pepesPick("2025-12", "1 4 KG GALLETA");
+  const pepesHalfDec = pepesPick("2025-12", "1 2 KG GALLETA");
+  const pepesMiniSep = pepesPick("2025-09", "MINI MED CHOCOLATE");
+  const pepesMiniNov = pepesPick("2025-11", "MINI MED PINERO");
+  const pepesGelNov = pepesPick("2025-11", "GELATINA IND FRESA");
+
+  assert(pepesMiniMay.absoluteError < 400, `mayo MINI MED CHOCOLATE debe bajar del |e| 557 (abs ${pepesMiniMay.absoluteError.toFixed(1)}, fc ${pepesMiniMay.forecast.toFixed(1)})`);
+  assert(/impulso frío Día de las Madres/i.test(pepesMiniMay.metodo || ""), "mayo MINI debe anotar el impulso frío");
+  assert(pepesPinMay.absoluteError < 350, `mayo MINI PINERO debe acercarse (abs ${pepesPinMay.absoluteError.toFixed(1)})`);
+  assert(pepesGelMay.absoluteError < 250, `mayo GELATINA IND FRESA debe bajar del |e| 395 (abs ${pepesGelMay.absoluteError.toFixed(1)}, fc ${pepesGelMay.forecast.toFixed(1)})`);
+  assert(/impulso frío Día de las Madres/i.test(pepesGelMay.metodo || ""), "mayo gelatina individual debe anotar el impulso");
+
+  assert(pepesPetitPinApr.forecast > 900, `abril PETIT PINERO debe subir de ~731 (fc ${pepesPetitPinApr.forecast.toFixed(1)})`);
+  assert(pepesPetitPinApr.absoluteError < 350, `abril PETIT PINERO debe bajar del |e| 475 (abs ${pepesPetitPinApr.absoluteError.toFixed(1)})`);
+  assert(/Semana Santa/i.test(pepesPetitPinApr.metodo || ""), "abril PETIT 3 LECHES debe anotar Semana Santa");
+  assert(pepesPetitChocApr.forecast > 1000, `abril PETIT CHOCOLATE debe subir de ~793 (fc ${pepesPetitChocApr.forecast.toFixed(1)})`);
+  assert(pepesPetitChocApr.absoluteError < 900, `abril PETIT CHOCOLATE debe bajar del |e| 1031 (abs ${pepesPetitChocApr.absoluteError.toFixed(1)})`);
+  assert(!/Semana Santa/i.test(pepesDecoradoApr.metodo || ""), "PETIT DECORADO no hereda el impulso de 3 leches");
+  assert(pepesPetitPinMay.forecast < 1100, `mayo PETIT PINERO no debe copiar abril 1206 (fc ${pepesPetitPinMay.forecast.toFixed(1)})`);
+  assert(pepesPetitPinMay.absoluteError < 350, `mayo PETIT PINERO debe bajar del |e| 530 (abs ${pepesPetitPinMay.absoluteError.toFixed(1)})`);
+
+  assert(pepesQuarterMay.absoluteError < 500, `mayo 1/4 KG debe bajar del |e| 690 (abs ${pepesQuarterMay.absoluteError.toFixed(1)}, fc ${pepesQuarterMay.forecast.toFixed(1)})`);
+  assert(pepesHalfMay.absoluteError < 450, `mayo 1/2 KG debe bajar del |e| 549 (abs ${pepesHalfMay.absoluteError.toFixed(1)}, fc ${pepesHalfMay.forecast.toFixed(1)})`);
+  assert(/kilo Madres/i.test(pepesQuarterMay.metodo || ""), "mayo kilo debe anotar el impulso");
+  assert(pepesQuarterDec.absoluteError < 750, `diciembre 1/4 KG debe bajar del |e| 988 (abs ${pepesQuarterDec.absoluteError.toFixed(1)}, fc ${pepesQuarterDec.forecast.toFixed(1)})`);
+  assert(pepesHalfDec.absoluteError < 450, `diciembre 1/2 KG debe bajar del |e| 538 (abs ${pepesHalfDec.absoluteError.toFixed(1)}, fc ${pepesHalfDec.forecast.toFixed(1)})`);
+  assert(/kilo Navidad/i.test(pepesHalfDec.metodo || ""), "diciembre kilo debe anotar Navidad");
+
+  assert(!/impulso frío/i.test(pepesMiniSep.metodo || ""), "septiembre no debe llevar impulso de evento");
+  assert(pepesMiniSep.absoluteError < 180, `septiembre MINI en régimen no debe empeorar (abs ${pepesMiniSep.absoluteError.toFixed(1)})`);
+  assert(pepesMiniNov.absoluteError < 200, `noviembre MINI PINERO no debe empeorar (abs ${pepesMiniNov.absoluteError.toFixed(1)})`);
+  assert(pepesGelNov.absoluteError < 220, `noviembre GELATINA no debe empeorar (abs ${pepesGelNov.absoluteError.toFixed(1)})`);
+
+  const focusRows = [
+    pepesMiniMay, pepesGelMay, pepesPetitPinApr, pepesPetitChocApr, pepesPetitPinMay,
+    pepesQuarterMay, pepesHalfMay, pepesQuarterDec, pepesHalfDec,
+  ];
+  const focusAbs = focusRows.reduce((sum, row) => sum + row.absoluteError, 0);
+  const focusBefore = 557.3 + 395.12 + 475.35 + 1031.42 + 529.9 + 689.89 + 548.83 + 988.35 + 537.63;
+  assert(focusAbs < focusBefore - 1500, `la canasta foco debe bajar el |e| publicado ${focusBefore.toFixed(0)} (ahora ${focusAbs.toFixed(0)})`);
+
   console.log("forecast-accuracy-test ok");
   console.log(
     JSON.stringify(
@@ -900,6 +1007,25 @@ async function main() {
           cajita3AprilAbs: Number(cajita3April.absoluteError.toFixed(1)),
           mosaicoMay: Number(mosaicoMay.forecast.toFixed(1)),
           mosaicoMayAbs: Number(mosaicoMay.absoluteError.toFixed(1)),
+        },
+        pepesColdStart: {
+          focusAbs: Number(focusAbs.toFixed(1)),
+          focusBefore: Number(focusBefore.toFixed(1)),
+          miniMay: Number(pepesMiniMay.forecast.toFixed(1)),
+          miniMayAbs: Number(pepesMiniMay.absoluteError.toFixed(1)),
+          gelMay: Number(pepesGelMay.forecast.toFixed(1)),
+          gelMayAbs: Number(pepesGelMay.absoluteError.toFixed(1)),
+          petitPinApr: Number(pepesPetitPinApr.forecast.toFixed(1)),
+          petitPinAprAbs: Number(pepesPetitPinApr.absoluteError.toFixed(1)),
+          petitChocApr: Number(pepesPetitChocApr.forecast.toFixed(1)),
+          petitChocAprAbs: Number(pepesPetitChocApr.absoluteError.toFixed(1)),
+          petitPinMay: Number(pepesPetitPinMay.forecast.toFixed(1)),
+          petitPinMayAbs: Number(pepesPetitPinMay.absoluteError.toFixed(1)),
+          quarterMayAbs: Number(pepesQuarterMay.absoluteError.toFixed(1)),
+          halfMayAbs: Number(pepesHalfMay.absoluteError.toFixed(1)),
+          quarterDecAbs: Number(pepesQuarterDec.absoluteError.toFixed(1)),
+          halfDecAbs: Number(pepesHalfDec.absoluteError.toFixed(1)),
+          miniSepAbs: Number(pepesMiniSep.absoluteError.toFixed(1)),
         },
         leftoverSkus: {
           june: Number(leftoverJune.wape.toFixed(2)),
