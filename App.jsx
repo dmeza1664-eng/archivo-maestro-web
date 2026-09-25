@@ -2776,6 +2776,54 @@ function applyPriorYearPulseFade(model, records, selectedMonth) {
   };
 }
 
+// Pulso anual de fecha fija (p. ej. San Valentín 14-feb). Con el año en curso
+// abierto (#23) el modelo solo ve los meses recientes, y un producto que vende
+// casi solo en un mes del año queda en ~0 justo en su mes. Si el MISMO mes del
+// año anterior fue un pulso (>= 40 piezas y los meses vecinos de ese año, el
+// anterior y el siguiente, <= 10% del pico), el pronóstico sube a ese nivel.
+// "Repetido": si hay historia cerrada de hace dos años para ese mes y sus
+// vecinos, también tuvo que ser pulso; si no la hay, basta con el año anterior.
+// Solo sube; solo usa meses anteriores al pronosticado; sin nombres de SKU.
+// No usa guarda de Cuaresma: el miércoles de ceniza cae en febrero casi todos
+// los años y la guarda apagaría San Valentín; la comprobación de dos años es
+// la que separa un pulso de Cuaresma que cambió de mes (capirotada 2025 vs 2026).
+const ANNUAL_PULSE_MIN_UNITS = 40;
+const ANNUAL_PULSE_NEIGHBOR_RATIO = 0.1;
+
+// true = pulso, false = no fue pulso, null = sin historia cerrada suficiente.
+function annualPulseInMonth(monthlyData, monthKey, completeMonths) {
+  const previous = previousMonthKey(monthKey);
+  const next = nextMonthKey(monthKey);
+  if (!completeMonths.has(previous) || !completeMonths.has(monthKey) || !completeMonths.has(next)) return null;
+  const peak = monthTotalFromData(monthlyData, monthKey);
+  if (!(peak >= ANNUAL_PULSE_MIN_UNITS)) return false;
+  if (monthTotalFromData(monthlyData, previous) > peak * ANNUAL_PULSE_NEIGHBOR_RATIO) return false;
+  if (monthTotalFromData(monthlyData, next) > peak * ANNUAL_PULSE_NEIGHBOR_RATIO) return false;
+  return true;
+}
+
+function applyAnnualFixedDatePulse(model, records, selectedMonth, completeHistoricalMonths) {
+  if (!model?.averages) return model;
+  const priorSameMonth = sameMonthPreviousYear(selectedMonth);
+  if (!priorSameMonth) return model;
+  const completeMonths = new Set((completeHistoricalMonths || []).filter((month) => month < selectedMonth));
+  const monthlyData = buildMonthlyForecastData(records || []);
+  if (annualPulseInMonth(monthlyData, priorSameMonth, completeMonths) !== true) return model;
+  if (annualPulseInMonth(monthlyData, sameMonthPreviousYear(priorSameMonth), completeMonths) === false) return model;
+  const target = monthTotalFromData(monthlyData, priorSameMonth);
+  const total = forecastTotalFromAverages(model.averages, selectedMonth);
+  if (!(target > total)) return model;
+  const averages = total > 0.5
+    ? scaleForecastAverages(model.averages, target / total)
+    : uniformWeekdayAverages(target / datesForMonth(selectedMonth).length);
+  return {
+    ...model,
+    averages,
+    trend: total > 0.5 ? (Number(model.trend) || 1) * (target / total) : Number(model.trend) || 1,
+    method: `${model.method || "Modelo"} · pulso anual de fecha fija (mismo mes del año anterior)`,
+  };
+}
+
 function calculateForecast({
   stockRows,
   historicalVentas,
@@ -2824,11 +2872,16 @@ function calculateForecast({
           method: `${rawForecastModel.method || "Modelo"} · promo activa: sin limpieza de catálogo`,
           catalogCleanup: "omitida por promo activa",
         }
-      : applyCatalogOutlierCleanup(
-          rawForecastModel,
+      : applyAnnualFixedDatePulse(
+          applyCatalogOutlierCleanup(
+            rawForecastModel,
+            v,
+            selectedMonth,
+            s.producto || product
+          ),
           v,
           selectedMonth,
-          s.producto || product
+          completeHistoricalMonths
         );
     const weekdayRow = buildWeekdayRow(forecastModel.averages);
 
@@ -10083,6 +10136,7 @@ export {
   applyColdStartDormantPriorYearGuard,
   applyEventPriorYearIndex,
   applyPriorYearPulseFade,
+  applyAnnualFixedDatePulse,
   lentDaysInMonth,
   isPriceTaggedProduct,
   isPromotionalProduct,
