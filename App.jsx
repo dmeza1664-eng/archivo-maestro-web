@@ -116,6 +116,8 @@ const MIN_SALES_DAILY_COVERAGE = 0.7;
 // y las reglas de calendario #20–#22 siguen activas. El año anterior
 // solo se abre si además el año en curso aún no tiene un mes cerrado.
 const COLD_START_MIN_RECENT_MONTHS = 2;
+// Fracción del ajuste por error del mes anterior (modelo base de validación).
+const CALIBRATION_SHRINK = 0.5;
 const API_PAGE_SIZE = 4000;
 const API_UPLOAD_BATCH_SIZE = 1500;
 const MAX_SNAPSHOT_BYTES = 3.5 * 1024 * 1024;
@@ -2618,6 +2620,88 @@ function prepareProductForecastHistory(observed, selectedMonth, completeHistoric
   };
 }
 
+// Arranque en frío con año anterior (#23): enero lee el año previo porque
+// aún no hay un mes cerrado del año en curso. Dos casos en los que copiar
+// o escalar ese año no es honesto (solo datos anteriores al mes):
+//  1) El producto fue intermitente el año anterior (vendió en menos de la
+//     mitad de sus meses cerrados) y el MISMO mes de ese año no vendió: no
+//     se rellena con meses vecinos (p. ej. febrero de San Valentín); queda 0.
+//  2) El producto se apagó al cierre del año anterior: el promedio de sus
+//     últimos 2 meses cerrados es menor al 25% del mismo mes de ese año; el
+//     pronóstico no pasa de ese nivel de cierre.
+// Con un mes cerrado del año en curso o sin año anterior no hace nada, así
+// que feb–dic y el walk-forward sin año previo quedan idénticos a main.
+const COLD_START_DORMANT_CLOSE_RATIO = 0.25;
+
+function applyColdStartDormantPriorYearGuard(model, records, selectedMonth) {
+  if (!model?.averages || yearHasClosedMonthBefore(selectedMonth)) return model;
+  if (!hasPriorYearHistory(records, selectedMonth)) return model;
+  const monthlyData = buildMonthlyForecastData(records || []);
+  const priorYear = String(Number(String(selectedMonth || "").slice(0, 4)) - 1);
+  const priorMonths = [...monthlyData.keys()]
+    .filter((key) => key.startsWith(`${priorYear}-`) && key < selectedMonth)
+    .sort();
+  if (!priorMonths.length) return model;
+  const total = forecastTotalFromAverages(model.averages, selectedMonth);
+  if (!(total > 0)) return model;
+  const sameMonthTotal = monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
+  const activeMonths = priorMonths.filter((key) => monthTotalFromData(monthlyData, key) > 0).length;
+  if (!(sameMonthTotal > 0) && activeMonths * 2 < priorMonths.length) {
+    return {
+      ...model,
+      averages: uniformWeekdayAverages(0),
+      trend: 0,
+      method: `${model.method || "Modelo"} · sin venta el mismo mes del año anterior (intermitente)`,
+    };
+  }
+  const closeMonths = priorMonths.slice(-2);
+  const closeLevel = closeMonths.reduce((sum, key) => sum + monthTotalFromData(monthlyData, key), 0) / closeMonths.length;
+  if (sameMonthTotal > 0 && closeLevel < sameMonthTotal * COLD_START_DORMANT_CLOSE_RATIO && total > closeLevel) {
+    const factor = closeLevel / total;
+    return {
+      ...model,
+      averages: scaleForecastAverages(model.averages, factor),
+      trend: (Number(model.trend) || 1) * factor,
+      method: `${model.method || "Modelo"} · tope al nivel de cierre del año anterior`,
+    };
+  }
+  return model;
+}
+
+// Índice del año anterior en Madres (mayo) y Navidad (diciembre). Con el
+// año en curso ya abierto, #23 oculta el año anterior y el pronóstico se
+// queda corto en estos dos picos. Si el producto trae el mes del evento y
+// el mes previo del año anterior, y el mes previo del año en curso (todos
+// > 40 piezas), se estima evento = mes previo actual × (evento / mes previo
+// del año anterior) con razón acotada a 0.7–1.6, y el pronóstico sube la
+// mitad del camino hacia ese nivel. Solo sube; nunca usa el mes pronosticado.
+// Se sostiene en 2024 (con 2023) y en 2025. Junio no entra: empeora 2024.
+const EVENT_INDEX_MONTHS = new Set(["madres", "navidad"]);
+const EVENT_INDEX_BLEND = 0.5;
+
+function applyEventPriorYearIndex(model, records, selectedMonth) {
+  if (!model?.averages) return model;
+  const event = calendarEventForMonth(selectedMonth);
+  if (!event || !EVENT_INDEX_MONTHS.has(event.id)) return model;
+  const monthlyData = buildMonthlyForecastData(records || []);
+  const previousMonth = previousMonthKey(selectedMonth);
+  const priorEvent = monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
+  const priorPrevious = monthTotalFromData(monthlyData, sameMonthPreviousYear(previousMonth));
+  const currentPrevious = monthTotalFromData(monthlyData, previousMonth);
+  if (!(priorEvent > 40 && priorPrevious > 40 && currentPrevious > 40)) return model;
+  const total = forecastTotalFromAverages(model.averages, selectedMonth);
+  if (!(total > 0)) return model;
+  const target = currentPrevious * clamp(priorEvent / priorPrevious, 0.7, 1.6);
+  if (!(target > total)) return model;
+  const factor = (total + (target - total) * EVENT_INDEX_BLEND) / total;
+  return {
+    ...model,
+    averages: scaleForecastAverages(model.averages, factor),
+    trend: (Number(model.trend) || 1) * factor,
+    method: `${model.method || "Modelo"} · índice ${event.label} año anterior`,
+  };
+}
+
 function calculateForecast({
   stockRows,
   historicalVentas,
@@ -2647,7 +2731,15 @@ function calculateForecast({
     const v = history.records;
     const b = collectProductRecords(bajasByProduct, product, s.producto, officialProducts);
     const activePromo = findActivePromoForProductInMonth(activePromos, s.producto || product, selectedMonth);
-    const rawForecastModel = calculateForecastModelForVersion(v, selectedMonth, product, modelVersion);
+    const rawForecastModel = applyEventPriorYearIndex(
+      applyColdStartDormantPriorYearGuard(
+        calculateForecastModelForVersion(v, selectedMonth, product, modelVersion),
+        v,
+        selectedMonth
+      ),
+      v,
+      selectedMonth
+    );
     const forecastModel = activePromo
       ? {
           ...rawForecastModel,
@@ -4149,9 +4241,20 @@ function calculateForecastModelLegacy(records, selectedMonth, useLatestAvailable
     sourceMonths: [],
   };
   const previousPrediction = backtestCandidates.get(selectedMethod)?.total || 0;
-  const calibration = backtestActual > 0 && previousPrediction > 0
+  const rawCalibration = backtestActual > 0 && previousPrediction > 0
     ? clamp(backtestActual / previousPrediction, 0.85, 1.15)
     : 1;
+  // Media calibración: corregir el 100% del error del mes anterior persigue
+  // el ruido (doble persecución de tendencia en minis). Se aplica la mitad,
+  // salvo que el mes de validación sea un evento (Madres, Padre, Navidad o
+  // Semana Santa), donde el error sí trae información del nivel.
+  // Validado fuera de muestra en 2024 (con 2023): 14.58 -> 14.23 Ene–Dic.
+  const validationIsEvent = Boolean(
+    calendarEventForMonth(backtestMonth) || monthContainsSemanaSanta(backtestMonth)
+  );
+  const calibration = validationIsEvent
+    ? rawCalibration
+    : 1 + (rawCalibration - 1) * CALIBRATION_SHRINK;
   const averages = scaleForecastAverages(selected.averages, calibration);
 
   return {
@@ -9893,6 +9996,8 @@ export {
   forecastHidesPriorYearMonths,
   prepareProductForecastHistory,
   buildColdStartPriorYearModel,
+  applyColdStartDormantPriorYearGuard,
+  applyEventPriorYearIndex,
   isPriceTaggedProduct,
   isPromotionalProduct,
   isOperationalCakeProduct,

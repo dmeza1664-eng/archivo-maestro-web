@@ -1060,6 +1060,56 @@ async function main() {
     `febrero con 2024 debe quedar igual que post22 (WAPE ${febWith2024.wape.toFixed(2)} vs ${febWithout2024.wape.toFixed(2)})`
   );
 
+  // Guard de arranque en frío (año anterior apagado o intermitente).
+  // Datos sintéticos: una línea estable para que los meses estén cerrados,
+  // un producto intermitente (vendió solo feb y dic del año previo, como
+  // BOLLOS C 6) y uno que se apagó al cierre del año previo.
+  const guardStock = [
+    { producto: "MOKA GDE", stock: 40, orden: 1 },
+    { producto: "BOLLOS C 6", stock: 10, orden: 2 },
+    { producto: "ROSCA C CAJETA", stock: 10, orden: 3 },
+  ];
+  const guardVentas = [];
+  for (let month = 1; month <= 12; month += 1) {
+    const key = `2024-${String(month).padStart(2, "0")}`;
+    guardVentas.push(monthClose(key, "MOKA GDE", 900 + month * 10));
+    const fadingQty = month <= 9 ? 500 : month === 10 ? 300 : month === 11 ? 50 : 40;
+    guardVentas.push(monthClose(key, "ROSCA C CAJETA", month === 1 ? 600 : fadingQty));
+  }
+  guardVentas.push(monthClose("2024-02", "BOLLOS C 6", 205));
+  guardVentas.push(monthClose("2024-12", "BOLLOS C 6", 111));
+  const guardJan = app.calculateForecast({
+    stockRows: guardStock,
+    historicalVentas: app.filterVentasBeforeMonth(guardVentas, "2025-01"),
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2025-01",
+    dailyBufferPct: 10,
+  });
+  const guardRow = (name) => guardJan.find((row) => row.producto === name);
+  assert(guardRow("MOKA GDE").pronosticoVenta > 800, "enero en frío: la línea estable sigue leyendo el año anterior");
+  assert(
+    guardRow("BOLLOS C 6").pronosticoVenta === 0,
+    `enero en frío: intermitente sin venta en enero del año previo debe quedar en 0 (salió ${guardRow("BOLLOS C 6").pronosticoVenta.toFixed(1)})`
+  );
+  assert(
+    guardRow("ROSCA C CAJETA").pronosticoVenta <= 45 + 1e-6,
+    `enero en frío: producto apagado al cierre no pasa del nivel nov–dic (45), salió ${guardRow("ROSCA C CAJETA").pronosticoVenta.toFixed(1)}`
+  );
+  // Con un mes cerrado del año en curso el guard no actúa (feb–dic = main).
+  const guardModel = { averages: [0, 1, 2, 3, 4, 5, 6].map(() => 10), trend: 1, method: "x" };
+  const guardFebRecords = [...guardVentas, monthClose("2025-01", "BOLLOS C 6", 1)]
+    .filter((row) => row.producto === "BOLLOS C 6");
+  assert(
+    app.applyColdStartDormantPriorYearGuard(guardModel, guardFebRecords, "2025-02") === guardModel,
+    "febrero: el guard de arranque en frío no debe tocar el modelo"
+  );
+  assert(
+    app.applyColdStartDormantPriorYearGuard(guardModel, [monthClose("2025-01", "BOLLOS C 6", 5)], "2025-01") === guardModel,
+    "sin año anterior el guard no debe tocar el modelo"
+  );
+
   console.log("forecast-accuracy-test ok");
   console.log(
     JSON.stringify(
