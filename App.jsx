@@ -3532,6 +3532,12 @@ function unsupportedRecentSpikeCap({ modelTotal, last, observedHistory, monthlyD
     // normal y no se apagan.
     if (productCategory(product) !== "Otros" || last < 400) return null;
     if (isYearRoundDessertLine(product)) return null;
+    // No es estreno si el mes calendario anterior al último ya vendió al menos
+    // la mitad (dato del año anterior, previo al mes pronosticado). En febrero,
+    // con el año abierto, solo se ve enero y un producto de todo el año
+    // (TARTALETA, VASO ARROZ, JERICALLA) caía al 35% de enero.
+    const beforeLast = monthTotalFromData(monthlyData, previousMonthKey(observedHistory.at(-1)));
+    if (beforeLast >= last * 0.5) return null;
     if (!(modelTotal > last * 0.5)) return null;
     return last * 0.35;
   }

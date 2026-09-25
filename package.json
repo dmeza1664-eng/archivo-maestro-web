@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/parser-test.cjs && node scripts/forecast-accuracy-test.cjs && node scripts/daily-branch-stock-test.cjs && node scripts/cold-room-production-test.cjs && node scripts/frozen-month-ops-test.cjs && node backend/auth-security-test.js && node backend/helpers-test.js && node scripts/ui-hierarchy-test.cjs && node scripts/post22-regression-test.cjs && node scripts/weekly-branch-disaggregation-test.cjs && node scripts/pulse-fade-test.cjs",
+    "test": "node scripts/parser-test.cjs && node scripts/forecast-accuracy-test.cjs && node scripts/daily-branch-stock-test.cjs && node scripts/cold-room-production-test.cjs && node scripts/frozen-month-ops-test.cjs && node backend/auth-security-test.js && node backend/helpers-test.js && node scripts/ui-hierarchy-test.cjs && node scripts/post22-regression-test.cjs && node scripts/weekly-branch-disaggregation-test.cjs && node scripts/pulse-fade-test.cjs && node scripts/false-debut-test.cjs",
     "test:wape": "node scripts/run-real-wape.cjs",
     "forecast:semanal": "node scripts/weekly-branch-forecast.cjs"
   },
