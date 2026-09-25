@@ -2702,6 +2702,80 @@ function applyEventPriorYearIndex(model, records, selectedMonth) {
   };
 }
 
+// Producto de pulso con antecedente (#25). El producto vendió el mes pasado
+// pero casi nada en los dos meses anteriores (<= 10% del mes pasado). Si el
+// año anterior hizo el mismo pulso (vendió en el mes previo y en el mes
+// objetivo cayó a <= 10%), el pronóstico baja a la mitad: p. ej. productos de
+// San Valentín en marzo o de Madres en junio. No se apaga del todo porque el
+// antecedente es de un solo año y el producto puede quedarse (jun-2026 siguió
+// vendiendo tras Madres). No actúa si la Cuaresma cae distinto en el mes
+// objetivo que el año anterior (más de 7 días de diferencia), porque la
+// Semana Santa cambia de mes. Solo usa meses anteriores al pronosticado; sin
+// año anterior no hace nada.
+const PULSE_FADE_RATIO = 0.1;
+const PULSE_FADE_MIN_UNITS = 20;
+const PULSE_FADE_LENT_TOLERANCE_DAYS = 7;
+const PULSE_FADE_FACTOR = 0.5;
+
+function easterSundayUTC(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31);
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return Date.UTC(year, month - 1, day);
+}
+
+// Días de Cuaresma (miércoles de ceniza a sábado de gloria) dentro del mes.
+function lentDaysInMonth(monthKey) {
+  const [year, month] = String(monthKey || "").split("-").map(Number);
+  if (!year || !month) return 0;
+  const DAY = 86400000;
+  const easter = easterSundayUTC(year);
+  const start = easter - 46 * DAY;
+  const end = easter - DAY;
+  const monthStart = Date.UTC(year, month - 1, 1);
+  const monthEnd = Date.UTC(year, month, 1) - DAY;
+  const from = Math.max(start, monthStart);
+  const to = Math.min(end, monthEnd);
+  return to < from ? 0 : Math.round((to - from) / DAY) + 1;
+}
+
+function applyPriorYearPulseFade(model, records, selectedMonth) {
+  if (!model?.averages) return model;
+  const total = forecastTotalFromAverages(model.averages, selectedMonth);
+  if (!(total > 0)) return model;
+  const priorSameMonth = sameMonthPreviousYear(selectedMonth);
+  if (!priorSameMonth) return model;
+  if (Math.abs(lentDaysInMonth(selectedMonth) - lentDaysInMonth(priorSameMonth)) > PULSE_FADE_LENT_TOLERANCE_DAYS) return model;
+  const monthlyData = buildMonthlyForecastData(records || []);
+  const m1 = previousMonthKey(selectedMonth);
+  const m2 = previousMonthKey(m1);
+  const m3 = previousMonthKey(m2);
+  const last = monthTotalFromData(monthlyData, m1);
+  if (!(last >= PULSE_FADE_MIN_UNITS)) return model;
+  if (monthTotalFromData(monthlyData, m2) > last * PULSE_FADE_RATIO) return model;
+  if (monthTotalFromData(monthlyData, m3) > last * PULSE_FADE_RATIO) return model;
+  const priorPulse = monthTotalFromData(monthlyData, sameMonthPreviousYear(m1));
+  const priorAfter = monthTotalFromData(monthlyData, priorSameMonth);
+  if (!(priorPulse >= PULSE_FADE_MIN_UNITS) || priorAfter > priorPulse * PULSE_FADE_RATIO) return model;
+  return {
+    ...model,
+    averages: scaleForecastAverages(model.averages, PULSE_FADE_FACTOR),
+    trend: (Number(model.trend) || 1) * PULSE_FADE_FACTOR,
+    method: `${model.method || "Modelo"} · pulso: el año anterior se apagó tras el mismo pulso (x${PULSE_FADE_FACTOR})`,
+  };
+}
+
 function calculateForecast({
   stockRows,
   historicalVentas,
@@ -2731,9 +2805,13 @@ function calculateForecast({
     const v = history.records;
     const b = collectProductRecords(bajasByProduct, product, s.producto, officialProducts);
     const activePromo = findActivePromoForProductInMonth(activePromos, s.producto || product, selectedMonth);
-    const rawForecastModel = applyEventPriorYearIndex(
-      applyColdStartDormantPriorYearGuard(
-        calculateForecastModelForVersion(v, selectedMonth, product, modelVersion),
+    const rawForecastModel = applyPriorYearPulseFade(
+      applyEventPriorYearIndex(
+        applyColdStartDormantPriorYearGuard(
+          calculateForecastModelForVersion(v, selectedMonth, product, modelVersion),
+          v,
+          selectedMonth
+        ),
         v,
         selectedMonth
       ),
@@ -9998,6 +10076,8 @@ export {
   buildColdStartPriorYearModel,
   applyColdStartDormantPriorYearGuard,
   applyEventPriorYearIndex,
+  applyPriorYearPulseFade,
+  lentDaysInMonth,
   isPriceTaggedProduct,
   isPromotionalProduct,
   isOperationalCakeProduct,
