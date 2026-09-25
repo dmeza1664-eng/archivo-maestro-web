@@ -2668,6 +2668,40 @@ function applyColdStartDormantPriorYearGuard(model, records, selectedMonth) {
   return model;
 }
 
+// Índice del año anterior en Madres (mayo) y Navidad (diciembre). Con el
+// año en curso ya abierto, #23 oculta el año anterior y el pronóstico se
+// queda corto en estos dos picos. Si el producto trae el mes del evento y
+// el mes previo del año anterior, y el mes previo del año en curso (todos
+// > 40 piezas), se estima evento = mes previo actual × (evento / mes previo
+// del año anterior) con razón acotada a 0.7–1.6, y el pronóstico sube la
+// mitad del camino hacia ese nivel. Solo sube; nunca usa el mes pronosticado.
+// Se sostiene en 2024 (con 2023) y en 2025. Junio no entra: empeora 2024.
+const EVENT_INDEX_MONTHS = new Set(["madres", "navidad"]);
+const EVENT_INDEX_BLEND = 0.5;
+
+function applyEventPriorYearIndex(model, records, selectedMonth) {
+  if (!model?.averages) return model;
+  const event = calendarEventForMonth(selectedMonth);
+  if (!event || !EVENT_INDEX_MONTHS.has(event.id)) return model;
+  const monthlyData = buildMonthlyForecastData(records || []);
+  const previousMonth = previousMonthKey(selectedMonth);
+  const priorEvent = monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
+  const priorPrevious = monthTotalFromData(monthlyData, sameMonthPreviousYear(previousMonth));
+  const currentPrevious = monthTotalFromData(monthlyData, previousMonth);
+  if (!(priorEvent > 40 && priorPrevious > 40 && currentPrevious > 40)) return model;
+  const total = forecastTotalFromAverages(model.averages, selectedMonth);
+  if (!(total > 0)) return model;
+  const target = currentPrevious * clamp(priorEvent / priorPrevious, 0.7, 1.6);
+  if (!(target > total)) return model;
+  const factor = (total + (target - total) * EVENT_INDEX_BLEND) / total;
+  return {
+    ...model,
+    averages: scaleForecastAverages(model.averages, factor),
+    trend: (Number(model.trend) || 1) * factor,
+    method: `${model.method || "Modelo"} · índice ${event.label} año anterior`,
+  };
+}
+
 function calculateForecast({
   stockRows,
   historicalVentas,
@@ -2697,8 +2731,12 @@ function calculateForecast({
     const v = history.records;
     const b = collectProductRecords(bajasByProduct, product, s.producto, officialProducts);
     const activePromo = findActivePromoForProductInMonth(activePromos, s.producto || product, selectedMonth);
-    const rawForecastModel = applyColdStartDormantPriorYearGuard(
-      calculateForecastModelForVersion(v, selectedMonth, product, modelVersion),
+    const rawForecastModel = applyEventPriorYearIndex(
+      applyColdStartDormantPriorYearGuard(
+        calculateForecastModelForVersion(v, selectedMonth, product, modelVersion),
+        v,
+        selectedMonth
+      ),
       v,
       selectedMonth
     );
@@ -9959,6 +9997,7 @@ export {
   prepareProductForecastHistory,
   buildColdStartPriorYearModel,
   applyColdStartDormantPriorYearGuard,
+  applyEventPriorYearIndex,
   isPriceTaggedProduct,
   isPromotionalProduct,
   isOperationalCakeProduct,
