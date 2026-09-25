@@ -4,6 +4,7 @@ const {
   salesInputsExist,
   runPepes2025Backtest,
 } = require("./run-backtest-2025-cold-start-2024.cjs");
+const { runSyntheticChecks } = require("./synthetic-cold-start-check.cjs");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -15,8 +16,11 @@ function nearly(actual, expected, digits = 2) {
 }
 
 async function main() {
+  // Siempre corre (CI incluido) con el fixture sintético versionado.
+  const synthetic = await runSyntheticChecks();
+  console.log(`post22-regression-test sintético ok (enero con 2024 ${synthetic.con2024["2025-01"]}%, sin 2024 ${synthetic.sin2024["2025-01"]}%)`);
   if (!salesInputsExist()) {
-    console.log("post22-regression-test skip: no están las ventas Pepes 2024-2025");
+    console.log("post22-regression-test: ventas Pepes 2024-2025 no presentes; se omite solo la parte con datos reales");
     return;
   }
 
