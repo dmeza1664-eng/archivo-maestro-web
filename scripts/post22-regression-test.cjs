@@ -29,7 +29,7 @@ async function main() {
     const actual = report.cutsSin2024[cut]?.weightedWapePct;
     assert(
       nearly(actual, expected),
-      `sin 2024 el corte ${cut} debe ser ${expected} (a050fa9), salió ${actual}`
+      `sin 2024 el corte ${cut} debe ser ${expected} (baseline sin 2024), salió ${actual}`
     );
   }
   for (const month of TARGET_MONTHS) {
@@ -37,7 +37,7 @@ async function main() {
     const actual = report.monthlySin2024[month]?.wape;
     assert(
       nearly(actual, expected),
-      `sin 2024 ${month} debe ser ${expected} (a050fa9), salió ${actual}`
+      `sin 2024 ${month} debe ser ${expected} (baseline sin 2024), salió ${actual}`
     );
   }
 
