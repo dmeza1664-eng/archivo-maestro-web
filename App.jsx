@@ -2807,6 +2807,65 @@ function annualPulseInMonth(monthlyData, monthKey, completeMonths) {
   return true;
 }
 
+// Encogimiento al nivel de los meses regulares del año. El modelo elige cada
+// mes el método que mejor le atinó al mes anterior y eso persigue el ruido: si
+// un mes salió alto, el siguiente se pronostica alto y viceversa (minis,
+// galletas en bolsa surtidas por Planta, gelatinas). En meses sin evento, el
+// pronóstico se acerca un 25% a la mediana de los últimos 2 meses regulares
+// del mismo año más el mes anterior. Meses con evento (enero = arranque del año, febrero = San
+// Valentín, mayo = Madres, junio = Padre, diciembre = Navidad, y el mes de
+// Semana Santa) no se tocan ni entran en la ventana. Solo mira el año en curso
+// (igual que #23: el año anterior sigue oculto en feb–dic). Solo actúa si el
+// producto vendió en los meses de la ventana y el modelo no lo apagó. Solo usa
+// meses anteriores al pronosticado; sin nombres de SKU. Validado en 2025, 2024
+// (con 2023) y 2026 ene–ago: bajan los tres y ningún mes sube.
+const REGULAR_MEDIAN_WINDOW = 2;
+const REGULAR_MEDIAN_SHRINK = 0.25;
+const REGULAR_MEDIAN_EVENT_MONTHS = new Set([1, 2, 5, 6, 12]);
+
+function isRegularMedianEventMonth(monthKey) {
+  const month = Number(String(monthKey || "").split("-")[1]);
+  return REGULAR_MEDIAN_EVENT_MONTHS.has(month) || monthContainsSemanaSanta(monthKey);
+}
+
+function applyRegularMonthMedianShrink(model, records, selectedMonth) {
+  if (!model?.averages) return model;
+  const year = String(selectedMonth || "").slice(0, 4);
+  if (!year || isRegularMedianEventMonth(selectedMonth)) return model;
+  const total = forecastTotalFromAverages(model.averages, selectedMonth);
+  if (!(total > 0.5)) return model;
+  const monthlyData = buildMonthlyForecastData(records || []);
+  const previous = previousMonthKey(selectedMonth);
+  if (!previous || previous.slice(0, 4) !== year) return model;
+  // Ventana: los últimos 2 meses regulares del año (enero cuenta como
+  // regular aquí: es venta normal, solo que como mes pronosticado es el
+  // arranque en frío) y además el mes anterior aunque sea de evento; se usa la
+  // mediana para que un solo mes raro no arrastre el pronóstico.
+  const windowMonths = new Set([previous]);
+  let regular = 0;
+  let cursor = previous;
+  while (cursor && cursor.slice(0, 4) === year && regular < REGULAR_MEDIAN_WINDOW) {
+    if (cursor.endsWith("-01") || !isRegularMedianEventMonth(cursor)) {
+      windowMonths.add(cursor);
+      regular += 1;
+    }
+    cursor = previousMonthKey(cursor);
+  }
+  if (regular < REGULAR_MEDIAN_WINDOW) return model;
+  const window = [...windowMonths].map((monthKey) => monthTotalFromData(monthlyData, monthKey));
+  if (window.some((value) => !(value > 0.5))) return model;
+  const center = median(window);
+  const target = total + (center - total) * REGULAR_MEDIAN_SHRINK;
+  if (!(target > 0) || Math.abs(target - total) < 1e-9) return model;
+  const factor = target / total;
+  return {
+    ...model,
+    averages: scaleForecastAverages(model.averages, factor),
+    trend: (Number(model.trend) || 1) * factor,
+    method: `${model.method || "Modelo"} · 25% hacia el nivel de meses regulares del año`,
+  };
+}
+
 function applyAnnualFixedDatePulse(model, records, selectedMonth, completeHistoricalMonths) {
   if (!model?.averages) return model;
   const priorSameMonth = sameMonthPreviousYear(selectedMonth);
@@ -2877,16 +2936,20 @@ function calculateForecast({
           method: `${rawForecastModel.method || "Modelo"} · promo activa: sin limpieza de catálogo`,
           catalogCleanup: "omitida por promo activa",
         }
-      : applyAnnualFixedDatePulse(
-          applyCatalogOutlierCleanup(
-            rawForecastModel,
+      : applyRegularMonthMedianShrink(
+          applyAnnualFixedDatePulse(
+            applyCatalogOutlierCleanup(
+              rawForecastModel,
+              v,
+              selectedMonth,
+              s.producto || product
+            ),
             v,
             selectedMonth,
-            s.producto || product
+            completeHistoricalMonths
           ),
           v,
-          selectedMonth,
-          completeHistoricalMonths
+          selectedMonth
         );
     const weekdayRow = buildWeekdayRow(forecastModel.averages);
 
@@ -10142,6 +10205,9 @@ export {
   applyEventPriorYearIndex,
   applyPriorYearPulseFade,
   applyAnnualFixedDatePulse,
+  applyRegularMonthMedianShrink,
+  uniformWeekdayAverages,
+  forecastTotalFromAverages,
   lentDaysInMonth,
   isPriceTaggedProduct,
   isPromotionalProduct,
