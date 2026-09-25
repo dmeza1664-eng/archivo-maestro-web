@@ -2674,10 +2674,14 @@ function applyColdStartDormantPriorYearGuard(model, records, selectedMonth) {
 // el mes previo del año anterior, y el mes previo del año en curso (todos
 // > 40 piezas), se estima evento = mes previo actual × (evento / mes previo
 // del año anterior) con razón acotada a 0.7–1.6, y el pronóstico sube la
-// mitad del camino hacia ese nivel. Solo sube; nunca usa el mes pronosticado.
-// Se sostiene en 2024 (con 2023) y en 2025. Junio no entra: empeora 2024.
+// mitad del camino hacia ese nivel (Madres) o todo el camino (Navidad). Solo
+// sube; nunca usa el mes pronosticado. Se sostiene en 2024 (con 2023) y en
+// 2025. Junio no entra: empeora 2024. En Navidad el blend completo baja
+// diciembre en 2024 (15.57 -> 10.84) y en 2025 (17.13 -> 15.06); en Madres
+// el blend completo empeora mayo 2025, por eso Madres sigue en 0.5.
 const EVENT_INDEX_MONTHS = new Set(["madres", "navidad"]);
 const EVENT_INDEX_BLEND = 0.5;
+const EVENT_INDEX_BLEND_BY_EVENT = { navidad: 1 };
 
 function applyEventPriorYearIndex(model, records, selectedMonth) {
   if (!model?.averages) return model;
@@ -2693,7 +2697,8 @@ function applyEventPriorYearIndex(model, records, selectedMonth) {
   if (!(total > 0)) return model;
   const target = currentPrevious * clamp(priorEvent / priorPrevious, 0.7, 1.6);
   if (!(target > total)) return model;
-  const factor = (total + (target - total) * EVENT_INDEX_BLEND) / total;
+  const blend = EVENT_INDEX_BLEND_BY_EVENT[event.id] ?? EVENT_INDEX_BLEND;
+  const factor = (total + (target - total) * blend) / total;
   return {
     ...model,
     averages: scaleForecastAverages(model.averages, factor),
