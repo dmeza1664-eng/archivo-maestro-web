@@ -2618,6 +2618,54 @@ function prepareProductForecastHistory(observed, selectedMonth, completeHistoric
   };
 }
 
+// Arranque en frío con año anterior (#23): enero lee el año previo porque
+// aún no hay un mes cerrado del año en curso. Dos casos en los que copiar
+// o escalar ese año no es honesto (solo datos anteriores al mes):
+//  1) El producto fue intermitente el año anterior (vendió en menos de la
+//     mitad de sus meses cerrados) y el MISMO mes de ese año no vendió: no
+//     se rellena con meses vecinos (p. ej. febrero de San Valentín); queda 0.
+//  2) El producto se apagó al cierre del año anterior: el promedio de sus
+//     últimos 2 meses cerrados es menor al 25% del mismo mes de ese año; el
+//     pronóstico no pasa de ese nivel de cierre.
+// Con un mes cerrado del año en curso o sin año anterior no hace nada, así
+// que feb–dic y el walk-forward sin año previo quedan idénticos a main.
+const COLD_START_DORMANT_CLOSE_RATIO = 0.25;
+
+function applyColdStartDormantPriorYearGuard(model, records, selectedMonth) {
+  if (!model?.averages || yearHasClosedMonthBefore(selectedMonth)) return model;
+  if (!hasPriorYearHistory(records, selectedMonth)) return model;
+  const monthlyData = buildMonthlyForecastData(records || []);
+  const priorYear = String(Number(String(selectedMonth || "").slice(0, 4)) - 1);
+  const priorMonths = [...monthlyData.keys()]
+    .filter((key) => key.startsWith(`${priorYear}-`) && key < selectedMonth)
+    .sort();
+  if (!priorMonths.length) return model;
+  const total = forecastTotalFromAverages(model.averages, selectedMonth);
+  if (!(total > 0)) return model;
+  const sameMonthTotal = monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
+  const activeMonths = priorMonths.filter((key) => monthTotalFromData(monthlyData, key) > 0).length;
+  if (!(sameMonthTotal > 0) && activeMonths * 2 < priorMonths.length) {
+    return {
+      ...model,
+      averages: uniformWeekdayAverages(0),
+      trend: 0,
+      method: `${model.method || "Modelo"} · sin venta el mismo mes del año anterior (intermitente)`,
+    };
+  }
+  const closeMonths = priorMonths.slice(-2);
+  const closeLevel = closeMonths.reduce((sum, key) => sum + monthTotalFromData(monthlyData, key), 0) / closeMonths.length;
+  if (sameMonthTotal > 0 && closeLevel < sameMonthTotal * COLD_START_DORMANT_CLOSE_RATIO && total > closeLevel) {
+    const factor = closeLevel / total;
+    return {
+      ...model,
+      averages: scaleForecastAverages(model.averages, factor),
+      trend: (Number(model.trend) || 1) * factor,
+      method: `${model.method || "Modelo"} · tope al nivel de cierre del año anterior`,
+    };
+  }
+  return model;
+}
+
 function calculateForecast({
   stockRows,
   historicalVentas,
@@ -2647,7 +2695,11 @@ function calculateForecast({
     const v = history.records;
     const b = collectProductRecords(bajasByProduct, product, s.producto, officialProducts);
     const activePromo = findActivePromoForProductInMonth(activePromos, s.producto || product, selectedMonth);
-    const rawForecastModel = calculateForecastModelForVersion(v, selectedMonth, product, modelVersion);
+    const rawForecastModel = applyColdStartDormantPriorYearGuard(
+      calculateForecastModelForVersion(v, selectedMonth, product, modelVersion),
+      v,
+      selectedMonth
+    );
     const forecastModel = activePromo
       ? {
           ...rawForecastModel,
@@ -9893,6 +9945,7 @@ export {
   forecastHidesPriorYearMonths,
   prepareProductForecastHistory,
   buildColdStartPriorYearModel,
+  applyColdStartDormantPriorYearGuard,
   isPriceTaggedProduct,
   isPromotionalProduct,
   isOperationalCakeProduct,
