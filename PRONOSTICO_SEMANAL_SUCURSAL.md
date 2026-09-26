@@ -24,7 +24,7 @@ node scripts/weekly-branch-forecast.cjs --month 2025-10 \
   --out reparto-2025-10.csv [--level sku]
 ```
 - `pronostico-mensual.json`: `{ "PRODUCTO": cantidad }` o `[{ "producto", "cantidad" }]`.
-- `ventas-diarias-sucursal.csv`: columnas `fecha,sucursal,producto,cantidad`, con **ventas de piso de las sucursales**. No incluir "Planta León · Piso de venta", que es surtido a sucursales.
+- `ventas-diarias-sucursal.csv`: columnas `fecha,sucursal,producto,cantidad`, con **ventas de piso de las sucursales**. "Planta León · Piso de venta" es surtido a sucursales: desde el 26-sep-2026 el módulo descarta solo las filas cuya sucursal dice PLANTA (y Suc. Amado Nervo antes de ago-2024), igual que la serie oficial de demanda del mensual.
 - Para los factores de fechas especiales hace falta al menos el mismo mes del año anterior en el archivo diario. Sin esa historia el factor es 1.
 
 ## Backtest 2025 (pepes_devBI, modelo mensual 91a2462 corrido sobre la venta de sucursales)
