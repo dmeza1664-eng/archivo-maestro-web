@@ -6,7 +6,8 @@
  *  - perfil de día de la semana y participación por sucursal salen del histórico;
  *  - ventas con fecha dentro del mes pronosticado se ignoran (sin fuga);
  *  - sucursal sin venta en los últimos 14 días no recibe reparto;
- *  - factor de fecha especial (10 de mayo) tomado del año anterior.
+ *  - factor de fecha especial (10 de mayo) tomado del año anterior;
+ *  - víspera solo para el SKU que históricamente sube la víspera (el otro no cambia).
  */
 const path = require("path");
 const { disaggregateMonthlyForecast, monthWeeks, isoWeekKey } = require(path.join(__dirname, "lib", "weekly-branch-disaggregation.cjs"));
@@ -61,6 +62,28 @@ const wk = isoWeekKey(Date.UTC(2025, 4, 10));
 const fEv = ev.porSkuSemana.find((r) => r.semana === wk).cantidad, fNo = noEv.porSkuSemana.find((r) => r.semana === wk).cantidad;
 assert(fEv > fNo * 1.3, `semana del 10 de mayo debe subir con el factor del año anterior (${fEv} vs ${fNo})`);
 assert(near(ev.porSkuSemana.reduce((a, r) => a + r.cantidad, 0), 1000), "con evento, el mensual se conserva");
+
+// Víspera por SKU: 2 años de historia (dic-2022 a ene-2025) en la sucursal A. "SUBE" vende 10 en días
+// normales y 30 en cada víspera (1–2 días antes de los eventos); "PLANO" vende 10 siempre.
+const { visperaDaysOfYear } = require(path.join(__dirname, "lib", "weekly-branch-disaggregation.cjs"));
+const vsp = new Set([2022, 2023, 2024, 2025].flatMap((y) => [...visperaDaysOfYear(y)]));
+const hist = [];
+for (const t of days("2023-02-01", "2025-01-31")) {
+  hist.push({ fecha: iso(t), sucursal: "A", producto: "SUBE", cantidad: vsp.has(t) ? 30 : 10 });
+  hist.push({ fecha: iso(t), sucursal: "A", producto: "PLANO", cantidad: 10 });
+}
+const FC = { SUBE: 280, PLANO: 280 };
+const conV = disaggregateMonthlyForecast({ month: "2025-02", monthlyForecast: FC, dailySales: hist });
+const sinV = disaggregateMonthlyForecast({ month: "2025-02", monthlyForecast: FC, dailySales: hist, options: { visperas: false } });
+assert(conV.skuVispera.join(",") === "SUBE", `solo SUBE lleva víspera, salió ${conV.skuVispera}`);
+const wkV = isoWeekKey(Date.UTC(2025, 1, 12)); // semana del 12–13 de febrero (víspera de San Valentín)
+const q = (r, p) => r.porSkuSemana.find((x) => x.producto === p && x.semana === wkV).cantidad;
+assert(q(conV, "SUBE") > q(sinV, "SUBE") * 1.1, `la semana de la víspera sube para SUBE (${q(conV, "SUBE")} vs ${q(sinV, "SUBE")})`);
+assert(near(q(conV, "PLANO"), q(sinV, "PLANO"), 1e-9), "PLANO no sube la víspera: no cambia");
+for (const p of ["SUBE", "PLANO"]) assert(near(conV.porSkuSemana.filter((x) => x.producto === p).reduce((a, x) => a + x.cantidad, 0), 280), `${p}: con víspera el mensual se conserva`);
+const leakV = hist.concat(days("2025-02-01", "2025-02-28").map((t) => ({ fecha: iso(t), sucursal: "A", producto: "PLANO", cantidad: vsp.has(t) ? 500 : 10 })));
+const conLeak = disaggregateMonthlyForecast({ month: "2025-02", monthlyForecast: FC, dailySales: leakV });
+assert(JSON.stringify(conLeak.porSkuSemana) === JSON.stringify(conV.porSkuSemana), "la víspera no usa ventas del mes pronosticado");
 
 let threw = false; try { disaggregateMonthlyForecast({ month: "2025-9", monthlyForecast: {}, dailySales: [] }); } catch { threw = true; }
 assert(threw, "mes con formato inválido debe fallar");
