@@ -4,7 +4,7 @@
  *  - arranque en frío: enero lee el año anterior y sin año anterior queda en 0;
  *  - año anterior oculto en feb–dic: con y sin 2024 el pronóstico es idéntico;
  *  - regla de mayo/diciembre para pasteles (impulso frío Madres / Navidad);
- *  - índice del año anterior en mayo/diciembre (solo con año anterior, solo sube);
+ *  - índice del año anterior en mayo/junio/diciembre (solo con año anterior, solo sube);
  *  - guard de producto intermitente o apagado al cierre del año anterior;
  *  - WAPE por mes del fixture (golden) para detectar cambios no intencionales.
  * Si un cambio del modelo es intencional: SYNTHETIC_UPDATE=1 node scripts/synthetic-cold-start-check.cjs
@@ -119,9 +119,9 @@ async function runSyntheticChecks() {
   // 3) Feb–dic: el año anterior queda oculto → idéntico con y sin 2024
   //    (BOLLOS C 6 queda fuera: tiene huecos y la reactivación de hueco sí
   //    lee el mismo mes del año anterior a propósito).
-  //    Mayo y diciembre sí leen el año anterior (índice de evento), ver 4b.
+  //    Mayo, junio y diciembre sí leen el año anterior (índice de evento), ver 4b.
   for (const month of MONTHS.slice(1)) {
-    if (month === "2025-05" || month === "2025-12") continue;
+    if (month === "2025-05" || month === "2025-06" || month === "2025-12") continue;
     for (const row of con[month].rows) {
       if (row.producto === "BOLLOS C 6") continue;
       const other = sin[month].byProduct.get(row.producto);
@@ -144,8 +144,9 @@ async function runSyntheticChecks() {
   const sepMoka = con["2025-09"].byProduct.get("MOKA GDE");
   assert(!/impulso frío/.test(sepMoka.metodoPronostico || ""), "septiembre no lleva impulso de calendario");
 
-  // 4b) Índice del año anterior en Madres/Navidad: con 2024 sube hacia
+  // 4b) Índice del año anterior en Madres/Padre/Navidad: con 2024 sube hacia
   //     mes previo × (evento/mes previo 2024); sin 2024 no existe.
+  //     (Padre/junio tiene su propia prueba: scripts/event-index-padre-test.cjs.)
   for (const month of ["2025-05", "2025-12"]) {
     const withPrior = con[month].byProduct.get("MOKA GDE");
     const withoutPrior = sin[month].byProduct.get("MOKA GDE");
@@ -154,8 +155,8 @@ async function runSyntheticChecks() {
     assert(withPrior.pronosticoVenta > withoutPrior.pronosticoVenta, `${month}: el índice de evento solo sube`);
   }
   for (const month of MONTHS) {
-    if (month === "2025-05" || month === "2025-12") continue;
-    assert(con[month].rows.every((row) => !/índice/.test(row.metodoPronostico || "")), `${month}: el índice de evento solo aplica en mayo y diciembre`);
+    if (month === "2025-05" || month === "2025-06" || month === "2025-12") continue;
+    assert(con[month].rows.every((row) => !/índice/.test(row.metodoPronostico || "")), `${month}: el índice de evento solo aplica en mayo, junio y diciembre`);
   }
 
   // 5) Golden: WAPE por mes del fixture.
