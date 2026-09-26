@@ -71,9 +71,25 @@ function monthWeeks(monthKey) {
   return [...seg.entries()].map(([semana, ds]) => ({ semana, inicio: isoOf(ds[0]), fin: isoOf(ds[ds.length - 1]), dias: ds.length, _days: ds }));
 }
 
+// Demanda oficial = venta de sucursales al público (26-sep-2026). "Planta León ·
+// Piso de venta" es el surtido de la planta a las sucursales registrado como
+// venta: no es una sucursal, no se reparte a ella ni entra a perfiles/factores.
+function isInternalSupplyChannel(value) {
+  const p = String(value ?? "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return Boolean(p) && /(^|[^A-Z])PLANTA([^A-Z]|$)/.test(p);
+}
+
+// Antes de ago-2024 Suc. Amado Nervo también surtía (filas mezcladas): fuera,
+// igual que en la serie oficial de sucursales.
+function isMixedSupplyBranchDay(r) {
+  const p = String(r?.sucursal ?? "").trim().toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return /AMADO NERVO/.test(p) && String(r?.fecha ?? "").slice(0, 7) < "2024-08";
+}
+
 function indexDaily(dailySales, beforeT) {
   const byDay = new Map(); // t -> Map(`${suc}\u0000${prod}` -> q)
   for (const r of dailySales || []) {
+    if (isInternalSupplyChannel(r.sucursal) || isMixedSupplyBranchDay(r)) continue;
     const q = Number(r.cantidad); if (!r.fecha || !Number.isFinite(q) || q === 0) continue;
     const t = toUTC(String(r.fecha)); if (!(t < beforeT)) continue; // sin fuga: solo antes del mes
     const k = `${r.sucursal}\u0000${r.producto}`;
@@ -227,4 +243,4 @@ function disaggregateMonthlyForecast({ month, monthlyForecast, dailySales, optio
   };
 }
 
-module.exports = { disaggregateMonthlyForecast, monthWeeks, isoWeekKey, visperaDaysOfYear, DEFAULTS };
+module.exports = { disaggregateMonthlyForecast, monthWeeks, isoWeekKey, visperaDaysOfYear, isInternalSupplyChannel, DEFAULTS };

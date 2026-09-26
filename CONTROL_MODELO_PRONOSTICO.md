@@ -1,10 +1,49 @@
 # Control del modelo de pronostico
 
-Ultima actualizacion: 2026-08-26
+Ultima actualizacion: 2026-09-26
 
 > **Aviso de reproducibilidad.** Las cifras de este documento anteriores al
 > 2026-08-21 se midieron sobre un catalogo distinto al actual. Ver la seccion
 > "El catalogo cambio de hoja" antes de comparar contra cualquier corrida nueva.
+
+## Serie oficial de demanda: venta de sucursales (desde 2026-09-26)
+
+Decisión de Carlos Zermeño (26-sep-2026): la demanda oficial del Pronóstico es la
+**venta de las sucursales al público**. El canal "Planta León · Piso de venta"
+registra como venta el surtido de la planta a las sucursales (tickets de sep-2025:
+89.6% de las piezas a clientes "SUC. ...", 0% a público general, 100% ligado a un
+pedido de sucursal), así que sumarlo contaba la demanda casi dos veces. En 2025,
+catálogo evaluado (111 productos): sucursales 305,199 piezas, Planta 336,698,
+suma 641,897.
+
+- `calculateForecast` filtra la historia con `filterDemandSales` (por defecto
+  `demandSeries: "sucursal"`): salen las filas cuya sucursal/canal/tienda dice
+  PLANTA y las de Suc. Amado Nervo antes de ago-2024 (entonces también surtía).
+  La app aplica el mismo filtro a ventas, ventas de validación y cierre mensual,
+  así que el error también se mide contra la venta de sucursales.
+- Todas las reglas (calibración, índices de Madres, Padre y Navidad, pulsos,
+  arranque en frío, 25% hacia meses regulares) se calculan con esa historia.
+- La producción sugerida = pronóstico de sucursales + colchón (10% en el backtest).
+- Filas sin sucursal (totales mensuales ya consolidados) pasan tal cual: esa serie
+  debe construirse ya sin Planta. `demandSeries: "total"` deja la suma de canales
+  solo como referencia.
+- El reparto semanal/sucursal ignora a Planta (no es sucursal ni recibe reparto).
+- Prueba: `scripts/demand-series-sucursal-test.cjs` (sintética).
+
+Cifras oficiales en la serie de sucursales (backtest mes a mes sin datos del mes,
+buffer 10%, 111 productos; mismo modelo que 63a18d1, que da idéntico SKU por SKU):
+
+| Corte | Serie de sucursales (oficial) | Serie total (referencia anterior) |
+|---|---:|---:|
+| 2025 Ene–Dic | 11.27% | 11.35% |
+| 2025 sin enero | 11.34% | 11.29% |
+| 2025 error del total mensual | 2.63% | 2.09% |
+| 2024 Ene–Dic (historia 2023) | 13.22% (12.76% sin Amado Nervo) | 12.32% |
+| 2026 Ene–Ago | 12.01% | 11.81% |
+| Semanal SKU × semana 2025 / 2026 / 2024 | 17.03 / 17.95 / 21.76 (ya era de sucursales) | — |
+
+La serie de sucursales es más chica y más ruidosa; la diferencia contra la serie
+total no es un cambio del modelo.
 
 ## Reglas de control
 

@@ -1186,6 +1186,50 @@ function filterVentasBeforeMonth(ventas, monthKey) {
   });
 }
 
+// Serie oficial de demanda (decisión del 26-sep-2026): venta de las SUCURSALES
+// al público. El canal "Planta León · Piso de venta" registra como venta el
+// surtido de la planta a las sucursales (tickets de sep-2025: 89.6% de las
+// piezas a clientes "SUC. ...", 0% a público general, 100% ligado a un pedido
+// de sucursal). Sumarlo cuenta la demanda casi dos veces: en 2025, catálogo
+// evaluado, sucursales 305,199 piezas + Planta 336,698 = 641,897. Por eso el
+// pronóstico, todas sus reglas (índices de evento, calibración, pulsos,
+// arranque en frío) y el error se calculan solo con filas de sucursal, y la
+// producción sugerida = pronóstico de sucursales + colchón. Se reconoce el
+// canal interno por la palabra PLANTA en sucursal/canal/tienda; no hay reglas
+// por nombre de SKU. Las filas sin sucursal (totales mensuales ya consolidados)
+// pasan tal cual: esa serie debe construirse ya sin Planta. La suma de canales
+// queda solo como referencia con demandSeries: "total".
+const DEMAND_SERIES_DEFAULT = "sucursal";
+
+function isInternalSupplyChannel(value) {
+  const p = norm(value);
+  return Boolean(p) && /(^|[^A-Z])PLANTA([^A-Z]|$)/.test(p);
+}
+
+// Antes de ago-2024 el surtido salía de Suc. Amado Nervo (bodega 3; may-2024:
+// 49,338 piezas, 85% en tickets de más de 20). En ese periodo sus filas mezclan
+// surtido y venta y la serie oficial de sucursales las excluye; desde ago-2024
+// es una sucursal normal.
+const MIXED_SUPPLY_BRANCH_UNTIL = "2024-08";
+
+function isMixedSupplyBranchRow(row) {
+  const names = [row?.sucursal, row?.canal, row?.tienda].map(norm);
+  if (!names.some((p) => /AMADO NERVO/.test(p))) return false;
+  const key = monthKeyFromRecord(row);
+  return Boolean(key) && key < MIXED_SUPPLY_BRANCH_UNTIL;
+}
+
+function isInternalSupplyRow(row) {
+  return isInternalSupplyChannel(row?.sucursal) || isInternalSupplyChannel(row?.canal) || isInternalSupplyChannel(row?.tienda)
+    || isMixedSupplyBranchRow(row);
+}
+
+function filterDemandSales(rows, demandSeries = DEMAND_SERIES_DEFAULT) {
+  if (!Array.isArray(rows)) return [];
+  if (demandSeries === "total") return rows;
+  return rows.filter((row) => !isInternalSupplyRow(row));
+}
+
 function precisionScore(forecast, actual) {
   if (!Number.isFinite(actual) || actual <= 0) return null;
   return Math.max(0, (1 - Math.abs(forecast - actual) / actual) * 100);
@@ -2904,8 +2948,9 @@ function calculateForecast({
   dailyBufferPct,
   modelVersion = FORECAST_MODEL_VERSION,
   activePromos = [],
+  demandSeries = DEMAND_SERIES_DEFAULT,
 }) {
-  const usableHistoricalVentas = filterIncompleteHistoricalMonths(historicalVentas);
+  const usableHistoricalVentas = filterIncompleteHistoricalMonths(filterDemandSales(historicalVentas, demandSeries));
   const completeHistoricalMonths = [...new Set(
     usableHistoricalVentas.map((row) => monthKeyFromRecord(row)).filter(Boolean)
   )].sort();
@@ -7439,12 +7484,14 @@ function Dashboard({ session, onLogout }) {
 
   const officialProducts = useMemo(() => getOfficialProducts(stockRows), [stockRows]);
 
+  // Demanda oficial = venta de sucursales: el surtido de Planta León no entra
+  // al pronóstico, a la validación ni a la lista de sucursales.
   const effectiveVentas = useMemo(
-    () => applyProductAliases(ventas, productAliases, officialProducts),
+    () => filterDemandSales(applyProductAliases(ventas, productAliases, officialProducts)),
     [ventas, productAliases, officialProducts]
   );
   const effectiveVentasValidacion = useMemo(
-    () => applyProductAliases(ventasValidacion, productAliases, officialProducts),
+    () => filterDemandSales(applyProductAliases(ventasValidacion, productAliases, officialProducts)),
     [ventasValidacion, productAliases, officialProducts]
   );
   const effectiveBajas = useMemo(
@@ -7468,7 +7515,7 @@ function Dashboard({ session, onLogout }) {
     [realProduction, productAliases, officialProducts]
   );
   const effectiveMonthlyCloseSales = useMemo(
-    () => applyProductAliases(monthlyCloseSales, productAliases, officialProducts),
+    () => filterDemandSales(applyProductAliases(monthlyCloseSales, productAliases, officialProducts)),
     [monthlyCloseSales, productAliases, officialProducts]
   );
   const effectiveMonthlyCloseProduction = useMemo(
@@ -10168,6 +10215,9 @@ export {
   consolidateSalesRowsForUpload,
   countCapturedProductStatuses,
   filterVentasBeforeMonth,
+  filterDemandSales,
+  isInternalSupplyChannel,
+  DEMAND_SERIES_DEFAULT,
   inferMonthHintFromFileName,
   monthsNamedInFileName,
   parseBajasReport,
