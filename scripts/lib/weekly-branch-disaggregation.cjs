@@ -11,6 +11,14 @@
  *    6-ene, 2-nov, 15-sep y Día del Padre = 3er domingo de junio): venta de ese día
  *    el año anterior contra el promedio del mismo día de la semana de ese mes,
  *    por SKU, encogido hacia el factor de todos los SKU con peso `eventK`.
+ *  - Víspera de evento (1–2 días antes de esas fechas) SOLO para los SKU que
+ *    históricamente suben la víspera: con la venta de los `vispWindowDays` días
+ *    previos (2 años) se compara, por SKU, la venta de cada víspera contra el
+ *    promedio del mismo día de la semana en días normales de ese mes (sin
+ *    evento, víspera ni 15–17). Razón encogida hacia 1 con `vispK` piezas; el
+ *    SKU entra si la razón es >= `vispMin` con al menos `vispMinObs` vísperas
+ *    observadas, y su víspera se multiplica por esa razón (tope `vispMax`). Los
+ *    demás SKU no se tocan. Sin nombres de SKU; sin datos del mes.
  *  - Participación por sucursal de las últimas `shareWindowDays` (por SKU),
  *    encogida hacia la participación general de la sucursal con peso `alpha`.
  *    Solo sucursales que vendieron en los últimos `activeDays` días.
@@ -29,6 +37,12 @@ const DEFAULTS = Object.freeze({
   eventK: 20,
   eventMin: 0.2,
   eventMax: 8,
+  visperas: true,
+  vispWindowDays: 730,
+  vispK: 30,
+  vispMin: 1.5,
+  vispMax: 3,
+  vispMinObs: 4,
 });
 const FIXED_EVENTS = [[1, 6], [2, 14], [4, 30], [5, 10], [9, 15], [11, 2], [12, 24], [12, 31]];
 const DAY_MS = 86400000;
@@ -93,6 +107,65 @@ function eventFactors(monthKey, byDay, o) {
   return f;
 }
 
+function eventDaysOfYear(y) {
+  const s = new Set(FIXED_EVENTS.map(([mm, dd]) => Date.UTC(y, mm - 1, dd)));
+  s.add(thirdSundayJune(y));
+  return s;
+}
+// Vísperas (1 y 2 días antes) de los eventos del año y del siguiente, sin días de evento del año.
+function visperaDaysOfYear(y) {
+  const ev = new Set([...eventDaysOfYear(y), ...eventDaysOfYear(y + 1)]);
+  const out = new Set();
+  for (const e of ev) for (const k of [1, 2]) { const t = e - k * DAY_MS; if (!ev.has(t)) out.add(t); }
+  return out;
+}
+
+/**
+ * Factor de víspera por SKU (solo SKU que históricamente suben la víspera).
+ * Devuelve Map(`${t}\u0000${producto}` -> factor) para las vísperas del mes.
+ */
+function visperaFactors(monthKey, byDay, products, o) {
+  const f = new Map(); if (!o.visperas) return f;
+  const days = monthDays(monthKey); const start = days[0]; const y = Number(monthKey.slice(0, 4));
+  const evAll = new Set(); const vsAll = new Set();
+  for (let yy = y - 3; yy <= y; yy++) { for (const t of eventDaysOfYear(yy)) evAll.add(t); for (const t of visperaDaysOfYear(yy)) vsAll.add(t); }
+  const winDays = [...byDay.keys()].filter((t) => t >= start - o.vispWindowDays * DAY_MS && t < start);
+  const normal = new Map();
+  for (const t of winDays) {
+    const d = new Date(t); const dom = d.getUTCDate();
+    if (evAll.has(t) || vsAll.has(t) || (dom >= 15 && dom <= 17)) continue;
+    const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${weekdayMon0(t)}`;
+    if (!normal.has(key)) normal.set(key, []);
+    normal.get(key).push(t);
+  }
+  const byProd = (t) => { const m = new Map(); for (const [k, q] of byDay.get(t) || []) { const p = k.split("\u0000")[1]; m.set(p, (m.get(p) || 0) + q); } return m; };
+  const sv = new Map(); const sb = new Map(); const nv = new Map();
+  for (const t of winDays) {
+    if (!vsAll.has(t)) continue;
+    const d = new Date(t);
+    const nd = normal.get(`${d.getUTCFullYear()}-${d.getUTCMonth()}-${weekdayMon0(t)}`);
+    if (!nd || nd.length < 2) continue;
+    const base = new Map();
+    for (const x of nd) for (const [p, q] of byProd(x)) base.set(p, (base.get(p) || 0) + q / nd.length);
+    const cur = byProd(t);
+    for (const p of new Set([...base.keys(), ...cur.keys()])) {
+      const b = base.get(p) || 0; if (!(b > 0)) continue;
+      sv.set(p, (sv.get(p) || 0) + (cur.get(p) || 0)); sb.set(p, (sb.get(p) || 0) + b); nv.set(p, (nv.get(p) || 0) + 1);
+    }
+  }
+  const evMonth = eventDaysOfYear(y); const vsMonth = visperaDaysOfYear(y);
+  const vd = days.filter((t) => vsMonth.has(t) && !evMonth.has(t));
+  if (!vd.length) return f;
+  for (const p of products) {
+    if ((nv.get(p) || 0) < o.vispMinObs || !((sb.get(p) || 0) > 0)) continue;
+    const r = ((sv.get(p) || 0) + o.vispK) / (sb.get(p) + o.vispK);
+    if (r < o.vispMin) continue;
+    const fac = Math.max(1, Math.min(o.vispMax, r));
+    for (const t of vd) f.set(`${t}\u0000${p}`, fac);
+  }
+  return f;
+}
+
 /**
  * @param {object} args
  * @param {string} args.month 'YYYY-MM'
@@ -128,6 +201,7 @@ function disaggregateMonthlyForecast({ month, monthlyForecast, dailySales, optio
   const sa = dowAll.reduce((a, b) => a + b, 0);
   const wall = sa > 0 ? dowAll.map((x) => x / sa) : new Array(7).fill(1 / 7);
   const ev = eventFactors(month, byDay, o);
+  const visp = visperaFactors(month, byDay, Object.keys(F), o);
   const weeks = monthWeeks(month);
 
   const porSkuSemana = []; const porSucursalSkuSemana = [];
@@ -135,7 +209,7 @@ function disaggregateMonthlyForecast({ month, monthlyForecast, dailySales, optio
     const Fm = Number(fmRaw) || 0; if (Fm <= 0) continue;
     const dp = dowP.get(p); const n = dp ? dp.reduce((a, b) => a + b, 0) : 0;
     const wp = n > 0 ? dp.map((x, k) => Math.max(0, (x + o.beta * wall[k]) / (n + o.beta))) : wall;
-    const dw = new Map(days.map((t) => [t, wp[weekdayMon0(t)] * (ev.get(`${t}\u0000${p}`) ?? ev.get(`${t}\u0000*`) ?? 1)]));
+    const dw = new Map(days.map((t) => [t, wp[weekdayMon0(t)] * (ev.get(`${t}\u0000${p}`) ?? ev.get(`${t}\u0000*`) ?? 1) * (visp.get(`${t}\u0000${p}`) ?? 1)]));
     let sdw = 0; for (const v of dw.values()) sdw += v;
     const npk = Math.max(0, pTot.get(p) || 0);
     const shares = recent.map((s) => [s, (Math.max(0, bp.get(`${s}\u0000${p}`) || 0) + o.alpha * sb.get(s)) / (npk + o.alpha)]);
@@ -149,7 +223,8 @@ function disaggregateMonthlyForecast({ month, monthlyForecast, dailySales, optio
   return {
     semanas: weeks.map(({ _days, ...w }) => w),
     porSkuSemana, porSucursalSkuSemana, sucursales: recent, opciones: o,
+    skuVispera: [...new Set([...visp.keys()].map((k) => k.split("\u0000")[1]))].sort(),
   };
 }
 
-module.exports = { disaggregateMonthlyForecast, monthWeeks, isoWeekKey, DEFAULTS };
+module.exports = { disaggregateMonthlyForecast, monthWeeks, isoWeekKey, visperaDaysOfYear, DEFAULTS };

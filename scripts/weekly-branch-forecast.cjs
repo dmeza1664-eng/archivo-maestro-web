@@ -7,7 +7,7 @@
  *   node scripts/weekly-branch-forecast.cjs --month 2025-10 \
  *        --forecast pronostico-mensual.json   (objeto {producto: cantidad} o arreglo [{producto, cantidad}])
  *        --daily ventas-diarias.csv           (columnas: fecha,sucursal,producto,cantidad; ventas de piso de sucursales)
- *        [--out salida.csv] [--level sucursal|sku] [--alpha 30] [--beta 50] [--window 56] [--no-events]
+ *        [--out salida.csv] [--level sucursal|sku] [--alpha 30] [--beta 50] [--window 56] [--no-events] [--no-vispera]
  * Solo se usan las filas diarias con fecha anterior al mes pedido.
  */
 "use strict";
@@ -19,6 +19,7 @@ function parseArgs(argv) {
   const a = {}; for (let i = 0; i < argv.length; i++) {
     const k = argv[i]; if (!k.startsWith("--")) continue;
     const key = k.slice(2); if (key === "no-events") { a.events = false; continue; }
+    if (key === "no-vispera") { a.visperas = false; continue; }
     a[key] = argv[++i];
   } return a;
 }
@@ -46,6 +47,7 @@ function main() {
   const options = {};
   for (const [k, o] of [["alpha", "alpha"], ["beta", "beta"], ["window", "windowDays"], ["share-window", "shareWindowDays"]]) if (a[k] != null) options[o] = Number(a[k]);
   if (a.events === false) options.events = false;
+  if (a.visperas === false) options.visperas = false;
   const res = disaggregateMonthlyForecast({ month: a.month, monthlyForecast: JSON.parse(fs.readFileSync(a.forecast, "utf8")), dailySales: readDaily(a.daily), options });
   const bySku = a.level === "sku";
   const rows = bySku ? res.porSkuSemana : res.porSucursalSkuSemana;
