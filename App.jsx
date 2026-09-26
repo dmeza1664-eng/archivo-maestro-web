@@ -2668,7 +2668,7 @@ function applyColdStartDormantPriorYearGuard(model, records, selectedMonth) {
   return model;
 }
 
-// Índice del año anterior en Madres (mayo) y Navidad (diciembre). Con el
+// Índice del año anterior en Madres (mayo), Padre (junio) y Navidad (diciembre). Con el
 // año en curso ya abierto, #23 oculta el año anterior y el pronóstico se
 // queda corto en estos dos picos. Si el producto trae el mes del evento y
 // el mes previo del año anterior, y el mes previo del año en curso (todos
@@ -2676,12 +2676,18 @@ function applyColdStartDormantPriorYearGuard(model, records, selectedMonth) {
 // del año anterior) con razón acotada a 0.7–1.6, y el pronóstico sube la
 // mitad del camino hacia ese nivel (Madres) o todo el camino (Navidad). Solo
 // sube; nunca usa el mes pronosticado. Se sostiene en 2024 (con 2023) y en
-// 2025. Junio no entra: empeora 2024. En Navidad el blend completo baja
-// diciembre en 2024 (15.57 -> 10.84) y en 2025 (17.13 -> 15.06); en Madres
-// el blend completo empeora mayo 2025, por eso Madres sigue en 0.5.
-const EVENT_INDEX_MONTHS = new Set(["madres", "navidad"]);
+// 2025. En Navidad el blend completo baja diciembre en 2024 (15.57 -> 10.84)
+// y en 2025 (17.13 -> 15.06).
+// Madres y Padre con dos años de observación (backtest post-#28, 2024 con
+// 2023, 2025 y 2026 ene–ago): Madres pasa a blend completo (mayo 2025
+// 12.87 -> 11.73, 2024 16.16 -> 15.74, 2026 9.93 -> 9.97) y entra el Día del
+// Padre (junio) con media distancia (junio 2025 8.12 -> 8.04, 2026 10.06 ->
+// 8.90; en 2024 sube 12.07 -> 12.35 en la serie total, pero baja en la de
+// sucursales 13.88 -> 13.40). Promediar las razones de varios años previos
+// empeora 2026 en los dos eventos, así que se usa solo el año anterior.
+const EVENT_INDEX_MONTHS = new Set(["madres", "padre", "navidad"]);
 const EVENT_INDEX_BLEND = 0.5;
-const EVENT_INDEX_BLEND_BY_EVENT = { navidad: 1 };
+const EVENT_INDEX_BLEND_BY_EVENT = { navidad: 1, madres: 1 };
 
 function applyEventPriorYearIndex(model, records, selectedMonth) {
   if (!model?.averages) return model;
