@@ -116,8 +116,13 @@ const MIN_SALES_DAILY_COVERAGE = 0.7;
 // y las reglas de calendario #20–#22 siguen activas. El año anterior
 // solo se abre si además el año en curso aún no tiene un mes cerrado.
 const COLD_START_MIN_RECENT_MONTHS = 2;
-// Fracción del ajuste por error del mes anterior (modelo base de validación).
-const CALIBRATION_SHRINK = 0.5;
+// Fracción del ajuste por error del mes anterior (modelo base de validación)
+// cuando el mes de validación no es evento. Backtest en la serie de
+// sucursales (26-sep-2026): con 0.5 -> 0.15, 2025 11.27 -> 11.19 (sin enero
+// 11.34 -> 11.24), 2024 13.22 -> 13.12, 2026 Ene–Ago 12.01 -> 11.87. Con 0
+// el total queda casi igual pero dic-2025 sube +0.17 y ago-2024 +0.64; con
+// 0.15 esos meses suben +0.12 y +0.44.
+const CALIBRATION_SHRINK = 0.15;
 const API_PAGE_SIZE = 4000;
 const API_UPLOAD_BATCH_SIZE = 1500;
 const MAX_SNAPSHOT_BYTES = 3.5 * 1024 * 1024;
@@ -3495,6 +3500,18 @@ function isLargeGelatina(product) {
   return value.includes("GELATINA") && /\bGDE\b/.test(value) && !isPriceTaggedProduct(product);
 }
 
+// Las reglas de arranque en frío (#22) siguen activas con 2+ meses seguidos
+// del año en curso solo si el producto tiene UN año de antecedente del mes
+// objetivo. Si también vendió ese mes hace dos años (> 40), el índice del
+// año anterior y la historia ya cubren el evento y el impulso frío sobra
+// (2026 Ene–Ago 11.87 -> 11.75; 2025 y 2024 no cambian porque sus series
+// no tienen dos años previos). Solo usa meses anteriores al pronosticado.
+function coldStartHasTwoPriorYears(records, selectedMonth) {
+  const monthlyData = buildMonthlyForecastData(records || []);
+  const twoYearsBack = sameMonthPreviousYear(sameMonthPreviousYear(selectedMonth));
+  return monthTotalFromData(monthlyData, twoYearsBack) > 40;
+}
+
 function liftColdStartMadresCalibration(model, records, selectedMonth, product) {
   if (!model?.averages) return model;
   if (calendarEventForMonth(selectedMonth)?.id !== "madres") return model;
@@ -3503,7 +3520,10 @@ function liftColdStartMadresCalibration(model, records, selectedMonth, product) 
   const monthlyData = buildMonthlyForecastData(records || []);
   const priorYearTotal = monthTotalFromData(monthlyData, sameMonthPreviousYear(selectedMonth));
   const recentCount = countSameYearConsecutiveRecentMonths(records || [], selectedMonth);
-  if (priorYearTotal > 40 && recentCount < COLD_START_MIN_RECENT_MONTHS) return model;
+  if (
+    priorYearTotal > 40
+    && (recentCount < COLD_START_MIN_RECENT_MONTHS || coldStartHasTwoPriorYears(records, selectedMonth))
+  ) return model;
   const trend = Number(model.trend);
   if (!Number.isFinite(trend) || trend <= 0 || trend >= 0.995) return model;
   return {
@@ -3587,7 +3607,10 @@ function coldStartEventUplift(records, selectedMonth, product) {
     sameMonthPreviousYear(selectedMonth)
   );
   const recentCount = countSameYearConsecutiveRecentMonths(records || [], selectedMonth);
-  if (priorYear > 40 && recentCount < COLD_START_MIN_RECENT_MONTHS) return null;
+  if (
+    priorYear > 40
+    && (recentCount < COLD_START_MIN_RECENT_MONTHS || coldStartHasTwoPriorYears(records, selectedMonth))
+  ) return null;
   const { last, priorMed } = recentLevelBeforeTarget(records, selectedMonth);
   if (!(last > 40) || !(priorMed > 0)) return null;
   const event = calendarEventForMonth(selectedMonth);
@@ -4500,11 +4523,11 @@ function calculateForecastModelLegacy(records, selectedMonth, useLatestAvailable
   const rawCalibration = backtestActual > 0 && previousPrediction > 0
     ? clamp(backtestActual / previousPrediction, 0.85, 1.15)
     : 1;
-  // Media calibración: corregir el 100% del error del mes anterior persigue
-  // el ruido (doble persecución de tendencia en minis). Se aplica la mitad,
-  // salvo que el mes de validación sea un evento (Madres, Padre, Navidad o
-  // Semana Santa), donde el error sí trae información del nivel.
-  // Validado fuera de muestra en 2024 (con 2023): 14.58 -> 14.23 Ene–Dic.
+  // Calibración parcial: corregir el 100% del error del mes anterior persigue
+  // el ruido (doble persecución de tendencia en minis). Se aplica solo
+  // CALIBRATION_SHRINK (15%), salvo que el mes de validación sea un evento
+  // (Madres, Padre, Navidad o Semana Santa), donde el error sí trae
+  // información del nivel y se aplica completo.
   const validationIsEvent = Boolean(
     calendarEventForMonth(backtestMonth) || monthContainsSemanaSanta(backtestMonth)
   );
@@ -10260,6 +10283,11 @@ export {
   applyColdStartDormantPriorYearGuard,
   applyEventPriorYearIndex,
   applyPriorYearPulseFade,
+  CALIBRATION_SHRINK,
+  calculateForecastModelLegacy,
+  coldStartHasTwoPriorYears,
+  coldStartEventUplift,
+  liftColdStartMadresCalibration,
   applyAnnualFixedDatePulse,
   applyRegularMonthMedianShrink,
   uniformWeekdayAverages,
