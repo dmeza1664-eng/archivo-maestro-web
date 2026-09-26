@@ -6,6 +6,46 @@ Ultima actualizacion: 2026-09-26
 > 2026-08-21 se midieron sobre un catalogo distinto al actual. Ver la seccion
 > "El catalogo cambio de hoja" antes de comparar contra cualquier corrida nueva.
 
+## Calibración al 15% y arranque en frío acotado (2026-09-26)
+
+Ablación sobre la serie de sucursales (después de #31) convertida en decisión.
+Criterio para fusionar: baja el total 2025 y 2025 sin enero no sube; ningún mes
+de 2025 empeora más de 0.3 puntos; ni 2024 ni 2026 Ene–Ago empeoran.
+
+- `CALIBRATION_SHRINK` 0.5 -> 0.15: el ajuste por error del mes anterior se
+  aplica al 15% cuando el mes de validación no es evento (sigue completo si lo
+  es). Rejilla probada: 0 / 0.15 / 0.25 / 0.35 / 0.5. Con 0 el total casi no
+  cambia frente a 0.15, pero dic-2025 sube +0.17 y ago-2024 +0.64; con 0.15,
+  +0.12 y +0.44.
+- Arranque en frío (#22): con 2+ meses seguidos del año en curso, las reglas de
+  impulso frío (y el "sin recorte pre-Madres") solo aplican si el producto tiene
+  UN año de antecedente del mes objetivo. Si también vendió ese mes hace dos
+  años (> 40), no aplican (`coldStartHasTwoPriorYears`). Solo cambia 2026:
+  mayo −1.31 y junio +0.54. En 2025 y 2024 no cambia nada porque sus series no
+  tienen dos años previos. Quitar el arranque en frío completo sí bajaba 2026
+  a 11.75, pero subía abr-2025 +1.52.
+- Día del Padre a media distancia (#29) se confirma: quitarlo o ponerlo completo
+  empeora los tres años (junio 2025 +0.92 / +1.84).
+- Descartadas por el criterio: calibración solo si persiste el signo (sep-2025
+  +0.39), solo en productos chicos (sep-2025 +0.33), solo a la baja (2024 sube),
+  solo con errores < 10% (2025 no baja), solo en productos grandes (2024 sube).
+- Prueba: `scripts/calibration-cold-start-test.cjs` (sintética). Golden del fixture
+  sintético: mar/abr 0.14 -> 0.22, ago 0.24 -> 0.30, sep 2.49 -> 2.52, oct/nov
+  0.16 -> 0.22 (y dic sin 2024 9.38 -> 9.41), por la calibración al 15%.
+
+| Corte (serie de sucursales, WAPE producto-mes) | #31 (abbc8bf) | Este cambio |
+|---|---:|---:|
+| 2025 Ene–Dic | 11.27% | 11.19% |
+| 2025 sin enero | 11.34% | 11.24% |
+| 2025 error del total mensual | 2.63% | 2.45% |
+| Peor cambio mensual 2025 | — | dic +0.12 |
+| 2024 Ene–Dic (historia 2023) | 13.22% (12.76% sin Amado Nervo) | 13.12% (12.61% sin Amado Nervo) |
+| 2026 Ene–Ago | 12.01% (11.75% sin enero) | 11.75% (11.45% sin enero) |
+| Semanal SKU × semana 2025 / 2026 / 2024 | 17.03 / 17.95 / 21.76 | 16.98 / 17.73 / 21.54 |
+
+El error del total mensual sube un poco en 2024 (4.49% -> 4.58%) y en 2026
+(3.46% -> 3.53%); el criterio se mide por producto-mes.
+
 ## Serie oficial de demanda: venta de sucursales (desde 2026-09-26)
 
 Decisión de Carlos Zermeño (26-sep-2026): la demanda oficial del Pronóstico es la
@@ -30,7 +70,7 @@ suma 641,897.
 - El reparto semanal/sucursal ignora a Planta (no es sucursal ni recibe reparto).
 - Prueba: `scripts/demand-series-sucursal-test.cjs` (sintética).
 
-Cifras oficiales en la serie de sucursales (backtest mes a mes sin datos del mes,
+Cifras de #31 en la serie de sucursales (backtest mes a mes sin datos del mes,
 buffer 10%, 111 productos; mismo modelo que 63a18d1, que da idéntico SKU por SKU):
 
 | Corte | Serie de sucursales (oficial) | Serie total (referencia anterior) |
