@@ -221,6 +221,11 @@ function databaseSyncStatusText(snapshot, sync) {
     sync.waste.ok ? `${sync.waste.count} bajas` : `bajas no sincronizadas (${sync.waste.error})`,
   ];
   if (isDatabaseSyncComplete(sync)) {
+    if (!sync.sales.count) {
+      // Conectó bien, pero la base no tiene ventas guardadas: el pronóstico solo ve
+      // las ventas del respaldo o de los Excel cargados en esta sesión.
+      return `${backup}La base de datos respondió, pero no tiene ventas guardadas (0 ventas, ${parts[1]} y ${parts[2]}). El pronóstico solo usa las ventas del respaldo o de los Excel que cargues.`;
+    }
     return `${backup}Base sincronizada: ${parts[0]}, ${parts[1]} y ${parts[2]}.`;
   }
   return `${backup}Sincronización incompleta: ${parts.join("; ")}.`;
@@ -7622,6 +7627,11 @@ function Dashboard({ session, onLogout }) {
       .filter((row) => row.combinedStatus !== "complete");
   }, [pendingSalesImport, salesMonthCoverage]);
 
+  const loadedSalesMonthKeys = useMemo(() => {
+    const keys = new Set(effectiveVentas.map((record) => monthKeyFromRecord(record)).filter(Boolean));
+    return [...keys].sort();
+  }, [effectiveVentas]);
+
   const historicalMonthKeys = useMemo(() => {
     const keys = new Set(historicalVentas.map((record) => monthKeyFromRecord(record)).filter(Boolean));
     return [...keys].sort();
@@ -7955,7 +7965,8 @@ function Dashboard({ session, onLogout }) {
   );
   const priorityMonthlyCloseProducts = monthlyClose.rows.slice(0, 15);
 
-  const comparableForecast = showMissingReal ? forecast : forecast.filter((r) => r.hasRealData);
+  const hasAnyRealProduction = forecast.some((r) => r.hasRealData);
+  const comparableForecast = showMissingReal || !hasAnyRealProduction ? forecast : forecast.filter((r) => r.hasRealData);
   const filtered = comparableForecast.filter((r) => r.producto.includes(norm(query)));
 
   const dailyRows = useMemo(
@@ -7967,10 +7978,10 @@ function Dashboard({ session, onLogout }) {
         selectedMonth,
         dailyBufferPct,
         activePromos,
-        dailyBranchStock: effectiveDailyBranchStock,
-        dailyColdRoom: effectiveDailyColdRoom,
+        dailyBranchStock: [],
+        dailyColdRoom: [],
       }),
-    [forecast, ventasRealesMes, effectiveRealProduction, selectedMonth, dailyBufferPct, activePromos, effectiveDailyBranchStock, effectiveDailyColdRoom]
+    [forecast, ventasRealesMes, effectiveRealProduction, selectedMonth, dailyBufferPct, activePromos]
   );
   const filteredDailyRows = dailyRows.filter((row) => {
     if (dailyDateFilter && row.fecha !== dailyDateFilter) return false;
@@ -8157,7 +8168,14 @@ function Dashboard({ session, onLogout }) {
   const shouldShowHomologation = homologationRows.length > 0;
 
   const loadedFileItems = [
-    { label: "Ventas históricas", loaded: Boolean(files.ventas || ventas.length), primary: true },
+    {
+      label: "Ventas históricas",
+      loaded: Boolean(files.ventas || ventas.length),
+      primary: true,
+      detail: loadedSalesMonthKeys.length
+        ? `${loadedSalesMonthKeys.length} ${loadedSalesMonthKeys.length === 1 ? "mes" : "meses"} · ${displayMonthLabel(loadedSalesMonthKeys[0])} a ${displayMonthLabel(loadedSalesMonthKeys.at(-1))}`
+        : "",
+    },
     { label: "Stock fijo", loaded: Boolean(files.stock || stockRows.length), primary: true },
     { label: "Producción real", loaded: Boolean(files.real || realProduction.length) },
     { label: "Bajas/devoluciones", loaded: Boolean(files.bajas || bajas.length) },
@@ -8318,627 +8336,12 @@ function Dashboard({ session, onLogout }) {
           </section>
         )}
 
-        <details className="weekly-progress-section compact-analytics-section">
-          <summary className="compact-analytics-summary">
-            <span className="compact-analytics-icon"><CalendarRange size={19} /></span>
-            <div>
-              <span className="eyebrow">Seguimiento contra pronóstico</span>
-              <strong>Avance semanal</strong>
-              <small>Venta real, cumplimiento y proyección mensual</small>
-            </div>
-            <span className={`pill ${weeklyProgress.hasRealData ? weeklyProgress.month.status.className : "muted"}`}>
-              {weeklyProgress.hasRealData && weeklyProgress.month.cumplimiento !== null
-                ? `${formatPercent(weeklyProgress.month.cumplimiento, 1)} al corte`
-                : "Sin ventas diarias"}
-            </span>
-          </summary>
-
-          <div className="compact-analytics-content">
-            <div className="compact-analytics-toolbar">
-              <p>Compara la venta real cargada contra el pronóstico original y proyecta el cierre sin modificarlo.</p>
-            <div className="weekly-actions">
-              <label>
-                Semana
-                <select value={selectedWeek?.key || ""} onChange={(event) => setSelectedWeekKey(event.target.value)}>
-                  {!weeklyProgress.weeks.length && <option value="">Sin semanas</option>}
-                  {weeklyProgress.weeks.map((week) => (
-                    <option value={week.key} key={week.key}>{week.label}</option>
-                  ))}
-                </select>
-              </label>
-              <button
-                className="primary"
-                type="button"
-                onClick={() => exportWeeklyProgress(weeklyProgress, selectedWeek, selectedMonth)}
-                disabled={!selectedWeek || !weeklyProgress.hasRealData}
-              >
-                <Download size={18} /> Exportar avance
-              </button>
-            </div>
-          </div>
-
-          <p className={`weekly-data-note ${weeklyProgress.hasRealData && weeklyProgress.month.coveragePct >= 90 ? "success" : "warning"}`}>
-            {weeklyProgress.hasRealData
-              ? `Venta real del ${displayDate(weeklyProgress.month.firstRealDate)} al ${displayDate(weeklyProgress.month.cutoffDate)} · cobertura de fechas ${formatPercent(weeklyProgress.month.coveragePct, 0)}.`
-              : "Aún no hay ventas diarias del mes seleccionado. El avance se activará al sincronizar o importar ventas reales."}
-          </p>
-
-          {weeklyProgress.hasRealData && <>
-          <section className="weekly-kpis">
-            <KpiCard
-              icon={CalendarRange}
-              label="Venta real de la semana"
-              value={selectedWeek?.comparedDays ? formatNumber(selectedWeek.ventaReal, 0) : "Sin datos"}
-              caption={selectedWeek?.comparedDays ? `${selectedWeek.comparedDays} días comparados` : "Esperando venta diaria"}
-            />
-            <KpiCard
-              icon={Target}
-              label="Pronóstico al corte"
-              value={selectedWeek?.comparedDays ? formatNumber(selectedWeek.pronosticoCorte, 0) : "Sin datos"}
-              caption={selectedWeek ? `Semana completa: ${formatNumber(selectedWeek.pronosticoPeriodo, 0)}` : "Sin semana"}
-            />
-            <KpiCard
-              icon={BarChart3}
-              label="Cumplimiento semanal"
-              value={selectedWeek?.cumplimiento === null || selectedWeek?.cumplimiento === undefined ? "Sin datos" : formatPercent(selectedWeek.cumplimiento, 1)}
-              caption={selectedWeek?.status.label || "Sin información"}
-              tone={selectedWeek?.status.tone}
-            />
-            <KpiCard
-              icon={TrendingUp}
-              label="Proyección de cierre mensual"
-              value={weeklyProgress.hasRealData ? formatNumber(weeklyProgress.month.proyeccionPeriodo, 0) : "Sin datos"}
-              caption={weeklyProgress.hasRealData
-                ? `${weeklyProgress.month.projectedDifference >= 0 ? "+" : ""}${formatNumber(weeklyProgress.month.projectedDifference, 0)} vs. pronóstico mensual`
-                : `Pronóstico mensual: ${formatNumber(weeklyProgress.month.pronosticoPeriodo, 0)}`}
-              tone={weeklyProgress.month.projectedStatus.tone}
-            />
-          </section>
-
-          <div className="weekly-timeline" aria-label="Resumen de semanas del mes">
-            {weeklyProgress.weeks.map((week) => (
-              <button
-                type="button"
-                className={`weekly-step ${selectedWeek?.key === week.key ? "active" : ""}`}
-                onClick={() => setSelectedWeekKey(week.key)}
-                key={week.key}
-              >
-                <span>{week.label.split(" · ")[0]}</span>
-                <strong>{week.comparedDays ? formatPercent(week.cumplimiento, 0) : "Pendiente"}</strong>
-                <small>{week.comparedDays ? `${formatNumber(week.ventaReal)} / ${formatNumber(week.pronosticoCorte)}` : week.label.split(" · ")[1]}</small>
-                <i className={`weekly-status-dot ${week.status.className}`} />
-              </button>
-            ))}
-          </div>
-
-          {selectedWeek?.comparedDays > 0 && (
-            <div className="weekly-detail-grid">
-              <section className="table-card weekly-product-card">
-                <div className="weekly-table-title">
-                  <div>
-                    <span className="eyebrow">Prioridad de revisión</span>
-                    <h4>Productos con mayor desviación</h4>
-                  </div>
-                  <small>Primeros {priorityWeeklyProducts.length}</small>
-                </div>
-                <table className="weekly-table">
-                  <thead>
-                    <tr>
-                      <th>Producto</th>
-                      <th>Pronóstico al corte</th>
-                      <th>Venta real</th>
-                      <th>Diferencia</th>
-                      <th>Cumplimiento</th>
-                      <th>Proyección semanal</th>
-                      <th>Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {priorityWeeklyProducts.map((row) => (
-                      <tr key={row.producto}>
-                        <td className="strong">{row.producto}</td>
-                        <td>{formatNumber(row.pronosticoCorte, 1)}</td>
-                        <td>{formatNumber(row.ventaReal, 1)}</td>
-                        <td className={row.diferencia < 0 ? "negative" : "positive"}>
-                          {row.diferencia > 0 ? "+" : ""}{formatNumber(row.diferencia, 1)}
-                        </td>
-                        <td>{row.cumplimiento === null ? "Sin dato" : formatPercent(row.cumplimiento, 1)}</td>
-                        <td>{formatNumber(row.proyeccionPeriodo, 1)}</td>
-                        <td><span className={`pill ${row.status.className}`}>{row.status.label}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </section>
-
-              <section className="table-card weekly-category-card">
-                <div className="weekly-table-title">
-                  <div>
-                    <span className="eyebrow">Lectura por familia</span>
-                    <h4>Categorías</h4>
-                  </div>
-                </div>
-                <table className="weekly-table">
-                  <thead>
-                    <tr>
-                      <th>Categoría</th>
-                      <th>Real</th>
-                      <th>Pronóstico</th>
-                      <th>Diferencia</th>
-                      <th>Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedWeek.categories.map((row) => (
-                      <tr key={row.categoria}>
-                        <td className="strong">{row.categoria}</td>
-                        <td>{formatNumber(row.ventaReal, 0)}</td>
-                        <td>{formatNumber(row.pronosticoCorte, 0)}</td>
-                        <td className={row.diferencia < 0 ? "negative" : "positive"}>
-                          {row.diferencia > 0 ? "+" : ""}{formatNumber(row.diferencia, 0)}
-                        </td>
-                        <td><span className={`pill ${row.status.className}`}>{row.status.label}</span></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </section>
-            </div>
-          )}
-          </>}
-          </div>
-        </details>
-
-        <details className="monthly-review-section compact-analytics-section">
-          <summary className="compact-analytics-summary">
-            <span className="compact-analytics-icon"><ShieldCheck size={19} /></span>
-            <div>
-              <span className="eyebrow">Decisión operativa explicable</span>
-              <strong>Revisión mensual asistida</strong>
-              <small>Estatus, existencias y alertas sin modificar el pronóstico</small>
-            </div>
-            <span className={`pill ${monthlyReview.state === "approved" ? "ok" : monthlyReviewSummary.alerts ? "warn" : "muted"}`}>
-              {monthlyReviewLoading
-                ? "Cargando"
-                : monthlyReview.state === "approved"
-                  ? `Aprobada v${monthlyReview.version}`
-                  : `${monthlyReviewSummary.alerts} alertas`}
-            </span>
-          </summary>
-
-          <div className="compact-analytics-content">
-            <div className="compact-analytics-toolbar monthly-review-toolbar">
-              <p>
-                El motor local usa únicamente historial anterior, estatus y existencias. Sus propuestas forman
-                un plan operativo separado del pronóstico estadístico.
-              </p>
-              <div className="monthly-review-actions">
-                <button
-                  className="secondary"
-                  type="button"
-                  onClick={() => exportMonthlyReview({
-                    rows: monthlyReviewRows,
-                    review: { ...monthlyReview, inventoryCutoff: inventoryCutoff.cutoff },
-                    selectedMonth,
-                    sourceVersion: monthlyReviewSource?.version,
-                  })}
-                  disabled={!monthlyReviewRows.length}
-                >
-                  <Download size={17} /> Exportar revisión
-                </button>
-                <button
-                  className="secondary"
-                  type="button"
-                  onClick={() => saveMonthlyReview("draft")}
-                  disabled={!canSave || !monthlyReviewSource || monthlyReviewSaving}
-                >
-                  <Save size={17} /> {monthlyReviewSaving ? "Guardando..." : "Guardar borrador"}
-                </button>
-                {session.user.rol === "admin" && (
-                  <button
-                    className="primary"
-                    type="button"
-                    onClick={() => saveMonthlyReview("approved")}
-                    disabled={!monthlyReviewSource || monthlyReviewSaving || monthlyReviewSummary.pending > 0 || inventoryBlocksApproval}
-                    title={
-                      monthlyReviewSummary.pending
-                        ? "Decide todas las propuestas antes de aprobar"
-                        : inventoryBlocksApproval
-                          ? "La fecha de corte de existencias debe estar en la ventana del mes"
-                          : "Aprobar plan operativo"
-                    }
-                  >
-                    <CheckCircle2 size={17} /> Aprobar plan
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <p className={`monthly-review-note ${monthlyReviewSource && !inventoryBlocksApproval ? "success" : "warning"}`}>
-              {monthlyReviewSource
-                ? `Fuente inmutable: pronóstico congelado ${selectedMonth}, versión ${monthlyReviewSource.version}. ${monthlyReview.state === "approved" ? "Editar cualquier dato abrirá un nuevo borrador." : "El pronóstico original no será modificado."}`
-                : `Aún no existe un pronóstico congelado para ${selectedMonth}. Puedes revisar propuestas provisionales, pero debes usar “Congelar mes” antes de guardarlas.`}
-              {existencias.length
-                ? inventoryCutoff.status === "fresh"
-                  ? ` Existencias con corte ${displayDate(inventoryCutoff.cutoff)} (ventana ${displayDate(inventoryCutoff.windowStart)} a ${displayDate(inventoryCutoff.windowEnd)}).`
-                  : inventoryCutoff.status === "missing"
-                    ? " Falta la fecha de corte de existencias: no se descuentan y no se puede aprobar."
-                    : ` Existencias del ${displayDate(inventoryCutoff.cutoff)} fuera de ventana: no se descuentan y no se puede aprobar.`
-                : ""}
-            </p>
-
-            <section className="monthly-review-kpis">
-              <KpiCard
-                icon={Target}
-                label="Plan operativo base"
-                value={formatNumber(monthlyReviewSummary.baseTotal, 0)}
-                caption={`Pronóstico congelado +${OPERATIONAL_MARGIN_PCT}%`}
-              />
-              <KpiCard
-                icon={TrendingUp}
-                label="Propuesta del motor"
-                value={formatNumber(monthlyReviewSummary.proposedTotal, 0)}
-                caption={`${monthlyReviewSummary.proposedTotal - monthlyReviewSummary.baseTotal >= 0 ? "+" : ""}${formatNumber(monthlyReviewSummary.proposedTotal - monthlyReviewSummary.baseTotal, 0)} piezas`}
-              />
-              <KpiCard
-                icon={PackageCheck}
-                label="Plan según decisiones"
-                value={formatNumber(monthlyReviewSummary.finalTotal, 0)}
-                caption={`${monthlyReviewSummary.accepted} aceptadas · ${monthlyReviewSummary.rejected} rechazadas`}
-              />
-              <KpiCard
-                icon={ShieldCheck}
-                label="Pendientes / alertas"
-                value={`${monthlyReviewSummary.pending} / ${monthlyReviewSummary.alerts}`}
-                caption="La aprobación exige resolver todas"
-                tone={monthlyReviewSummary.pending ? "warn" : ""}
-              />
-            </section>
-
-            <label className="monthly-review-general-note">
-              Nota general del mes
-              <textarea
-                value={monthlyReview.generalNote}
-                onChange={(event) => updateMonthlyReview({ generalNote: event.target.value })}
-                placeholder="Ejemplo: apertura de sucursales, campaña, cambio de horario o decisión comercial."
-                disabled={!canSave}
-                rows="2"
-              />
-            </label>
-
-            <div className="monthly-review-controls">
-              <label className="search">
-                <Search size={17} />
-                <input
-                  type="search"
-                  value={monthlyReviewQuery}
-                  onChange={(event) => setMonthlyReviewQuery(event.target.value)}
-                  placeholder="Buscar producto"
-                />
-              </label>
-              <label>
-                Mostrar
-                <select value={monthlyReviewFilter} onChange={(event) => setMonthlyReviewFilter(event.target.value)}>
-                  <option value="all">Todos</option>
-                  <option value="alerts">Solo alertas</option>
-                  <option value="pending">Solo pendientes</option>
-                  <option value="adjusted">Con ajuste propuesto</option>
-                </select>
-              </label>
-              <span>{filteredMonthlyReviewRows.length} productos visibles</span>
-              <button
-                className="secondary"
-                type="button"
-                onClick={() => decideVisibleMonthlyReview("rejected")}
-                disabled={!canSave || !filteredMonthlyReviewRows.length}
-              >
-                Rechazar visibles
-              </button>
-              <button
-                className="primary"
-                type="button"
-                onClick={() => decideVisibleMonthlyReview("accepted")}
-                disabled={!canSave || !filteredMonthlyReviewRows.length}
-              >
-                Aceptar visibles
-              </button>
-            </div>
-
-            <section className="table-card monthly-review-table-card">
-              <table className="monthly-review-table">
-                <thead>
-                  <tr>
-                    <th>Producto</th>
-                    <th>Estatus</th>
-                    <th>Existencias</th>
-                    <th>Pronóstico</th>
-                    <th>Plan base</th>
-                    <th>Propuesta</th>
-                    <th>Diferencia</th>
-                    <th>Motivos</th>
-                    <th>Nota</th>
-                    <th>Decisión</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredMonthlyReviewRows.map((row) => (
-                    <tr className={`monthly-review-row ${row.severity}`} key={row.producto}>
-                      <td>
-                        <strong>{row.producto}</strong>
-                        <small>{row.categoria}</small>
-                      </td>
-                      <td>
-                        <select
-                          value={row.status}
-                          onChange={(event) => updateMonthlyReviewItem(row.producto, { status: event.target.value })}
-                          disabled={!canSave}
-                        >
-                          {MONTHLY_REVIEW_STATUSES.map((status) => <option value={status} key={status}>{status}</option>)}
-                        </select>
-                      </td>
-                      <td>
-                        <input
-                          className="monthly-review-number"
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={row.inventoryOverride ?? row.inventory}
-                          onChange={(event) => updateMonthlyReviewItem(row.producto, { inventoryOverride: event.target.value })}
-                          disabled={!canSave}
-                          title={row.hasLoadedInventory && row.inventoryOverride === null ? "Valor cargado desde existencias" : "Valor capturado en la revisión"}
-                        />
-                      </td>
-                      <td>{formatNumber(row.baseForecast, 0)}</td>
-                      <td>{formatNumber(row.baseOperational, 0)}</td>
-                      <td>
-                        <strong>{formatNumber(row.proposed, 0)}</strong>
-                        <small>colchón {row.marginPct}%</small>
-                      </td>
-                      <td className={row.difference < 0 ? "negative" : row.difference > 0 ? "positive" : ""}>
-                        {row.difference > 0 ? "+" : ""}{formatNumber(row.difference, 0)}
-                      </td>
-                      <td>
-                        <span className={`pill ${row.severity}`}>{row.severity === "danger" ? "Crítica" : row.severity === "warn" ? "Revisar" : "Estable"}</span>
-                        <small className="monthly-review-reasons">{row.reasons.join(" ")}</small>
-                      </td>
-                      <td>
-                        <input
-                          className="monthly-review-note-input"
-                          value={row.note}
-                          onChange={(event) => updateMonthlyReviewItem(row.producto, { note: event.target.value })}
-                          placeholder="Contexto operativo"
-                          disabled={!canSave}
-                        />
-                      </td>
-                      <td>
-                        <div className="monthly-review-decision">
-                          <button
-                            type="button"
-                            className={row.decision === "accepted" ? "accepted" : ""}
-                            onClick={() => updateMonthlyReviewItem(row.producto, { decision: "accepted" })}
-                            disabled={!canSave}
-                            title="Aceptar propuesta"
-                          >
-                            Sí
-                          </button>
-                          <button
-                            type="button"
-                            className={row.decision === "rejected" ? "rejected" : ""}
-                            onClick={() => updateMonthlyReviewItem(row.producto, { decision: "rejected" })}
-                            disabled={!canSave}
-                            title="Conservar plan base"
-                          >
-                            No
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                  {!filteredMonthlyReviewRows.length && (
-                    <tr><td colSpan="10" className="empty">No hay productos para este filtro.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </section>
-          </div>
-        </details>
-
-        <details className="monthly-close-section compact-analytics-section">
-          <summary className="compact-analytics-summary">
-            <span className="compact-analytics-icon"><FileSpreadsheet size={19} /></span>
-            <div>
-              <span className="eyebrow">Resultado definitivo del periodo</span>
-              <strong>Cierre mensual</strong>
-              <small>Venta, pronóstico, producción y error por producto</small>
-            </div>
-            <span className={`pill ${monthlyClose.salesLoaded ? monthlyClose.summary.status.className : "muted"}`}>
-              {monthlyClose.salesLoaded && monthlyClose.summary.cumplimiento !== null
-                ? `${formatPercent(monthlyClose.summary.cumplimiento, 1)} · WAPE ${formatPercent(monthlyClose.summary.wape, 1)}`
-                : "Cargar cierre"}
-            </span>
-          </summary>
-
-          <div className="compact-analytics-content">
-          <div className="compact-analytics-toolbar">
-            <p>Carga resúmenes por producto para comparar venta, pronóstico y producción sin convertirlos en registros diarios.</p>
-            <button
-              className="primary"
-              type="button"
-              onClick={() => exportMonthlyClose(monthlyClose, selectedMonth)}
-              disabled={!monthlyClose.salesLoaded}
-            >
-              <Download size={18} /> Exportar cierre
-            </button>
-          </div>
-
-          <div className="monthly-close-upload-grid">
-            <UploadBox
-              title="Ventas del cierre"
-              description="Resumen mensual con Producto y Cantidad Total. Reemplaza el cierre anterior del mismo mes."
-              required
-              onFile={(file) => handleMonthlyCloseFile(file, "sales")}
-              fileName={files.monthlyCloseSales}
-            />
-            <UploadBox
-              title="Producción del cierre"
-              description="Resumen mensual con Cantidad y Producto. No necesita fecha diaria."
-              onFile={(file) => handleMonthlyCloseFile(file, "production")}
-              fileName={files.monthlyCloseProduction}
-            />
-          </div>
-
-          <p className={`monthly-close-note ${monthlyClose.salesLoaded ? "success" : "warning"}`}>
-            {!monthlyCloseMatchesSelectedMonth && monthlyClosePeriod
-              ? `El cierre cargado corresponde a ${monthlyClosePeriod}. Selecciona ese mes o carga los archivos de ${selectedMonth}.`
-              : monthlyClose.salesLoaded
-                ? `Cierre ${selectedMonth}: ${formatNumber(monthlyClose.summary.productos)} productos comparados contra el ${effectiveForecastState.label}.`
-                : "Carga las ventas mensuales para activar WAPE, MAE y cumplimiento. La producción es complementaria."}
-          </p>
-
-          {monthlyClose.salesLoaded && <section className="monthly-close-kpis">
-            <KpiCard
-              icon={Target}
-              label="Pronóstico del cierre"
-              value={formatNumber(monthlyClose.summary.pronostico, 0)}
-              caption={`${formatNumber(monthlyClose.summary.productos)} productos regulares`}
-            />
-            <KpiCard
-              icon={BarChart3}
-              label="Venta real"
-              value={monthlyClose.salesLoaded ? formatNumber(monthlyClose.summary.ventaReal, 0) : "Sin datos"}
-              caption={monthlyClose.salesLoaded
-                ? `${monthlyClose.summary.diferenciaPronostico >= 0 ? "+" : ""}${formatNumber(monthlyClose.summary.diferenciaPronostico, 0)} vs. pronóstico`
-                : "Esperando cierre de ventas"}
-              tone={monthlyClose.summary.status.tone}
-            />
-            <KpiCard
-              icon={TrendingUp}
-              label="Cumplimiento"
-              value={monthlyClose.summary.cumplimiento === null ? "Sin datos" : formatPercent(monthlyClose.summary.cumplimiento, 1)}
-              caption={monthlyClose.summary.status.label}
-              tone={monthlyClose.summary.status.tone}
-            />
-            <KpiCard
-              icon={ShieldCheck}
-              label="WAPE / MAE"
-              value={monthlyClose.summary.wape === null ? "Sin datos" : `${formatPercent(monthlyClose.summary.wape, 2)} / ${formatNumber(monthlyClose.summary.mae, 2)}`}
-              caption={monthlyClose.salesLoaded ? `${monthlyClose.summary.dentro15} productos dentro de ±15` : "Error por producto"}
-            />
-            <KpiCard
-              icon={PackageCheck}
-              label="Producción real"
-              value={monthlyClose.productionLoaded ? formatNumber(monthlyClose.summary.producido, 0) : "Sin datos"}
-              caption={monthlyClose.productionLoaded && monthlyClose.salesLoaded
-                ? `${monthlyClose.summary.diferenciaProduccion >= 0 ? "+" : ""}${formatNumber(monthlyClose.summary.diferenciaProduccion, 0)} producido menos vendido`
-                : "Producción mensual opcional"}
-              tone={monthlyClose.summary.productionStatus.tone}
-            />
-          </section>}
-
-          {monthlyClose.salesLoaded && (
-            <>
-              <div className="monthly-close-detail-grid">
-                <section className="table-card monthly-close-product-card">
-                  <div className="weekly-table-title">
-                    <div>
-                      <span className="eyebrow">Mayor impacto en el error</span>
-                      <h4>Productos prioritarios</h4>
-                    </div>
-                    <small>Primeros {priorityMonthlyCloseProducts.length}</small>
-                  </div>
-                  <table className="monthly-close-table">
-                    <thead>
-                      <tr>
-                        <th>Producto</th>
-                        <th>Pronóstico</th>
-                        <th>Venta</th>
-                        <th>Diferencia</th>
-                        <th>Error absoluto</th>
-                        <th>Producido</th>
-                        <th>Prod. - venta</th>
-                        <th>Estado</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {priorityMonthlyCloseProducts.map((row) => (
-                        <tr key={row.producto}>
-                          <td className="strong">{row.producto}</td>
-                          <td>{formatNumber(row.pronostico, 1)}</td>
-                          <td>{formatNumber(row.ventaReal, 1)}</td>
-                          <td className={row.diferenciaPronostico < 0 ? "negative" : "positive"}>
-                            {row.diferenciaPronostico > 0 ? "+" : ""}{formatNumber(row.diferenciaPronostico, 1)}
-                          </td>
-                          <td>{formatNumber(row.errorAbsoluto, 1)}</td>
-                          <td>{monthlyClose.productionLoaded ? formatNumber(row.producido, 1) : "-"}</td>
-                          <td>{monthlyClose.productionLoaded ? `${row.diferenciaProduccion > 0 ? "+" : ""}${formatNumber(row.diferenciaProduccion, 1)}` : "-"}</td>
-                          <td><span className={`pill ${row.status.className}`}>{row.status.label}</span></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </section>
-
-                <section className="table-card monthly-close-category-card">
-                  <div className="weekly-table-title">
-                    <div>
-                      <span className="eyebrow">Resultado por familia</span>
-                      <h4>Categorías</h4>
-                    </div>
-                  </div>
-                  <table className="monthly-close-table">
-                    <thead>
-                      <tr>
-                        <th>Categoría</th>
-                        <th>Pronóstico</th>
-                        <th>Venta</th>
-                        <th>WAPE</th>
-                        <th>Prod. - venta</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {monthlyClose.categories.map((row) => (
-                        <tr key={row.categoria}>
-                          <td className="strong">{row.categoria}</td>
-                          <td>{formatNumber(row.pronostico, 0)}</td>
-                          <td>{formatNumber(row.ventaReal, 0)}</td>
-                          <td>{row.wape === null ? "Sin dato" : formatPercent(row.wape, 1)}</td>
-                          <td className={row.diferenciaProduccion < 0 ? "negative" : "positive"}>
-                            {monthlyClose.productionLoaded ? `${row.diferenciaProduccion > 0 ? "+" : ""}${formatNumber(row.diferenciaProduccion, 0)}` : "-"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </section>
-              </div>
-
-              <div className="monthly-close-reconciliation">
-                <div>
-                  <span>Venta regular comparable</span>
-                  <strong>{formatNumber(monthlyClose.summary.ventaReal, 0)}</strong>
-                </div>
-                <div>
-                  <span>Venta fuera del catálogo regular</span>
-                  <strong>{formatNumber(monthlyClose.unmatchedSalesTotal, 0)}</strong>
-                  <small>{monthlyClose.unmatchedSales.length} productos</small>
-                </div>
-                <div>
-                  <span>Producción fuera del catálogo regular</span>
-                  <strong>{monthlyClose.productionLoaded ? formatNumber(monthlyClose.unmatchedProductionTotal, 0) : "Sin datos"}</strong>
-                  <small>{monthlyClose.productionLoaded ? `${monthlyClose.unmatchedProduction.length} productos` : "Carga opcional"}</small>
-                </div>
-              </div>
-            </>
-          )}
-          </div>
-        </details>
-
         <section className="loaded-files-section">
           <div className="section-heading compact-heading">
             <div>
               <span className="eyebrow">Paso 1 · Datos</span>
               <h3>Cargar stock y ventas</h3>
-              <p>Estos dos archivos encienden el pronóstico. Bajas, existencias y producción real están en Más archivos.</p>
+              <p>Con estos dos archivos se calcula el pronóstico. El stock se sube aquí; ya no hace falta capturar inventario del día.</p>
             </div>
             <div className="loaded-context">
               <span>Mes: {selectedMonth || "Sin mes"}</span>
@@ -8959,58 +8362,15 @@ function Dashboard({ session, onLogout }) {
             <span>{cloudStatus}</span>
             {lastBackup?.created_at && <small>Último respaldo: {new Date(lastBackup.created_at).toLocaleString("es-MX")}</small>}
           </div>
+          {loadedSalesMonthKeys.length > 0 && loadedSalesMonthKeys.length < 13 && (
+            <p className="real-validation-message warning sales-history-note">
+              Solo hay {loadedSalesMonthKeys.length} {loadedSalesMonthKeys.length === 1 ? "mes" : "meses"} de venta cargados
+              ({displayMonthLabel(loadedSalesMonthKeys[0])} a {displayMonthLabel(loadedSalesMonthKeys.at(-1))}). El pronóstico usa
+              solo lo cargado. Para usar todo el histórico, selecciona juntos los Excel de 2024, 2025 y 2026 y pulsa
+              «Guardar ventas en la base»: el respaldo no alcanza para guardar años completos de venta diaria.
+            </p>
+          )}
         </section>
-
-        {shouldShowHomologation && <details className="homologation-section compact-homologation advanced-details">
-          <summary className="advanced-summary">
-            <div>
-              <span className="eyebrow">Catálogo maestro</span>
-              <strong>Homologación de productos</strong>
-              <small>{formatNumber(pendingHomologationCount)} nombres pendientes de revisar</small>
-            </div>
-            <span className="advanced-count">{formatNumber(officialProducts.length)} oficiales</span>
-          </summary>
-
-          <section className="table-card homologation-table-card advanced-details-content">
-            <table className="homologation-table">
-              <thead>
-                <tr>
-                  <th>Producto leído</th>
-                  <th>Nombre original</th>
-                  <th>Origen</th>
-                  <th>Registros</th>
-                  <th>Producto oficial</th>
-                  <th>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {homologationRows.map((row) => (
-                  <tr key={row.product}>
-                    <td>{row.product}</td>
-                    <td>{row.originalNames.join(", ")}</td>
-                    <td>{row.sources.join(", ")}</td>
-                    <td>{formatNumber(row.count)}</td>
-                    <td>
-                      <select value={row.official} onChange={(e) => saveProductAlias(row.product, e.target.value)}>
-                        <option value="">Seleccionar producto</option>
-                        {officialProducts.map((product) => (
-                          <option value={product} key={product}>
-                            {product}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <span className={`pill ${row.status === "Pendiente" ? "warn" : row.status === "Manual" ? "ok" : "muted"}`}>
-                        {row.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
-        </details>}
 
         <section className="uploads required-uploads">
           <UploadBox
@@ -9022,54 +8382,13 @@ function Dashboard({ session, onLogout }) {
           />
           <UploadBox
             title="Ventas"
-            description="Selecciona juntos los históricos de 2024, 2025 y 2026."
+            description="Selecciona juntos los históricos de 2024, 2025 y 2026. Abajo aparecen los archivos que ya están cargados."
             required
             multiple
             onFile={handleSalesFiles}
             fileName={files.ventas}
           />
         </section>
-
-        <SectionDisclosure
-          className="complementary-files advanced-details"
-          summaryClassName="advanced-summary"
-          contentClassName="advanced-details-content complementary-files-content"
-          eyebrow="Opcional"
-          title="Más archivos"
-          description="Bajas, existencias y producción real. No bloquean el pronóstico base."
-          badge={(
-            <span className="advanced-count">
-              {[
-                files.bajas || bajas.length,
-                files.existencias || existencias.length,
-                files.real || realProduction.length,
-              ].filter(Boolean).length}
-              /3 cargados
-            </span>
-          )}
-        >
-          <section className="uploads optional-uploads">
-            <UploadBox
-              title="Bajas"
-              description="Merma, devoluciones o bajas por producto."
-              onFile={handleWasteFile}
-              fileName={files.bajas}
-            />
-            <UploadBox
-              title="Existencias"
-              description="Corte mensual (EXISTENCIA EN SUCURSALES) para el balance. El inventario diario por sucursal se captura en Planta."
-              onFile={handleExistenciasFile}
-              fileName={files.existencias}
-            />
-            <UploadBox
-              title="Producción real"
-              description="Excel consolidado o ZIP con producción real."
-              accept=".xlsx,.xls,.zip"
-              onFile={handleProductionReal}
-              fileName={files.real}
-            />
-          </section>
-        </SectionDisclosure>
 
         {salesSourceDecisions.length > 0 && (
           <section className="sales-conflict-bar">
@@ -9096,33 +8415,6 @@ function Dashboard({ session, onLogout }) {
                 </div>
               );
             })}
-          </section>
-        )}
-
-        {existencias.length > 0 && (
-          <section className={`inventory-cutoff-bar ${inventoryCutoff.status === "fresh" ? "success" : "warning"}`}>
-            <label>
-              Fecha de corte de existencias
-              <input
-                type="date"
-                value={existenciasCutoff.date || ""}
-                onChange={(event) => {
-                  setExistenciasCutoff((current) => ({
-                    ...current,
-                    date: event.target.value,
-                    source: "captura manual",
-                  }));
-                  setHasUnsavedChanges(true);
-                }}
-              />
-            </label>
-            <p>
-              {inventoryCutoff.status === "fresh"
-                ? `Válidas para ${selectedMonth}: ${displayDate(inventoryCutoff.windowStart)} a ${displayDate(inventoryCutoff.windowEnd)}${existenciasCutoff.source ? ` · origen: ${existenciasCutoff.source}` : ""}.`
-                : inventoryCutoff.status === "missing"
-                  ? "Sin fecha de corte: la revisión no descuenta inventario y no se puede aprobar."
-                  : `Fuera de ventana (${displayDate(inventoryCutoff.windowStart)} a ${displayDate(inventoryCutoff.windowEnd)}): no se descuentan y no se puede aprobar.`}
-            </p>
           </section>
         )}
 
@@ -9181,142 +8473,17 @@ function Dashboard({ session, onLogout }) {
           </section>
         )}
 
-        <OperationalImportPanel
-          title="Validación antes de guardar producción real"
-          description="Consolida por fecha, producto y turno; las cargas repetidas actualizan el registro existente."
-          dimensionLabel="Turnos identificados"
-          pendingRows={pendingProductionImport}
-          preview={productionImportPreview}
-          status={productionImportStatus}
-          importing={productionImporting}
-          canSave={canSave}
-          onImport={() => importOperationalToDatabase("produccion")}
-          resumeFromBatch={productionImportRun?.nextBatch > 1 ? productionImportRun.nextBatch : null}
-        />
-
-        <OperationalImportPanel
-          title="Validación antes de guardar bajas"
-          description="Consolida por fecha, producto, sucursal y motivo sin convertir totales mensuales en bajas diarias."
-          dimensionLabel="Sucursales y motivos"
-          pendingRows={pendingWasteImport}
-          preview={wasteImportPreview}
-          status={wasteImportStatus}
-          importing={wasteImporting}
-          canSave={canSave}
-          onImport={() => importOperationalToDatabase("bajas")}
-          resumeFromBatch={wasteImportRun?.nextBatch > 1 ? wasteImportRun.nextBatch : null}
-        />
-
-        <details className="historical-validation-section advanced-details">
-          <summary className="advanced-summary historical-validation-heading">
-            <div>
-              <span className="eyebrow">Validación histórica</span>
-              <strong>Ventas, producido y bajas</strong>
-              <small>Comparativo mayo-junio y referencia de julio</small>
-            </div>
-            <span className="advanced-count">{historicalValidationRows.length ? `${formatNumber(historicalValidationSummary.products)} productos` : "Opcional"}</span>
-          </summary>
-
-          <div className="advanced-details-content historical-validation-content">
-              <section className="historical-validation-uploads">
-                <UploadBox
-                  title="Producido mayo"
-                  description="Resumen mensual por producto."
-                  onFile={(file) => handleMonthlySummaryFile(file, "producedMay", setProducedMay)}
-                  fileName={files.producedMay}
-                />
-                <UploadBox
-                  title="Producido junio"
-                  description="Resumen mensual por producto."
-                  onFile={(file) => handleMonthlySummaryFile(file, "producedJune", setProducedJune)}
-                  fileName={files.producedJune}
-                />
-                <UploadBox
-                  title="Bajas junio"
-                  description="Hoja BAJAS ERICK."
-                  onFile={(file) => handleMonthlySummaryFile(file, "bajasJune", setBajasJune, parseBajasSummaryFile)}
-                  fileName={files.bajasJune}
-                />
-                <UploadBox
-                  title="Bajas julio"
-                  description="Referencia real, puede ser corte parcial."
-                  onFile={(file) => handleMonthlySummaryFile(file, "bajasJuly", setBajasJuly, parseBajasSummaryFile)}
-                  fileName={files.bajasJuly}
-                />
-              </section>
-
-              <div className="historical-validation-kpis">
-                <KpiCard icon={PackageCheck} label="Productos evaluados" value={formatNumber(historicalValidationSummary.products)} caption="Ventas, producido y bajas" />
-                <KpiCard icon={Target} label="Precisión promedio junio" value={formatPercent(historicalValidationSummary.precision, 1)} caption="Mayo pronostica junio" />
-                <KpiCard icon={Database} label="Bajas junio" value={formatNumber(historicalValidationSummary.bajasJune)} caption="Hoja BAJAS ERICK" />
-                <KpiCard icon={ShieldCheck} label="Producción julio ajustada" value={formatNumber(historicalValidationSummary.adjusted)} caption="Incluye bajas esperadas" />
-              </div>
-
-              <section className="table-card historical-validation-table-card">
-                <table className="historical-validation-table">
-                  <thead>
-                    <tr>
-                      <th>Producto</th>
-                      <th>Venta junio</th>
-                      <th>Producido junio</th>
-                      <th>Bajas junio</th>
-                      <th>Demanda ajustada</th>
-                      <th>Saldo junio</th>
-                      <th>Tasa bajas</th>
-                      <th>Pronóstico junio</th>
-                      <th>Precisión</th>
-                      <th>Pronóstico julio</th>
-                      <th>Bajas esperadas</th>
-                      <th>Producción julio base</th>
-                      <th>Producción ajustada</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {historicalValidationRows.map((row) => (
-                      <tr key={row.producto}>
-                        <td>{row.producto}</td>
-                        <td>{formatNumber(row.ventaJunio)}</td>
-                        <td>{formatNumber(row.producidoJunio)}</td>
-                        <td>{formatNumber(row.bajasJunio)}</td>
-                        <td>{formatNumber(row.demandaAjustadaJunio)}</td>
-                        <td>{formatNumber(row.saldoJunio)}</td>
-                        <td>{formatPercent(row.tasaBajas * 100, 1)}</td>
-                        <td>{formatNumber(row.pronosticoJunio, 2)}</td>
-                        <td>{row.precisionJunio === null ? "Sin dato" : formatPercent(row.precisionJunio, 1)}</td>
-                        <td>{formatNumber(row.pronosticoJulio, 2)}</td>
-                        <td>{formatNumber(row.bajasEsperadasJulio, 2)}</td>
-                        <td className="strong">{formatNumber(row.produccionSugeridaBase)}</td>
-                        <td className="strong">{formatNumber(row.produccionSugeridaAjustada)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {!historicalValidationRows.length && (
-                  <div className="empty">Carga ventas, producido y bajas para generar la validación histórica.</div>
-                )}
-              </section>
-
-              <div className="historical-validation-actions">
-                <p>La producción ajustada es un escenario informativo: agrega las bajas esperadas a la producción base.</p>
-                <button className="primary" type="button" onClick={() => exportHistoricalValidation(historicalValidationRows)} disabled={!historicalValidationRows.length}>
-                  <Download size={18} /> Exportar validación a Excel
-                </button>
-              </div>
-          </div>
-        </details>
-
         <section className="executive-summary-section decision-section">
           <div className="section-heading compact-heading">
             <div>
               <span className="eyebrow">Paso 2 · Salud</span>
               <h3>Pronóstico listo para planta</h3>
-              <p>Revisa el WAPE de meses cerrados, el sync y el total sugerido antes de congelar. Un mes congelado ya no se recalcula en silencio.</p>
+              <p>Revisa que haya meses de venta y el total del mes antes de congelar. Un mes congelado ya no se recalcula en silencio.</p>
             </div>
             <strong className="decision-month-chip">{selectedMonth || "Sin mes"} · margen {dailyBufferPct}%</strong>
           </div>
 
           <ForecastHealthStrip health={forecastHealth} selectedMonth={selectedMonth} />
-          <ForecastAccuracyPanel health={forecastHealth} selectedMonth={selectedMonth} />
           <FrozenMonthBanner forecastLock={effectiveForecastState} selectedMonth={selectedMonth} />
           <FreezeReadinessStrip readiness={freezeReadiness} selectedMonth={selectedMonth} />
 
@@ -9339,13 +8506,7 @@ function Dashboard({ session, onLogout }) {
               icon={ShieldCheck}
               label="Producción sugerida mensual"
               value={formatNumber(dailySummary.produccionSugeridaMensual, 0)}
-              caption={effectiveDailyBranchStock.length ? "Con regla operativa e inventario del día" : "Con regla operativa"}
-            />
-            <KpiCard
-              icon={Target}
-              label="Escenario operativo"
-              value={formatNumber(operationalScenarioTotal, 0)}
-              caption={`Colchón +${OPERATIONAL_MARGIN_PCT}% separado del estadístico`}
+              caption="Suma de «Mandar a producir» del mes"
             />
           </section>
         </section>
@@ -9490,7 +8651,7 @@ function Dashboard({ session, onLogout }) {
             <div>
               <span className="eyebrow">Paso 3 · Planta</span>
               <h3>Producción diaria sugerida</h3>
-              <p>Captura sucursales y cuarto frío. Pedido planta es el envío; A producir es lo que hay que fabricar. El mes se cambia arriba, junto a Congelar.</p>
+              <p>«Mandar a producir» es la cantidad del día para planta. El mes se cambia arriba, junto a Congelar.</p>
               <strong className="row-counter">{formatNumber(dailyRows.length)} filas diarias generadas</strong>
               {files.ventas && (
                 <p className={`real-validation-message ${historicalVentas.length ? "success" : "warning"}`}>
@@ -9506,173 +8667,6 @@ function Dashboard({ session, onLogout }) {
               <Download size={18} /> Exportar diario
             </button>
           </div>
-
-          <section className="daily-stock-panel" aria-label="Inventario diario por sucursal y cuarto frío">
-            <div className="daily-stock-heading">
-              <span className="daily-stock-icon"><Warehouse size={20} /></span>
-              <div>
-                <span className="eyebrow">Inventario del día</span>
-                <h4>Stock por sucursal, cuarto frío y SKU</h4>
-                <p>Sucursales restan del pedido de planta. Cuarto frío resta de A producir. Vacío = no capturado. 0 = contado vacío.</p>
-              </div>
-              <span className={`pill ${inventoryDayHasCapture ? "ok" : "muted"}`}>
-                {inventoryDayHasCapture
-                  ? `${formatNumber(inventoryDayProducts)} SKU · ${formatNumber(inventoryDayPieces, 0)} suc. · ${formatNumber(inventoryDayColdPieces, 0)} CF · ${displayDate(inventoryDate)}`
-                  : `Sin captura · ${displayDate(inventoryDate)}`}
-              </span>
-            </div>
-            <div className="daily-stock-toolbar">
-              <label>
-                Fecha de inventario
-                <input
-                  type="date"
-                  min="2020-01-01"
-                  max="2100-12-31"
-                  value={isPlausibleIsoDate(inventoryDate) ? inventoryDate : ""}
-                  onChange={(event) => {
-                    const next = event.target.value;
-                    if (next && !isPlausibleIsoDate(next)) return;
-                    setStockCaptureDate(next);
-                    setDailyDateFilter(next);
-                  }}
-                />
-              </label>
-              <div className="search">
-                <Search size={18} />
-                <input
-                  placeholder="Buscar SKU del inventario..."
-                  value={stockCaptureQuery}
-                  onChange={(event) => setStockCaptureQuery(event.target.value)}
-                />
-              </div>
-              <label className="daily-stock-add-branch">
-                Sucursal
-                <span>
-                  <input
-                    value={newSucursalName}
-                    onChange={(event) => setNewSucursalName(event.target.value)}
-                    placeholder="Nombre de sucursal"
-                    disabled={!canSave}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        addManualSucursal();
-                      }
-                    }}
-                  />
-                  <button className="secondary" type="button" onClick={addManualSucursal} disabled={!canSave || !newSucursalName.trim()}>
-                    Agregar
-                  </button>
-                </span>
-              </label>
-              <label className="upload-button daily-stock-upload">
-                <FileSpreadsheet size={17} />
-                Importar Excel
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  disabled={!canSave}
-                  onChange={(event) => {
-                    handleDailyBranchStockFile(event.target.files?.[0]);
-                    event.target.value = "";
-                  }}
-                />
-              </label>
-              <button
-                className="secondary"
-                type="button"
-                onClick={() => exportDailyBranchStockTemplate(inventoryDate, knownSucursales, officialProducts)}
-              >
-                <Download size={17} /> Plantilla
-              </button>
-              <button
-                className="secondary"
-                type="button"
-                onClick={() => clearDailyInventoryForDate(inventoryDate)}
-                disabled={!canSave || !inventoryDayHasCapture}
-              >
-                Vaciar este día
-              </button>
-            </div>
-            {files.dailyBranchStock && <span className="file-name">Último Excel: {files.dailyBranchStock}</span>}
-            {knownSucursales.length === 0 && !officialProducts.length && !coldRowsForDate.length ? (
-              <div className="empty">Agrega una sucursal o importa un Excel RAIZ (sucursales y/o Cuarto frío / Restante CF). Las metas TOTAL A TENER no se importan como sucursal.</div>
-            ) : !stockGridProducts.length ? (
-              <div className="empty">
-                {officialProducts.length
-                  ? "Ningún SKU coincide con la búsqueda."
-                  : "Carga el stock fijo para ver el catálogo, o importa un Excel con productos."}
-              </div>
-            ) : (
-              <div className="daily-stock-table-wrap">
-                <table className="daily-stock-table">
-                  <thead>
-                    <tr>
-                      <th>Producto</th>
-                      {knownSucursales.map((sucursal) => (
-                        <th key={sucursal}>{sucursal}</th>
-                      ))}
-                      <th>Total sucursales</th>
-                      <th className="daily-stock-cf">Cuarto frío</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stockGridProducts.map((product) => {
-                      const total = knownSucursales.reduce((sum, sucursal) => {
-                        const value = stockQtyByProductBranch.get(`${product}|${norm(sucursal)}`);
-                        return sum + (Number.isFinite(value) ? value : 0);
-                      }, 0);
-                      const captured = knownSucursales.some((sucursal) => stockQtyByProductBranch.has(`${product}|${norm(sucursal)}`));
-                      const coldValue = coldQtyByProduct.has(product) ? coldQtyByProduct.get(product) : "";
-                      return (
-                        <tr key={product}>
-                          <td>{product}</td>
-                          {knownSucursales.map((sucursal) => {
-                            const key = `${product}|${norm(sucursal)}`;
-                            const value = stockQtyByProductBranch.has(key) ? stockQtyByProductBranch.get(key) : "";
-                            return (
-                              <td key={sucursal}>
-                                <input
-                                  className="daily-stock-qty"
-                                  type="number"
-                                  min="0"
-                                  step="1"
-                                  inputMode="numeric"
-                                  value={value}
-                                  disabled={!canSave}
-                                  aria-label={`${product} en ${sucursal}`}
-                                  onChange={(event) => updateDailyBranchStockCell(inventoryDate, sucursal, product, event.target.value)}
-                                />
-                              </td>
-                            );
-                          })}
-                          <td className="strong">{captured ? formatNumber(total, 0) : "—"}</td>
-                          <td className="daily-stock-cf">
-                            <input
-                              className="daily-stock-qty"
-                              type="number"
-                              min="0"
-                              step="1"
-                              inputMode="numeric"
-                              value={coldValue}
-                              disabled={!canSave}
-                              aria-label={`${product} en cuarto frío`}
-                              onChange={(event) => updateDailyColdRoomCell(inventoryDate, product, event.target.value)}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {inventoryCapturedDates.length > 1 && (
-              <small className="daily-stock-hint">
-                Días con inventario: {inventoryCapturedDates.map((date) => displayDate(date)).join(" · ")}
-              </small>
-            )}
-          </section>
 
           <section className="controls daily-controls">
             <label>
@@ -9723,37 +8717,6 @@ function Dashboard({ session, onLogout }) {
             </label>
           </section>
 
-          <details className="advanced-details daily-more-filters">
-            <summary className="advanced-summary">
-              <div>
-                <span className="eyebrow">Filtros extra</span>
-                <strong>Más filtros de la tabla</strong>
-                <small>Faltante, sobreproducción y recortes de revisión</small>
-              </div>
-              <span className="advanced-count">
-                {[onlyDailyShortage, onlyDailyOverproduction].filter(Boolean).length || "Ocultos"}
-              </span>
-            </summary>
-            <div className="advanced-details-content daily-more-filters-content">
-              <label className="check-control">
-                <input
-                  type="checkbox"
-                  checked={onlyDailyShortage}
-                  onChange={(e) => setOnlyDailyShortage(e.target.checked)}
-                />
-                Ver solo productos con faltante
-              </label>
-              <label className="check-control">
-                <input
-                  type="checkbox"
-                  checked={onlyDailyOverproduction}
-                  onChange={(e) => setOnlyDailyOverproduction(e.target.checked)}
-                />
-                Ver solo productos con sobreproducción
-              </label>
-            </div>
-          </details>
-
           <section className="table-card daily-table-card">
             <table className="daily-table">
               <thead>
@@ -9761,15 +8724,9 @@ function Dashboard({ session, onLogout }) {
                   <th>Fecha</th>
                   <th>Día</th>
                   <th>Producto</th>
-                  <th>Promedio aplicado</th>
-                  <th>Pronóstico de venta</th>
-                  <th>Margen de seguridad</th>
-                  <th>Base con margen</th>
-                  <th>Bruto planta</th>
-                  <th>Inventario sucursales</th>
-                  <th>Cuarto frío</th>
-                  <th>Pedido planta</th>
-                  <th>A producir</th>
+                  <th className="num">Pronóstico de venta</th>
+                  <th className="num">Margen de seguridad</th>
+                  <th className="num produce-col">Mandar a producir</th>
                 </tr>
               </thead>
               <tbody>
@@ -9783,15 +8740,9 @@ function Dashboard({ session, onLogout }) {
                         <span className="pill ok promo-day-pill" title={row.promoEtiqueta}>Promo</span>
                       )}
                     </td>
-                    <td>{row.promedioUsado.toFixed(2)}</td>
-                    <td>{row.pronosticoVentaDia.toFixed(2)}</td>
-                    <td>{row.colchonDiario.toFixed(2)}</td>
-                    <td>{row.baseConColchonDia.toFixed(2)}</td>
-                    <td>{row.produccionBrutaDia ?? row.produccionSugeridaDia}</td>
-                    <td>{row.hasDailyBranchStock ? formatNumber(row.inventarioSucursalesDia, 0) : "—"}</td>
-                    <td>{row.hasDailyColdRoom ? formatNumber(row.cuartoFrioDia, 0) : "—"}</td>
-                    <td>{row.produccionSugeridaDia}</td>
-                    <td className="strong">{row.aProducirDia ?? row.produccionSugeridaDia}</td>
+                    <td className="num">{row.pronosticoVentaDia.toFixed(2)}</td>
+                    <td className="num">{row.colchonDiario.toFixed(2)}</td>
+                    <td className="num produce-col" title={row.reglaOperativa}>{row.aProducirDia ?? row.produccionSugeridaDia}</td>
                   </tr>
                 ))}
               </tbody>
@@ -9808,300 +8759,11 @@ function Dashboard({ session, onLogout }) {
             )}
             {dailyRows.length > 0 && (
               <small className="daily-stock-hint">
-                Pedido planta = max(0, bruto − sucursales). A producir = max(0, bruto − sucursales − cuarto frío). Sin captura no se descuenta.
+                Mandar a producir = producción sugerida del mes repartida por día (pronóstico + margen), con lotes de pastel, la demanda del domingo pasada al sábado y la promo activa si hay. No se descuenta inventario.
               </small>
             )}
           </section>
         </section>
-
-        <section className="secondary-tools-heading">
-          <div>
-            <span className="eyebrow">Cuando haga falta</span>
-            <h3>Seguimiento y auditoría</h3>
-            <p>Avance semanal, cierre, homologación y validación. Cerrados para no competir con la decisión de planta.</p>
-          </div>
-        </section>
-
-        <SectionDisclosure
-          className="notes-section compact-analytics-section"
-          eyebrow="Lectura rápida"
-          title="Notas de interpretación"
-          description="Reglas de domingo, lotes de pastel y cómo se lee una promo."
-          icon={FileSpreadsheet}
-          badge={<span className="pill muted">Guía</span>}
-        >
-          <div className="notes-list">
-            <p>El pronóstico elige el método con menor error en el mes anterior y aplica una calibración limitada.</p>
-            <p>El pronóstico de venta se reparte por día de semana. El domingo no se produce y su demanda pasa al sábado.</p>
-            <p>Las existencias de corte mensual solo se descuentan en el balance si la fecha cae entre el mes anterior y el mes planificado.</p>
-            <p>El inventario diario se captura en Planta. Pedido planta (envío) = max(0, bruto con promo − sucursales). A producir (fabricar) = max(0, bruto con promo − sucursales − cuarto frío). Vacío no descuenta; 0 sí. No se vuelve a armar lote de pastel después de restar inventario.</p>
-            <p>Para pasteles GDE, MED y CH, cada día de planta (lunes a sábado) se produce 0 o un lote de 10, 15, 20… Un 13 se hace 15; menos de 8 no se produce. El domingo queda en cero y su demanda pasa al sábado, que también sale en lote.</p>
-            <p>Una promo activa es un overlay de planta: no reescribe el WAPE histórico. Mientras dura, no se apaga el SKU por la limpieza de catálogo y la producción sugerida aplica el multiplicador y/o las piezas extra.</p>
-            <p>La vista Validación de cálculos permite auditar cada producto.</p>
-          </div>
-        </SectionDisclosure>
-
-        <SectionDisclosure
-          className="validation-section compact-analytics-section"
-          eyebrow="Auditoría paso a paso"
-          title="Validación de cálculos"
-          description="Ventas leídas, promedios y el cálculo diario de un producto."
-          icon={BarChart3}
-          badge={<span className="pill muted">{validationProduct || "Sin producto"}</span>}
-        >
-          <div className="section-heading compact-heading">
-            <div>
-              <span className="eyebrow">Producto a auditar</span>
-              <h3>Desglose del cálculo</h3>
-              <p>Revisa las ventas leídas, los promedios aplicados y el cálculo diario completo.</p>
-            </div>
-            <label className="validation-product-select">
-              Producto
-              <select value={validationProduct} onChange={(e) => setValidationProduct(e.target.value)}>
-                {!validationProducts.length && <option value="">Carga productos</option>}
-                {validationProducts.map((row) => (
-                  <option value={row.producto} key={row.producto}>
-                    {row.producto}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          {validationForecast ? (
-            <>
-              <section className="validation-summary">
-                <KpiCard
-                  icon={FileSpreadsheet}
-                  label="Ventas diarias leídas"
-                  value={formatNumber(validationSales.length)}
-                  caption={
-                    validationSourceNames.length
-                      ? `Excel: ${validationSourceNames.join(", ")}`
-                      : `Producto homologado: ${validationProduct}`
-                  }
-                />
-                <KpiCard
-                  icon={BarChart3}
-                   label="Pronóstico venta mensual"
-                   value={formatNumber(validationSummary.pronosticoVentaMensual, 2)}
-                   caption={`${validationForecast.metodoPronostico} · factor ${formatPercent(validationForecast.tendenciaAplicada * 100, 1)}`}
-                 />
-                <KpiCard
-                  icon={ShieldCheck}
-                  label="Producción sugerida mensual"
-                  value={formatNumber(validationSummary.produccionSugeridaMensual)}
-                  caption={`Regla operativa con ${dailyBufferPct}% de margen`}
-                />
-                <KpiCard
-                  icon={Database}
-                  label="Producción real"
-                  value={formatNumber(validationForecast.produccionReal)}
-                  caption={`Diferencia: ${formatNumber(
-                    validationForecast.produccionReal - validationSummary.produccionSugeridaMensual
-                  )}`}
-                  tone={
-                    validationForecast.produccionReal < validationSummary.produccionSugeridaMensual
-                      ? "danger"
-                      : validationForecast.produccionReal > validationSummary.produccionSugeridaMensual
-                        ? "warn"
-                        : "ok"
-                  }
-                />
-              </section>
-
-              <section className="validation-grid">
-                <div className="panel">
-                  <div className="panel-title">
-                    <div>
-                      <h3>Promedio por día de semana</h3>
-                      <p>Promedio = suma de cantidades del día / registros encontrados.</p>
-                    </div>
-                    <CheckCircle2 size={22} />
-                  </div>
-                  <div className="weekday-average-list">
-                    {validationWeekdayAverages.map((day) => (
-                      <div className="weekday-average-row" key={day.index}>
-                        <span>{day.label}</span>
-                        <small>{day.registros} registros</small>
-                        <strong>{formatNumber(day.value, 2)}</strong>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="panel">
-                  <div className="panel-title">
-                    <div>
-                      <h3>Comprobación mensual</h3>
-                      <p>La suma utiliza cada fecha del mes seleccionado.</p>
-                    </div>
-                    <Target size={22} />
-                  </div>
-                  <div className="calculation-checks">
-                    <div>
-                      <span>Pronóstico venta</span>
-                      <strong>{formatNumber(validationSummary.pronosticoVentaMensual, 2)}</strong>
-                    </div>
-                    <div>
-                    </div>
-                    <div>
-                      <span>Producción real</span>
-                      <strong>{formatNumber(validationForecast.produccionReal)}</strong>
-                    </div>
-                    <div>
-                      <span>Precisión contra real</span>
-                      <strong>
-                        {validationForecast.produccionReal > 0
-                          ? formatPercent(
-                              (1 -
-                                Math.abs(
-                                  validationSummary.produccionSugeridaMensual - validationForecast.produccionReal
-                                ) /
-                                  validationForecast.produccionReal) *
-                                100,
-                              1
-                            )
-                          : "Sin dato real"}
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              <div className="validation-block">
-                <div className="validation-block-heading">
-                  <div>
-                    <h4>1. Ventas diarias leídas del Excel</h4>
-                    <p>Estos son los registros usados para calcular los promedios de {validationProduct}.</p>
-                  </div>
-                  <strong>{validationSales.length} registros</strong>
-                </div>
-                <section className="table-card validation-sales-table-card">
-                  <table className="validation-sales-table">
-                    <thead>
-                      <tr>
-                        <th>Fecha leída</th>
-                        <th>Día leído</th>
-                        <th>Nombre en Excel</th>
-                        <th>Producto homologado</th>
-                        <th>Cantidad</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {validationSales.map((row, index) => (
-                        <tr key={`${row.producto}-${row.fechaDisplay}-${index}`}>
-                          <td>{row.fechaDisplay || "-"}</td>
-                          <td>{row.dia}</td>
-                          <td>{row.productoOriginal || row.producto}</td>
-                          <td>{row.producto}</td>
-                          <td className="strong">{formatNumber(row.cantidad, 2)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {!validationSales.length && <div className="empty">No se encontraron ventas leídas para este producto.</div>}
-                </section>
-              </div>
-
-              <div className="validation-block">
-                <div className="validation-block-heading">
-                  <div>
-                    <h4>2. Registros usados para el promedio de jueves</h4>
-                    <p>Promedio jueves = suma de cantidades de jueves / registros de jueves.</p>
-                  </div>
-                  <strong>
-                    {validationThursdaySales.length} registros · Promedio {formatNumber(validationThursdayAverage, 2)}
-                  </strong>
-                </div>
-                <section className="table-card validation-sales-table-card">
-                  <table className="validation-sales-table">
-                    <thead>
-                      <tr>
-                        <th>Fecha leída</th>
-                        <th>Día leído</th>
-                        <th>Nombre en Excel</th>
-                        <th>Producto homologado</th>
-                        <th>Cantidad usada</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {validationThursdaySales.map((row, index) => (
-                        <tr key={`thursday-${row.producto}-${row.fechaDisplay}-${index}`}>
-                          <td>{row.fechaDisplay || "-"}</td>
-                          <td>{row.dia}</td>
-                          <td>{row.productoOriginal || row.producto}</td>
-                          <td>{row.producto}</td>
-                          <td className="strong">{formatNumber(row.cantidad, 2)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {!validationThursdaySales.length && (
-                    <div className="empty">No se encontraron registros de jueves para este producto.</div>
-                  )}
-                </section>
-              </div>
-
-              <div className="validation-block">
-                <div className="validation-block-heading">
-                  <div>
-                    <h4>3. Pronóstico diario y producción sugerida</h4>
-                    <p>Cada fila muestra margen de seguridad, base con margen y la regla operativa aplicada.</p>
-                  </div>
-                  <strong>{validationDailyRows.length} días</strong>
-                </div>
-                <section className="table-card validation-daily-table-card">
-                  <table className="validation-daily-table">
-                    <thead>
-                      <tr>
-                        <th>Fecha</th>
-                        <th>Día</th>
-                        <th>Promedio aplicado</th>
-                        <th>Pronóstico de venta</th>
-                        <th>Margen aplicado</th>
-                        <th>Base con margen</th>
-                        <th>Bruto planta</th>
-                        <th>Inventario sucursales</th>
-                        <th>Cuarto frío</th>
-                        <th>Pedido planta</th>
-                        <th>A producir</th>
-                        <th>Producción real diaria</th>
-                        <th>Diferencia</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {validationDailyRows.map((row) => (
-                        <tr key={`validation-${row.fecha}-${row.producto}`}>
-                          <td>{row.fechaDisplay}</td>
-                          <td>{row.dia}</td>
-                          <td>{formatNumber(row.promedioUsado, 2)}</td>
-                          <td>{formatNumber(row.pronosticoVentaDia, 2)}</td>
-                          <td>{formatNumber(row.colchonDiario, 2)}</td>
-                          <td>{formatNumber(row.baseConColchonDia, 2)}</td>
-                          <td>{formatNumber(row.produccionBrutaDia ?? row.produccionSugeridaDia)}</td>
-                          <td>{row.hasDailyBranchStock ? formatNumber(row.inventarioSucursalesDia, 0) : "—"}</td>
-                          <td>{row.hasDailyColdRoom ? formatNumber(row.cuartoFrioDia, 0) : "—"}</td>
-                          <td>
-                            {formatNumber(row.produccionSugeridaDia)}
-                            {row.promoActiva ? ` · promo ${row.promoEtiqueta}` : ""}
-                          </td>
-                          <td className="strong">{formatNumber(row.aProducirDia ?? row.produccionSugeridaDia)}</td>
-                          <td>{row.produccionRealDia === null ? "-" : formatNumber(row.produccionRealDia)}</td>
-                          <td>{row.diferenciaPiezas === null ? "-" : formatNumber(row.diferenciaPiezas)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </section>
-              </div>
-            </>
-          ) : (
-            <div className="empty validation-empty">
-              Carga stock fijo y ventas para validar paso a paso un producto como <strong>PIÑA GDE</strong>.
-            </div>
-          )}
-        </SectionDisclosure>
 
       </main>
     </div>
