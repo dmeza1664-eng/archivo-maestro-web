@@ -10,3 +10,6 @@ __MACOSX/
 .env*
 !.env.example
 !**/.env.example
+
+# Salidas del pronóstico automático (se generan en cada corrida)
+salidas/

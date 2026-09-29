@@ -1,10 +1,90 @@
 # Control del modelo de pronostico
 
-Ultima actualizacion: 2026-09-26
+Ultima actualizacion: 2026-09-28
 
 > **Aviso de reproducibilidad.** Las cifras de este documento anteriores al
 > 2026-08-21 se midieron sobre un catalogo distinto al actual. Ver la seccion
 > "El catalogo cambio de hoja" antes de comparar contra cualquier corrida nueva.
+
+## Pronóstico automático y pruebas sin integrar (2026-09-28, modelo `d0e61f7`)
+
+- `npm run pronostico:auto` (ver `README.md`): lee extractos o la copia espejo de
+  `pepes_devBI` (solo lectura), pronostica con `calculateForecast` sin cambiarlo y
+  cruza producción contra pronóstico. En modo archivos reproduce exacto las métricas
+  de abajo (2024 13.12 / 2025 11.19 / 2026 ene–ago 11.75).
+- Mismo criterio de integración que #32. Todas las cifras: WAPE producto-mes, serie
+  de sucursales, backtest oficial (`backtest-2025-completo-pepes-sucursal/scripts/bt.cjs`).
+
+### Navidad y diciembre, medido otra vez con `d0e61f7`
+
+El índice de Navidad completo (#27) se comparó contra quitarlo, dejarlo a la mitad
+(como antes de #27), 0.25, 0.75 y topes de 1.3 y 1.4:
+
+| Variante | 2025 | Sin enero | Total mensual 2025 | 2024 | 2026 | Dic-2025 | Dic-2024 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Completo (vigente) | **11.19** | **11.24** | **2.45** | **13.12** | **11.75** | 17.20 | 11.62 |
+| Sin índice | 11.89 | 12.01 | 3.71 | 14.46 | 11.75 | 23.97 | 23.20 |
+| Mitad | 11.19 | 11.25 | 2.70 | 13.60 | 11.75 | 17.26 | 15.80 |
+| 0.25 | 11.53 | 11.61 | 3.21 | 14.02 | 11.75 | 20.48 | 19.46 |
+| 0.75 | 11.02 | 11.06 | 2.20 | 13.26 | 11.75 | 15.57 | 12.86 |
+| Tope 1.3 | 11.21 | 11.27 | 2.33 | 13.49 | 11.75 | 17.44 | 14.81 |
+| Tope 1.4 | 11.14 | 11.20 | 2.14 | 13.22 | 11.75 | 16.77 | 12.52 |
+
+- Sigue ayudando: contra no tener índice baja 2025 0.70 puntos y 2024 1.34.
+- Plan de diciembre 2025 (pronóstico + 10%): completo 36,101 piezas, mitad 32,729,
+  sin índice 29,341; venta real 31,677. El completo suma **+3,372 piezas** al plan
+  frente a la mitad (antes se reportó +3,338 con el modelo anterior) y +6,760 frente
+  a no tener índice. Pronóstico dic-2025: completo 32,826 (+3.6% sobre la venta),
+  mitad 29,755 (−6.1%). Dic-2024: completo 26,001 contra 28,110 reales (−7.5%),
+  mitad 23,897 (−15.0%).
+- No se recalibra: 0.75 y tope 1.4 bajan 2025 pero suben 2024 (13.26 y 13.22),
+  así que no cumplen el criterio. Volver a medir con diciembre 2026. El sobrante
+  de dic-2025 (plan 36,101 contra venta 31,677) viene del colchón de 10% más un
+  pronóstico 3.6% arriba; ajustar el colchón en diciembre es decisión operativa.
+
+### Gelatinas de promoción
+
+- En los datos no se pueden separar por categoría ni por promoción: GELATINA
+  PROMOCION SEMANA SANTA comparte `nCategoriaPK` con las gelatinas individuales
+  regulares y GELATINA PROMO $90 con MOSAICO CH; ambas son `cTipo = 'Producto'`;
+  `VentaDet.nPromocionPK` no tiene líneas en 2025 (el módulo de promociones de la
+  base arranca el 18-ago-2026). Hoy quedan fuera del pronóstico por la regla
+  genérica de nombre `isPromotionalProduct` (PROMO/PROMOCION), que ya existía.
+- Tamaño medido (venta de sucursales): 10,932 piezas en 2024, 33,449 en 2025 y
+  35,607 en 2026 ene–ago.
+- Si se metieran al pronóstico (sin separarlas), el WAPE sobre 113 productos sería
+  2024 15.93 (sin enero 15.48), 2025 17.20 (sin enero 17.24), 2026 22.05 (sin
+  enero 21.86); el error propio de esas dos gelatinas es 72–82%. Los 111 productos
+  restantes no cambian (13.12 / 11.19 / 11.75). Separarlas sigue siendo correcto,
+  pero no hay forma de hacerlo con datos (sin nombre) hasta que se acumule historia
+  de `nPromocionPK`; el modo base del pronóstico automático ya lee esa cantidad
+  (`qtyPromocion`) para cuando exista. No se integra ningún cambio.
+
+### Día de Muertos (noviembre) con dos años
+
+Noviembre ya sale bien: nov-2025 WAPE 6.27 (pronóstico 24,727 contra 25,211),
+nov-2024 8.40 (20,642 contra 20,462). Se probó un índice de noviembre por total:
+octubre del año en curso × promedio de noviembre/octubre de hasta dos años
+previos, acotado 0.7–1.6 y encogido hacia el pronóstico (peso n/(n+1) con n años,
+o 0.25). Sin nombres de SKU y sin datos del mes pronosticado.
+
+| Variante | 2025 | Sin enero | 2024 | 2026 | Nov-2025 | Nov-2024 | Criterio |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Vigente | 11.19 | 11.24 | 13.12 | 11.75 | 6.27 | 8.40 | — |
+| Ambos sentidos, peso n/(n+1) | 11.21 | 11.27 | 13.15 | 11.75 | 6.54 | 8.84 | no cumple |
+| Solo a la baja, peso n/(n+1) | 11.22 | 11.29 | 13.10 | 11.75 | 6.74 | 8.19 | no cumple (nov-2025 +0.47) |
+| Solo a la baja, peso 0.25 | 11.19 | 11.25 | 13.10 | 11.75 | 6.37 | 8.17 | no cumple (2025 sube: 11.185 → 11.193) |
+| Ambos sentidos, peso 0.25 | 11.17 | 11.23 | 13.12 (13.1215 vs 13.1181) | 11.75 | 6.13 | 8.44 | no cumple (2024 sube 0.003) |
+| Solo con dos años de historia | 11.19 | 11.24 | 13.12 | 11.75 | 6.27 | 8.40 | sin efecto |
+
+- En los backtests oficiales noviembre 2025 solo tiene un año previo (2024), así
+  que la versión "dos años" no actúa. Con la serie extendida a 2023 (sensibilidad,
+  no oficial) sí usa 2023 y 2024: nov-2025 6.27 → 6.20 (2025 completo 11.48 → 11.47).
+  La ganancia de usar dos años es chica.
+- No se integra. La mejor variante (ambos sentidos, peso 0.25) empeora 2024 por
+  milésimas y nov-2024 +0.04, y su peso se eligió viendo los resultados. Revisar
+  con noviembre 2026, cuando noviembre 2026 tenga dos años previos en la serie
+  oficial.
 
 ## Calibración al 15% y arranque en frío acotado (2026-09-26)
 

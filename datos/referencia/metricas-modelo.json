@@ -1,0 +1,9 @@
+{
+ "_nota": "Cifras oficiales del backtest walk-forward del modelo vigente, serie de venta de sucursales (sin Planta León; sin Suc. Amado Nervo antes de ago-2024). WAPE producto-mes y error del total mensual, en %. 2024 usa historia 2023 (definición estricta, la misma de la app). Fuente: backtest-2025-completo-pepes-sucursal/metricas.json (26-sep-2026). Si un PR cambia las métricas del modelo, actualiza este archivo en el mismo PR.",
+ "modelo": "d0e61f7",
+ "cortes": {
+  "2024": { "wape": 13.12, "wapeSinEnero": 12.66, "errorTotalMensual": 4.58 },
+  "2025": { "wape": 11.19, "wapeSinEnero": 11.24, "errorTotalMensual": 2.45 },
+  "2026": { "meses": ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08"], "wape": 11.75, "wapeSinEnero": 11.45, "errorTotalMensual": 3.53 }
+ }
+}
