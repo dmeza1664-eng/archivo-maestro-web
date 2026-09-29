@@ -4072,19 +4072,34 @@ tbody tr:hover {
   white-space: nowrap;
 }
 
-.daily-table th.produce-col {
-  background: var(--accent-strong, #9a5424);
-  color: #ffffff;
-  font-size: 12px;
+/* «Mandar a producir»: mismo encabezado que las demás columnas (solo cambia el color
+   del texto) y la cantidad en una pastilla centrada de ancho fijo. El separador
+   izquierdo va como sombra interior para que no se pierda con el encabezado sticky. */
+.daily-table th.produce-col,
+.daily-table td.produce-col {
+  box-shadow: inset 1px 0 0 var(--border, #d4c6b4);
+  text-align: center;
 }
 
-.daily-table td.produce-col,
-.daily-table tr:nth-child(even) td.produce-col,
-.daily-table tbody tr:hover td.produce-col {
-  background: rgba(178, 101, 46, 0.14);
-  color: var(--text, #241c16);
-  font-size: 15px;
-  font-weight: 800;
+.daily-table th.produce-col {
+  color: var(--accent-strong, #9a5424);
+  font-weight: 600;
+}
+
+.daily-table .produce-badge {
+  background: #f8efe6;
+  border: 1px solid rgba(154, 84, 36, 0.24);
+  border-radius: 999px;
+  box-sizing: border-box;
+  color: #6b3817;
+  display: inline-block;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1.4;
+  min-width: 64px;
+  padding: 2px 10px;
+  text-align: center;
 }
 
 .sales-history-note {

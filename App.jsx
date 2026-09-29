@@ -8742,7 +8742,9 @@ function Dashboard({ session, onLogout }) {
                     </td>
                     <td className="num">{row.pronosticoVentaDia.toFixed(2)}</td>
                     <td className="num">{row.colchonDiario.toFixed(2)}</td>
-                    <td className="num produce-col" title={row.reglaOperativa}>{row.aProducirDia ?? row.produccionSugeridaDia}</td>
+                    <td className="num produce-col" title={row.reglaOperativa}>
+                      <span className="produce-badge">{row.aProducirDia ?? row.produccionSugeridaDia}</span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
