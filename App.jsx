@@ -8366,8 +8366,8 @@ function Dashboard({ session, onLogout }) {
             <p className="real-validation-message warning sales-history-note">
               Solo hay {loadedSalesMonthKeys.length} {loadedSalesMonthKeys.length === 1 ? "mes" : "meses"} de venta cargados
               ({displayMonthLabel(loadedSalesMonthKeys[0])} a {displayMonthLabel(loadedSalesMonthKeys.at(-1))}). El pronóstico usa
-              solo lo cargado. Para usar todo el histórico, selecciona juntos los Excel de 2024, 2025 y 2026 y pulsa
-              «Guardar ventas en la base»: el respaldo no alcanza para guardar años completos de venta diaria.
+              solo lo cargado. Para usar todo el histórico, carga los cierres mensuales de venta desde enero de 2024 con
+              «Seleccionar Excel» en la tarjeta Ventas y pulsa «Guardar respaldo».
             </p>
           )}
         </section>
