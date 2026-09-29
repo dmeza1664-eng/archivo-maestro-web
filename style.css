@@ -4058,3 +4058,40 @@ tbody tr:hover {
     right: 0;
   }
 }
+
+/* Tabla diaria simplificada: cabe en una laptop de ~1280 px sin scroll horizontal
+   y la columna «Mandar a producir» queda resaltada al final. */
+.daily-table {
+  min-width: 0;
+  width: 100%;
+}
+
+.daily-table th.num,
+.daily-table td.num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.daily-table th.produce-col {
+  background: var(--accent-strong, #9a5424);
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.daily-table td.produce-col,
+.daily-table tr:nth-child(even) td.produce-col,
+.daily-table tbody tr:hover td.produce-col {
+  background: rgba(178, 101, 46, 0.14);
+  color: var(--text, #241c16);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.sales-history-note {
+  margin-top: 10px;
+}
+
+.daily-table th:nth-child(-n+3),
+.daily-table td:nth-child(-n+3) {
+  text-align: left;
+}
