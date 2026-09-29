@@ -1,0 +1,437 @@
+nProductoPK,cCodigo,cDescripcion,qtyTotal2025,producto,method,confidence,inCatalog,promotional,slice,inWapeUniverse,notes
+147,153,BENGALA GRANDE,73572,,no_match,0,false,false,false,false,
+146,154,BENGALA CH,67690,,no_match,0,false,false,false,false,
+145,152,VELA MAGICA,67235,,no_match,0,false,false,false,false,
+20847,211,Gelatina de promocion semana santa,58822,GELATINA PROMOCION SEMANA SANTA,exact_code,0.99,true,true,false,false,
+520942,P02R,REBANADA DE $20 PAN DULCE 25 PIEZAS,56269,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+520943,P001R,REBANADA DE $15 PAN DULCE 25 PIEZAS,50480,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+160870,154m,BENGALA MINI,29562,,no_match,0,false,false,false,false,
+63,60,MINI MEDIANO CHOCOLATE,28665,MINI MED CHOCOLATE,exact_code,0.99,true,false,false,true,
+64,61,MINI PASTELITO CHOCOLATE,27053,MINI PASTELITO CHOCOLATE,exact_code,0.99,true,false,false,true,
+61,58,MINI MEDIANO PIÑERO,26703,MINI MED PINERO,exact_code,0.99,true,false,false,true,
+52,48,GELATINA IND FRESA,25788,GELATINA IND FRESA,exact_code,0.99,true,false,false,true,
+62,59,MINI PASTELITO PIÑERO,22593,MINI PASTELITO PINERO,exact_code,0.99,true,false,false,true,
+87,01,MOKA GDE,15836,MOKA GDE,exact_code,0.99,true,false,false,true,
+53,49,GELATINA IND MOSAICO,15765,GELATINA IND MOSAICO,exact_code,0.99,true,false,false,true,
+170872,01m,MOKA MEDIANO,14659,MOKA MED,exact_code,0.99,true,false,false,true,
+20856,23n,FRUTAS MED,13196,FRUTAS MED,exact_code,0.99,true,false,false,true,
+4,03,FRUTAS GDE,13087,FRUTAS GDE,exact_code,0.99,true,false,false,true,
+27,23,MOKA CH,12879,MOKA CH,exact_code,0.99,true,false,false,true,
+24,20,FRUTAS CH,12021,FRUTAS CH,exact_code,0.99,true,false,false,true,
+259,1119,OTROS VARIOS,11878,,no_match,0,false,false,false,false,
+66,63,CHESSECAKE PETIT,11556,CHESSECAKE PETIT,exact_code,0.99,true,false,false,true,
+11,07,CHOCOLATE GDE,11299,CHOCOLATE GDE,exact_code,0.99,true,false,false,true,
+20857,24n,CHOCOLATE MED,11035,CHOCOLATE MED,exact_code,0.99,true,false,false,true,
+750953,PI02,PETIT 3 LECHES CHOCOLATE,10715,PETIT 3 LECHES CHOCOLATE,normalized_name,0.92,true,false,false,true,
+330,10b,GELATINA PROMO $90,10336,GELATINA PROMO $90,exact_code,0.99,true,true,false,false,
+20714,c3l,CAJITA DE TRES LECHES,10182,CAJITA 3 LECHES,exact_code,0.99,true,false,false,true,
+29,25,CHOCOLATE CH,9939,CHOCOLATE CH,exact_code,0.99,true,false,false,true,
+436,197,1/4 Kg de GALLETA,9550,1 4 KG GALLETA,exact_code,0.99,true,false,false,true,
+260914,01ge,GELATINA FRESA $150,9282,GELATINA FRESA $150,exact_code,0.99,true,false,false,true,
+58,55,PAY DE GUAYABA GDE,9205,PAY GUAYABA GDE,exact_code,0.99,true,false,false,true,
+439,197A,1/2 kg DE GALLETA,8905,1 2 KG GALLETA,exact_code,0.99,true,false,false,true,
+200892,06m,DUO DURAZNO MEDIANO,8859,DUO DURAZNO MED,exact_code,0.99,true,false,false,true,
+159,159,KIT DE PLATOS,8570,,no_match,0,false,false,false,false,
+750952,PI01,PETIT 3 LECHES PIÑERO,8096,PETIT 3 LECHES PINERO,normalized_name,0.92,true,false,false,true,
+200891,04m,TRES LECHES MEDIANO,8076,3 LECHES MED,exact_code,0.99,true,false,false,true,
+3,02,PIÑA GDE,8033,PINA GDE,exact_code,0.99,true,false,false,true,
+72,69,PETIT DECORADO,7990,PETIT DECORADO,exact_code,0.99,true,false,false,true,
+20765,0lm2,LETRERO DE MADERA MINI,7825,,no_match,0,false,false,false,false,
+40,36,M & M GDE,7788,M & M GDE,exact_code,0.99,true,false,false,true,
+21,17,DURAZNO CH,7774,DURAZNO CH,exact_code,0.99,true,false,false,true,
+17,13,DUO DURAZNO GDE,7699,DUO DURAZNO GDE,exact_code,0.99,true,false,false,true,
+157,001t,tartaleta,7677,TARTALETA,exact_code,0.99,true,false,false,true,
+200893,07m,M & M MEDIANO,7659,M & M MED,exact_code,0.99,true,false,false,true,
+10,06,3 LECHES GDE,7530,3 LECHES GDE,exact_code,0.99,true,false,false,true,
+13,09,NUTELA GDE,7366,NUTELA GDE,exact_code,0.99,true,false,false,true,
+8,04,DURAZNO GDE,7360,DURAZNO GDE,exact_code,0.99,true,false,false,true,
+70,67,ZANAHORIA PETIT,7319,ZANAHORIA PETIT,exact_code,0.99,true,false,false,true,
+32,28,NUTELA CH,7300,NUTELA CH,exact_code,0.99,true,false,false,true,
+23,19,3 LECHES CH,7236,3 LECHES CH,exact_code,0.99,true,false,false,true,
+20,16,PIÑA CH,7187,PINA CH,exact_code,0.99,true,false,false,true,
+380931,03j,JERICALLA UN CUARTO $45,6890,JERICALLA UN CUARTO $45,exact_code,0.99,true,false,false,true,
+92,87,M & M CH,6883,M & M CH,exact_code,0.99,true,false,false,true,
+49,45,GELATINA MOSAICO CH,6813,GELATINA MOSAICO CH,exact_code,0.99,true,false,false,true,
+20482,F011,VASO DE ARROZ,6750,VASO ARROZ,exact_code,0.99,true,false,false,true,
+78,75,FLAN EN VASO,6297,FLAN EN VASO,exact_code,0.99,true,false,false,true,
+65,62,CHESSECAKE MINIMED,5985,CHESSECAKE MINIMED,exact_code,0.99,true,false,false,true,
+22,18,FRESA CH,5948,FRESA CH,exact_code,0.99,true,false,false,true,
+33,29,ZANAHORIA CH,5938,ZANAHORIA CH,exact_code,0.99,true,false,false,true,
+34,30,3 LECHES QUESO GDE,5754,3 LECHES QUESO GDE,exact_code,0.99,true,false,false,true,
+20494,11C,PAN MUERTO IND AZUCAR 50GR,5741,,no_match,0,false,false,false,false,
+250912,08m,PIÑA MED,5717,PINA MED,exact_code,0.99,true,false,false,true,
+57,54,PAY DE FRESA GDE,5636,PAY FRESA GDE,exact_code,0.99,true,false,false,true,
+20803,30ch,3 LECHES QUESO CH,5628,3 LECHES QUESO CH,exact_code,0.99,true,false,false,true,
+44,40,GELATINA FRESA GDE,5567,GELATINA FRESA GDE,exact_code,0.99,true,false,false,true,
+20737,015b,BOCADITO PEPE 15 PIEZAS,5459,BOCADITO PEPE 15 PIEZAS,exact_code,0.99,true,false,false,true,
+41,37,CHESSECAKE GDE,5258,CHESSECAKE GDE,exact_code,0.99,true,false,false,true,
+48,44,GELATINA MOSAICO GDE,5132,GELATINA MOSAICO GDE,exact_code,0.99,true,false,false,true,
+77,74,VAINILLA NATURAL,4874,VAINILLA NATURAL,exact_code,0.99,true,false,false,true,
+182,F100,PALETA GALLETA $35,4665,PALETA GALLETA $35,exact_code,0.99,true,false,false,true,
+19,15,ZANAHORIA GDE,4311,ZANAHORIA GDE,exact_code,0.99,true,false,false,true,
+20770,n02,RED VELVET CHEESE CAKE MINI MEDIANO,4308,RED VELVET CHESSECAKE MINI MED,exact_code,0.99,true,false,false,true,
+221,99,TRUFAS CON 9,4255,TRUFAS CON 9,exact_code,0.99,true,false,false,true,
+73,70,PLANCHA DE VAINILLA,3773,PLANCHA VAINILLA,exact_code,0.99,true,false,false,true,
+184,91,VAINILLA MARMOLEADO,3755,VAINILLA MARMOLEADO,exact_code,0.99,true,false,false,true,
+20769,n01,RED VELVET CHEESE CAKE GDE,3745,RED VELVET CHESSECAKE GDE,exact_code,0.99,true,false,false,true,
+20801,32ch,CHOCOQUESO CH,3656,CHOCOQUESO CH,exact_code,0.99,true,false,false,true,
+274,162,MINI CHUNCHES ACETATO,3528,,no_match,0,false,false,false,false,
+181,160,bolsa de galleta de 60 grs,3443,BOLSA GALLETA 60 GRS,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+810971,01pg,GALLETA POLVORON BOLSA,3145,GALLETA POLVORON BOLSA,exact_code,0.99,true,false,false,true,
+860975,04BT,GALLETA ATE BOLSA TIENDITA,3142,GALLETA ATE BOLSA,fuzzy_channel_variant,0.8,true,false,false,true,ambiguous_review
+860974,03BT,GALLETA ALFAJOR BOLSA TIENDITA,3112,GALLETA ALFAJOR BOLSA,fuzzy_channel_variant,0.8,true,false,false,true,ambiguous_review
+280,06R,REBANADA DE 3 LECHES GDE,3097,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+860972,01BT,GALLETA BOLSA POLVORON TIENDITA,3084,GALLETA POLVORON BOLSA,fuzzy_channel_variant,0.8,true,false,false,true,ambiguous_review
+67,64,CHOCOFLAN MINI MEDIANO,3082,CHOCOFLAN MINI MED,exact_code,0.99,true,false,false,true,
+148,157,SERPENTINA CHICA,3055,,no_match,0,false,false,false,false,
+36,32,CHOCOQUESO,2993,CHOCOQUESO,exact_code,0.99,true,false,false,true,
+210906,P02,$20 PAN DULCE 25 piezas,2906,,no_match,0,false,false,false,false,
+20802,31ch,SELVA NEGRA CH,2878,SELVA NEGRA CH,exact_code,0.99,true,false,false,true,
+20822,P001,$15 PAN DULCE 25 piezas,2870,,no_match,0,false,false,false,false,
+168,001r,rosca tradicional jumbo,2801,,no_match,0,false,false,false,false,
+20854,21n,PLANCHA 1/4,2749,PLANCHA 1 4,exact_code,0.99,true,false,false,true,
+900979,02re,KIT DE PLATOS DE REGALO,2727,,no_match,0,false,false,false,false,
+185,92,VAINILLA NARANJA,2699,VAINILLA NARANJA,exact_code,0.99,true,false,false,true,
+194,04R,REBANADA DE DURAZNO GDE,2668,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20507,b01,Bolsa ecológica,2646,,no_match,0,false,false,false,false,
+900978,01re,BENGALA DE REGALO,2469,,no_match,0,false,false,false,false,
+810974,04PG,GALLETA ATE BOLSA,2448,GALLETA ATE BOLSA,exact_code,0.99,true,false,false,true,
+238,02R,REBANADA DE PIÑA GDE,2405,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+169,002r,rosca tradicional grande,2373,,no_match,0,false,false,false,false,
+810973,03PG,GALLETA ALFAJOR BOLSA,2302,GALLETA ALFAJOR BOLSA,exact_code,0.99,true,false,false,true,
+149,158,SERPENTINA GRANDE,2223,,no_match,0,false,false,false,false,
+710943,03na,ROL DE CANELA,2186,,no_match,0,false,false,false,false,
+860973,02BT,GALLETA CORAZON CHOCOLATE TIENDITA,2160,,no_match,0,false,false,false,false,
+170,003r,rosca tradicional mediana,2109,,no_match,0,false,false,false,false,
+322,161,VELA MUSICAL FLOR,2059,,no_match,0,false,false,false,false,
+81,78,ROSCA C/CAJETA,2003,ROSCA C CAJETA,exact_code,0.99,true,false,false,true,
+288,36R,REBANADA DE M & M,1972,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+810972,02PG,GALLETA CORAZON CHOCO BOLSA,1962,GALLETA CORAZON CHOCO BOLSA,exact_code,0.99,true,false,false,true,
+190,13R,REBANADA DE DUO DURAZNO GDE,1866,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+264,09R,REBANADA DE NUTELA GDE,1847,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+200904,04mR,REBANADA DE TRES LECHES MEDIANO,1812,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+262,32R,REBANADA DE CHOCOQUESO,1760,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+760958,221,CAJITA FELIZ,1735,CAJITA FELIZ,exact_code,0.99,true,false,false,true,
+281,07R,REBANADA DE CHOCOLATE GDE,1664,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+245,15R,REBANADA DE ZANAHORIA GDE,1645,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+760960,223,ROSCA CASERA,1597,,no_match,0,false,false,false,false,
+75,72,BOLLOS C/4,1583,BOLLOS C 4,exact_code,0.99,true,false,false,true,
+218,19R,REBANADA DE 3 LECHES CH,1490,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+191,87R,REBANADA DE M & M CH,1279,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20807,32chR,REBANADA DE CHOCOQUESO CH,1263,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+227,16R,REBANADA DE PIÑA CH,1252,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+260913,08mR,REBANADA DE PIÑA MED,1251,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+200906,07mR,REBANADA DE M & M MEDIANO,1207,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+178,008r,ROSCA CAJETA DE FRUTOS SECOS,1203,,no_match,0,false,false,false,false,
+20779,n01R,REBANADA DE RED VELVET CHEESE CAKE GDE,1157,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+422,187,paq galleta niño,1157,,no_match,0,false,false,false,false,
+243,37R,REBANADA DE CHESSECAKE GDE,1084,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+284,03R,REBANADA DE FRUTAS GDE,1080,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+193,18R,REBANADA DE FRESA CH,1045,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+320,11b,PAN MUERTO IND RELLENO NUTELLA 100gr,1037,,no_match,0,false,false,false,false,
+165,007r,ROSCA NATILLA DE FRUTOS SECOS,1000,,no_match,0,false,false,false,false,
+376,C002,CAPIROTADA DE LECHE IND,987,CAPIROTADA LECHE IND,exact_code,0.99,true,false,false,true,
+20860,24nR,REBANADA DE CHOCOLATE MED,978,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+413,185,PAY DE QUESO,973,PAY QUESO,exact_code,0.99,true,false,false,true,
+198,01R,REBANADA DE MOKA GDE,908,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+228,F002,DOMO GALLETA DORADITA DE CAJETA,883,DOMO GALLETA DORADITA CAJETA,exact_code,0.99,true,false,false,true,
+441,100A,lalitos,858,,no_match,0,false,false,false,false,
+240,30R,REBANADA DE 3 LECHES QUESO,854,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+263,28R,REBANADA DE NUTELA CH,837,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+346,004r,ROSCA TRADICIONAL NUTELA JUMBO,825,,no_match,0,false,false,false,false,
+236,25R,REBANADA DE CHOCOLATE CH,819,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+248,17R,REBANADA DE DURAZNO CH,808,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20808,30chR,REBANADA DE 3 LECHES QUESO CH,789,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+200894,06mR,REBANADA DE DUO DURAZNO MEDIANO,783,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+800972,F013,DOMO DE GALLETAS EMPANADAS,775,DOMO GALLETAS EMPANADAS,exact_code,0.99,true,false,false,true,
+300917,322,Caja de bollos 6 pzas dia del niñ,750,,no_match,0,false,false,false,false,
+300916,321,Caja de bollos 4 pzas dia del niño,749,,no_match,0,false,false,false,false,
+410,40R,REBANADA DE GELATINA FRESA GDE,746,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20806,31chR,REBANADA DE SELVA NEGRA CH,740,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+76,73,BOLLOS C/6,733,BOLLOS C 6,exact_code,0.99,true,false,false,true,
+300918,323,Brownie IND,728,,no_match,0,false,false,false,false,
+750951,C009,CAPIROTADA TRADICIONAL CON PILONCILLO,727,CAPIROTADA TRADICIONAL CON PILONCILLO,exact_code,0.99,true,false,false,true,
+20767,11D,PAN DE MUERTO IND RELLENO CAJETA 100GR,727,,no_match,0,false,false,false,false,
+20792,a06,CAJA BROWNIE CON 6 PIEZAS,723,,fuzzy_candidate_rejected,0.6,false,false,false,false,best_candidate=CAJA BROWNIES CON 4 PIEZAS;score=0.600
+800971,F014,DOMO DE GALLETAS OREJITAS,722,DOMO GALLETAS OREJITAS,exact_code,0.99,true,false,false,true,
+348,015r,rosca tradicional rellena CAJETA,677,,no_match,0,false,false,false,false,
+112,90,CHAROLA C/8 PAN DE MUERTO,651,,no_match,0,false,false,false,false,
+173,011r,rosca volteado de piña grande,600,,no_match,0,false,false,false,false,
+30862,23nR,REBANADA DE FRUTAS MED,595,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+40862,10m,PASTEL DE CARAJILLO MEDIANO,581,,no_match,0,false,false,false,false,
+180878,01mR,REBANADA DE MOKA MEDIANO,579,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+940982,235,PASTEL DE FRUTOS ROJOS 3 LECH PETIT,578,PASTEL FRUTOS ROJOS 3 LECH PETIT,exact_code,0.99,true,false,false,true,
+350926,07dm,PASTEL SORPRESA CASERO $90,571,,no_match,0,false,false,false,false,
+265,F104,CAJA DE BROWNIES CON 4 PIEZAS,566,CAJA BROWNIES CON 4 PIEZAS,exact_code,0.99,true,false,false,true,
+820973,03RR,PASTEL 3 LECHES ROL MINI,564,,no_match,0,false,false,false,false,
+190883,11g,PAN DE MUERTO GLASEADO,536,,no_match,0,false,false,false,false,
+300914,319,Cajita 3 leches duvalin,524,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=CAJITA 3 LECHES;score=0.667
+170875,05m,CHEESECAKE FRUTAL GDE,521,CHESSECAKE FRUTAL GDE,exact_code,0.99,true,false,false,true,
+176,009r,rosca milenium,509,,no_match,0,false,false,false,false,
+412,70R,REBANADA DE FANTASIA 3/4,490,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+190879,11f,HUESITOS PAN DE MUERTO,488,,no_match,0,false,false,false,false,
+371,54R,REBANADA DE PAY DE FRESA GDE,476,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20741,10c,PASTEL DE CARAJILLO GDE,472,,no_match,0,false,false,false,false,
+425,44R,REBANADA DE GELATINA MOSAICO GDE,470,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+327,20R,REBANADA DE FRUTAS CH,451,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20755,h05,CALAVERA CHOCOLATE,451,,no_match,0,false,false,false,false,
+530941,90b,DEDOS DE BRUJA,448,,no_match,0,false,false,false,false,
+20746,10cR,REBANADA DE PASTEL DE CARAJILLO GDE,437,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+86,82,PASTEL VAINILLA FLORETIN,431,,no_match,0,false,false,false,false,
+389,74R,REBANADA DE VAINILLA FANTASIA GDE,430,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+190882,C3LC,CAJITA 3 LECHES CALABAZA,422,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=CAJITA 3 LECHES;score=0.667
+241,23R,REBANADA DE MOKA CH,420,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+780964,225,GELATINA DE CAFE CH,411,,no_match,0,false,false,false,false,
+730945,326,CASERO DE PAPÁ,408,RAMO FLORAL 12CM 3 CAPAS,exact_code,0.99,true,false,false,true,
+170878,05mR,REBANADA DE CHEESECAKE BANDERA GDE,399,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+950981,238,PASTEL DE LOTUS 3 LECH PETIT,392,,no_match,0,false,false,false,false,
+940980,233,PASTEL DE FRUTOS ROJOS 3 LECH MED,384,PASTEL FRUTOS ROJOS 3 LECH MED,exact_code,0.99,true,false,false,true,
+780966,227,ROSCA DE CHOCOLATE CREMA QUESO MINI,374,,no_match,0,false,false,false,false,
+286,92R,REBANADA DE VAINILLA NARANJA,359,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+760954,217,PASTEL TURIN MEDIANO,350,,no_match,0,false,false,false,false,
+780963,224,PASTEL CHOCONUGGS MEDIANO,350,,no_match,0,false,false,false,false,
+770961,220R,REBANADA DE PASTEL PALETA PAYASO MEDIANO,344,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+860976,01GF,GELATINA DE FRUTA CON YOGUR CH,343,,no_match,0,false,false,false,false,
+760955,218,PASTEL TURIN MINI MEDIANO,341,,no_match,0,false,false,false,false,
+350921,02dm,MOUSSE DE MANGO PETIT,340,,no_match,0,false,false,false,false,
+20488,58a,FANTASIA MINI MEDIANO,328,,no_match,0,false,false,false,false,
+369,55R,REBANADA DE PAY DE GUAYABA GDE,327,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20778,n10,GELATINA DE PIÑA IND,324,GELATINA PINA IND,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+760956,219,PASTEL BUBULUBU MEDIANO,318,,no_match,0,false,false,false,false,
+930981,232,PASTEL VAINILLA-FLAN MINI MED,307,,no_match,0,false,false,false,false,
+20462,195m,QUESO TIRAMISU MMD,306,QUESO TIRAMISU MMD,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+290915,313,Paleta Payaso MMD,302,,no_match,0,false,false,false,false,
+206,1004,3/4 KG PIÑERO FAMILIAR,295,,no_match,0,false,false,false,false,
+290,91R,REBANADA DE VAINILLA MARMOLEADO,293,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+250913,21nR,REBANADA DE PLANCHA 1/4,286,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+260,29R,REBANADA DE ZANAHORIA CH,282,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+325,17A,PAN MUERTO RELLENO NUTELLA GDE 250GR,281,,no_match,0,false,false,false,false,
+870977,230,PASTEL DE LIMON 3 LECHES CH,279,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=3 LECHES CH;score=0.667
+760957,220,PASTEL PALETA PAYASO MEDIANO,276,,no_match,0,false,false,false,false,
+500939,01z,ZANAHORIA TRES LECHE MINI MEDIANO,275,,no_match,0,false,false,false,false,
+540941,90CAR,REBANADA DE PASTEL DE CALABAZA CHICO,271,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+1010980,246R,REBANADA DE PASTEL MILKY PP GDE,271,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+324,15B,PAN MUERTO AZUCAR GDE 250GR,268,,no_match,0,false,false,false,false,
+20766,17C,PAN DE MUERTO RELLENO CAJETA GDE 250GR,267,,no_match,0,false,false,false,false,
+780969,224R,REBANADA DE PASTEL CHOCONUGGS MEDIANO,266,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+205,1003,3/4 KG VAINILLA FAMILIAR,263,,no_match,0,false,false,false,false,
+190885,T01,FERRERO CORAZON CH,262,FERRERO CORAZON CH,exact_code,0.99,true,false,false,true,
+20790,a04,GELATINA IND FRESA SIN AZUCAR,262,,fuzzy_candidate_rejected,0.6,false,false,false,false,best_candidate=GELATINA IND FRESA;score=0.600
+207,1005,3/4 KG CHOCOLATE FAMILIAR,261,,no_match,0,false,false,false,false,
+350927,08dm,MINI PASTEL SORPRESA $80,259,,no_match,0,false,false,false,false,
+100868,10mR,REBANADA DE PASTEL DE CARAJILLO MEDIANO,251,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+270,203,GELATINA FRESA SIN AZUCAR CHICA,245,,no_match,0,false,false,false,false,
+199,94F,CHESSE DUO DE AMOR CH,241,,no_match,0,false,false,false,false,
+940983,236,PASTEL DE LOTUS 3 LECHES MED,238,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=3 LECHES MED;score=0.667
+390,78R,REBANADA DE ROSCA C/CAJETA,237,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+760953,216,PASTEL CASERO 12cm 3capas para niña,232,,no_match,0,false,false,false,false,
+930980,231,PASTEL VAINILLA-FLAN GRANDE,229,,no_match,0,false,false,false,false,
+20819,11p,PAY PATRIO,228,,no_match,0,false,false,false,false,
+890977,230R,REBANADA DE PASTEL DE LIMON 3 LECHES CH,226,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+420,45R,REBANADA DE GELATINA MOSAICO CH,224,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+277,207,CHEESECAKE CHOCOLATE MINI MEDIANO,224,,no_match,0,false,false,false,false,
+220909,05VA,CORAZON DE BROWNIE,221,CORAZON BROWNIE,exact_code,0.99,true,false,false,true,
+770960,219R,REBANADA DE PASTEL BUBULUBU MEDIANO,221,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+950980,237,PASTEL DE LOTUS 3 LECH MIN MED,219,,no_match,0,false,false,false,false,
+940981,234,PASTEL DE FRUTOS ROJOS 3 LECH MINI MED,219,,no_match,0,false,false,false,false,
+990982,247,PASTEL MILKY PP MIN MED,218,,no_match,0,false,false,false,false,
+820972,02RR,PASTEL ROL 3 LECHES MINI MEDIANO,217,,no_match,0,false,false,false,false,
+380929,01t,QUESO TIRAMISU CH,215,QUESO TIRAMISU CH,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+760952,215,PASTEL CASERO 12cm 3capas para niño,212,,no_match,0,false,false,false,false,
+700943,01ne,ROSCA NEVADA,207,,no_match,0,false,false,false,false,
+154,F105,PASTEL PRINCESA CORAZON CH,207,PASTEL PRINCESA CORAZON CH,exact_code,0.99,true,false,false,true,
+20740,97ba,CAJITA GALLETA BAJA EN AZUCAR,204,,no_match,0,false,false,false,false,
+20751,h01,PAY DE CALABAZA GDE,204,,no_match,0,false,false,false,false,
+20753,h03,PANQUE DE CALABAZA,204,,no_match,0,false,false,false,false,
+214,1012,1 KG PIÑERO SUPER FAMILIAR,202,,no_match,0,false,false,false,false,
+770959,217R,REBANADA DE PASTEL TURIN MEDIANO,202,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20855,22n,ROSCA 3 LECHES CH,199,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=3 LECHES CH;score=0.667
+660943,05baR,REBANADA DE CHESSECAKE DE MANZANA GDE,197,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+960981,240,CHESSECAKE DE OREO MIN MED,194,,no_match,0,false,false,false,false,
+190887,T03,ZANAHORIA TRES LECHES MEDIANO,191,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=3 LECHES MED;score=0.667
+730951,332,GELATINA SAN VALENTÍN 2025 IND,190,,no_match,0,false,false,false,false,
+780965,226,ROSCA DE CHOCOLATE CREMA QUESO CHICA,190,,no_match,0,false,false,false,false,
+780961,09dm,MOUSSE DE MANGO MINI MEDIANO,189,,no_match,0,false,false,false,false,
+28,24,AMOR MIO CORAZON CH,187,,no_match,0,false,false,false,false,
+730950,331,PASTEL 10CM,184,,no_match,0,false,false,false,false,
+700944,02na,ROSCA CREMA DIPLOMATICA,182,,no_match,0,false,false,false,false,
+89,84,COCO CH,178,COCO CH,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+980980,244,BOLSA DE GALLETAS NAVIDEÑAS 10pzas,172,,no_match,0,false,false,false,false,
+400934,P17,IMPERIAL CHOCOLATE MED,168,IMPERIAL CHOCOLATE MED,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+530942,90CA,PASTEL DE CALABAZA CHICO,168,,no_match,0,false,false,false,false,
+460938,01p,GELATINA PIÑA COLADA,166,GELATINA PINA COLADA,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+390929,01tR,REBANADA DE QUESO TIRAMISU CH,166,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+590947,07ba,CHESSECAKE MANZANA MMD,166,,no_match,0,false,false,false,false,
+840972,01RRR,REBANADA DE PASTEL ROL 3 LECHES CH,163,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+354,003f,FANTASIA DIA DE LAS MADRES GDE,160,,no_match,0,false,false,false,false,
+730947,328,VAINILLA COQUETTE ROSA,158,,no_match,0,false,false,false,false,
+161,006r,rosca de reyes mini,152,,no_match,0,false,false,false,false,
+367,1120,1 KG VAINILLA SUPER FAMILIAR,149,,no_match,0,false,false,false,false,
+350920,01dm,MOUSSE DE MANGO MEDIANO,148,,no_match,0,false,false,false,false,
+910979,01pa,TARTAS PATRIAS,146,,no_match,0,false,false,false,false,
+990981,246,PASTEL MILKY PP GDE,145,,no_match,0,false,false,false,false,
+20713,940,CAJITA GALLETA NAVIDEÑA $60,139,,no_match,0,false,false,false,false,
+215,1013,1 KG CHOCOLATE SUPER FAMILIAR,135,,no_match,0,false,false,false,false,
+285,84R,REBANADA DE COCO CH,135,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+400933,P16,IMPERIAL CHOCOLATE GDE,134,IMPERIAL CHOCOLATE GDE,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+590945,05ba,CHESSECAKE PATRIO,134,,no_match,0,false,false,false,false,
+401,178,CHUNCHE DIA DEL ABUELO $10,132,,no_match,0,false,false,false,false,
+20761,h01R,REBANADA DE PAY DE CALABAZA GDE,129,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+730944,325,RED VELVET COQUETTE PASIÓN,127,,no_match,0,false,false,false,false,
+960980,239,CHESSECAKE DE OREO GDE,120,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=CHESSECAKE GDE;score=0.667
+400936,P19,PASTEL CASERO DE CHOCOLATE,118,PASTEL CASERO CHOCOLATE,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+338,c08,cuernitos c/12,116,,no_match,0,false,false,false,false,
+400935,P18,IMPERIAL CHOCOLATE CH,110,IMPERIAL CHOCOLATE CH,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+192,24R,REBANADA DE AMOR MIO CH,104,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+880977,03z,MINI MEDIANO ZANAHORIA SPLENDA,103,,no_match,0,false,false,false,false,
+1020980,236R,REBANADA DE PASTEL DE LOTUS 3 LECHES MED,101,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+410938,P16R,REBANADA DE IMPERIAL CHOCOLATE GDE,98,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+820971,01RR,PASTEL ROL 3 LECHES CH,97,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=3 LECHES CH;score=0.667
+990984,249,GELATINA NAVIDEÑA CARAMELO CH,91,,no_match,0,false,false,false,false,
+970981,242,CHESSECAKE DE MANZANA GDE,90,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=CHESSECAKE GDE;score=0.667
+310914,01geR,REBANADA DE GELATINA FRESA $150,87,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+392,62R,REBANADA DE CHESSECAKE MINIMED,85,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+500940,02z,ZANAHORIA PETIT SPLENDA,85,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=ZANAHORIA PETIT;score=0.667
+20707,c62,PAQUETE 2 LOMO DE CERDO MECHADO (6 personas),84,,no_match,0,false,false,false,false,
+400937,P18R,REBANADA DE IMPERIAL CHOCOLATE CH,82,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+1100982,239R,REBANADA DE CHESSECAKE DE OREO GDE,81,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+80,77,ROSCA DE CHOCOLATE ABUELITA,80,,no_match,0,false,false,false,false,
+421,185R,REBANADA DE PAY DE QUESO,75,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+400932,P15C,PLANCHA 1/4 3 LECHES CHOCOLATE,73,PLANCHA 1 4 3 LECHES CHOCOLATE,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+400938,P17R,REBANADA DE IMPERIAL CHOCOLATE MED,73,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+730946,327,CHOCOLATE LOVE,72,,no_match,0,false,false,false,false,
+860977,01GFR,REBANADA DE GELATINA DE FRUTA CON YOGUR CH,71,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+383,C006,CAPIROTADA DE LECHE GRANDE,69,,no_match,0,false,false,false,false,
+830971,223R,REBANADA DE ROSCA CASERA,69,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20708,c64,PAQUETE 1 PECHUGA DE POLLO RELLENA (6 personas),68,,no_match,0,false,false,false,false,
+730949,330,BESO BROWNIE,68,,no_match,0,false,false,false,false,
+730948,329,VAINILLA CALENDARIO D AMOR,68,,no_match,0,false,false,false,false,
+1130984,251,Tartaleta uva,68,TARTALETA UVA,exact_code,0.99,true,false,false,true,
+800970,225R,REBANADA DE GELATINA DE CAFE CH,67,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+760959,222,PAQUETE NIÑO FELIZ,66,,no_match,0,false,false,false,false,
+1130983,250,Mini mediano uva,66,MINI MED UVA,exact_code,0.99,true,false,false,true,
+400931,P14V,PLANCHA 1/4 3 LECHES VAINILLA,64,PLANCHA 1 4 3 LECHES VAINILLA,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+420938,P19R,REBANADA DE PASTEL CASERO DE CHOCOLATE,63,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+374,64R,REBANADA DE CHOCOFLAN MINI MEDIANO,57,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+740951,F105R,REBANADA DE PASTEL PRINCESA CORAZON CH,56,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20782,n02R,REBANADA DE RED VELVET CHEESE CAKE MINI MEDIANO,54,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+780962,T03R,REBANADA DE ZANAHORIA TRES LECHES MEDIANO,54,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+399,176,ARREGLO $80,53,,no_match,0,false,false,false,false,
+379,77R,REBANADA DE ROSCA DE CHOCOLATE,53,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+82,79,ROSCA NAVIDEÑA DE COCO CH,53,,no_match,0,false,false,false,false,
+335,c05,PAQUETE 1 PECHUGA DE POLLO RELLENA (12 personas),53,,no_match,0,false,false,false,false,
+440938,P15CR,REBANADA DE PLANCHA 1/4 3 LECHES CHOCOLATE,51,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+920980,01ki,OTROS VARIOS KIOSKO,51,,no_match,0,false,false,false,false,
+850972,F015,DOMO ROLES DE CANELA MINI,48,,no_match,0,false,false,false,false,
+1040981,233R,REBANADA DE PASTEL DE FRUTOS ROJOS 3 LECH MED,48,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+282,58R,REBANADA DE MINI MEDIANO PIÑERO,47,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+630943,07baR,REBANADA DE CHESSECAKE MANZABA MMD,46,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+144,pan,PAN DULCE $25,46,,no_match,0,false,false,false,false,
+332,c02,PAQUETE 2 LOMO DE CERDO MECHADO (12 personas),46,,no_match,0,false,false,false,false,
+1080982,231R,REBANADA DE PASTEL VAINILLA-FLAN GRANDE,46,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20821,11pR,REBANADA DE PAY PATRIO,45,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+890978,203R,REBANADA DE GELATINA FRESA SIN AZUCAR CHICA,44,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20458,82R,REBANADA DE PSTEL NUBE VAINILLA,42,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20473,10bR,REBANADA DE GELATINA PROMO $30,42,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20523,pa07,Día del padre y abuelo pastel taza de café,42,,no_match,0,false,false,false,false,
+234,015f,PETIT CASERO FIGURITA,40,PETIT CASERO FIGURITA,exact_code,0.99,true,false,false,true,
+1040982,247R,REBANADA DE PASTEL MILKY PP MIN MED,39,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+480938,02cR,REBANADA DE PASTEL 3 LECHES CLASICO MED,37,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20710,c65,PAQUETE 5 LASAÑA (6 personas),37,,no_match,0,false,false,false,false,
+20486,LM,LETRERO DE ACETATO GDE,37,,no_match,0,false,false,false,false,
+1050982,237R,REBANADA DE PASTEL DE LOTUS 3 LECH MIN MED,37,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20709,c63,PAQUETE 4 PIERNA CERDO MECHADA (6 personas),36,,no_match,0,false,false,false,false,
+380928,01dmR,REBANADA DE CHEESECAKE DE MANGO,36,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+10444,101c,ROSCA CHEESEFILING,35,,no_match,0,false,false,false,false,
+610943,04baR,REBANADA DE CHESSECAKE LOTUS GDE,33,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+230912,T01R,REBANADA DE FERRERO CORAZON CH,32,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+840971,01BR,CAJA COMBO BREAK,32,,no_match,0,false,false,false,false,
+334,c04,PAQUETE 3 PAVO DE 5KG (12 a 15 personas),32,,no_match,0,false,false,false,false,
+1060982,008rR,REBANADA DE ROSCA CAJETA DE FRUTOS SECOS,32,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+398,175,ARREGLO $100,30,,no_match,0,false,false,false,false,
+1000980,007rR,REBANADA DE ROSCA NATILLA DE FRUTOS SECOS,30,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20834,94FR,REBANADA DE CHEESE DUO DE AMOR CH,29,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+39,35,ALAS DE ANGEL,29,,no_match,0,false,false,false,false,
+336,c06,PAQUETE 5 LASAÑA (12 personas),29,,no_match,0,false,false,false,false,
+365,60R,REBANADA DE MINI MEDIANO CHOCOLATE,27,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+333,c03,PAQUETE 4 PIERNA DE CERDO MECHADA (12 personas),27,,no_match,0,false,false,false,false,
+490938,P14VR,REBANADA DE PLANCHA 1/4 3 LECHES VAINILLA,24,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+780967,228,PAN $15,23,,no_match,0,false,false,false,false,
+20744,10chR,REBANADA DE PASTEL DE CARAJILLO CH,23,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+1020981,79G,ROSCA NAVIDEÑA DE COCO GDE,23,,no_match,0,false,false,false,false,
+1070982,240R,REBANADA DE CHESSECAKE DE OREO MIN MED,23,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+197,163,CHUNCHES,22,,no_match,0,false,false,false,false,
+209,1007,2 DE 3/4 PIÑERO JUMBO-FAMILIAR,21,,no_match,0,false,false,false,false,
+430940,03c,PASTEL 3 LECHES CLASICO CH,20,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=3 LECHES CH;score=0.667
+266,205,BROWNIE SALUDABLE,20,,no_match,0,false,false,false,false,
+990980,245,ROSCA DE CHOUX CH,19,,no_match,0,false,false,false,false,
+395,172,ARREGLO $250,18,,no_match,0,false,false,false,false,
+397,174,ARREGLO $150,18,,no_match,0,false,false,false,false,
+208,1006,2 DE 3/4 VAINILLA JUMBO-FAMILIAR,17,,no_match,0,false,false,false,false,
+1110983,005r,ROSCA TRADICIONAL NUTELA MEDIANA,17,,no_match,0,false,false,false,false,
+640943,01baR,REBANADA DE PASTEL ALEMAN BARRA,16,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+450938,03cR,REBANADA DE PASTEL 3 LECHES CLASICO CH,16,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+680943,157R,REBANADA DE SERPENTINA CHICA,16,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+910980,VIGA,VISAGRA DE PAN Y GALLETA,16,,no_match,0,false,false,false,false,
+790969,01zR,REBANADA DE ZANAHORIA TRES LECHE MINI MEDIANO,15,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+1100983,242R,REBANADA DE CHESSECAKE DE MANZANA GDE,15,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+790970,226R,REBANADA DE ROSCA DE CHOCOLATE CREMA QUESO CHICA,14,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+380930,02j,JERICALLA IND $30,14,,no_match,0,false,false,false,false,
+210,1008,2 DE 3/4 CHOCOLATE JUMBO - FAMILIAR,12,,no_match,0,false,false,false,false,
+1120983,249R,REBANADA DE GELATINA NAVIDEÑA CARAMELO CH,12,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20491,178A,ARREGLO $120,11,,no_match,0,false,false,false,false,
+690943,01bc,PASTEL BOCA PEPE,10,,no_match,0,false,false,false,false,
+430939,02c,PASTEL 3 LECHES CLASICO MED,10,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=3 LECHES MED;score=0.667
+43,39,CHOCOFLAN,9,,no_match,0,false,false,false,false,
+307,59R,REBANADA DE MINI PASTELITO PIÑERO,8,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20471,195mR,REBANADA DE MOSTACHON MMD,8,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+550950,co8,PAN DE MESA GDE PARA 12 PERSONAS,8,,no_match,0,false,false,false,false,
+400,177,ARREGLO $50,8,,no_match,0,false,false,false,false,
+560943,01pR,REBANADA DE GELATINA PIÑA COLADA,8,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+730943,101cR,REBANADA DE ROSCA CHEESEFILING,8,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+300919,324,Paleta Pinta Peque,8,,no_match,0,false,false,false,false,
+381,35R,REBANADA DE ALAS DE ANGEL,8,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+1090982,79GR,REBANADA DE ROSCA NAVIDEÑA DE COCO GDE,8,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+211,1009,3 DE 3/4 KG VAINILLA MEGA-FAMILIAR,7,,no_match,0,false,false,false,false,
+9,05,FRESA GDE,7,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=GELATINA FRESA GDE;score=0.667
+246,21R,REBANADA DE DUO DURAZNO CH,7,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+1140983,232R,REBANADA DE PASTEL VAINILLA-FLAN MINI MED,7,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+20703,1376,MJR016 3 leches,6,,no_match,0,false,false,false,false,
+720943,003rR,REBANADA DE ROSCA TRADICIONAL MEDIANA,5,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+550951,co9,PAN DE MESA CHICO PARA 6 PERSONAS,5,,no_match,0,false,false,false,false,
+620943,02baR,REBANADA DE PASTEL FRUTOS ROJO BARRA,5,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+590946,06ba,CHESSECAKE LOTUS MMD,5,,no_match,0,false,false,false,false,
+287,61R,REBANADA DE MINI PASTELITO CHOCOLATE,5,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+213,1011,3 DE 3/4 KG CHOCOLATE MEGA-FAMILIAR,5,,no_match,0,false,false,false,false,
+650943,03baR,REBANADA DE PASTEL MATCH BARRA,4,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+251,1111,PIÑERO 3 LECHES 26 CM,4,,no_match,0,false,false,false,false,
+276,206,RED VELVET CORAZON CH,4,,no_match,0,false,false,false,false,
+20501,103,FLAN INDIVIDUAL,4,,no_match,0,false,false,false,false,
+35,31,SELVA NEGRA,4,SELVA NEGRA,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
+394,171,ARREGLO $350,4,,no_match,0,false,false,false,false,
+1150983,234R,REBANADA DE PASTEL DE FRUTOS ROJOS 3 LECH MINI MED,4,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+550947,co5,ENSALADA NAVIDEÑA COMPLEMENTO,4,,no_match,0,false,false,false,false,
+254,1114,20 CM PIÑERO,3,,no_match,0,false,false,false,false,
+252,1112,CHOCOLATE 26 CM,3,,no_match,0,false,false,false,false,
+20742,10ch,PASTEL DE CARAJILLO CH,3,,no_match,0,false,false,false,false,
+550948,co6,ROSCA NAVIDEÑA GDE 12 PERSONAS,3,,no_match,0,false,false,false,false,
+256,1116,16 CM MMD VAINILLA,2,,no_match,0,false,false,false,false,
+20650,1323,HMB001 vainilla,2,,no_match,0,false,false,false,false,
+20685,1358,MJR004 3 leches,2,,no_match,0,false,false,false,false,
+990983,248,PASTEL MILKY PP MINI PASTELITO,2,,no_match,0,false,false,false,false,
+550943,co1,SPAGUETTI VERDE COMPLEMENTO,2,,no_match,0,false,false,false,false,
+650944,06baR,REBANADA DE CHESSECAKE LOTUS MMD,1,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
+590943,03ba,PASTEL MATCH BARRA,1,,no_match,0,false,false,false,false,
+20774,n06,CASA DE JENGIBRE,1,,no_match,0,false,false,false,false,
+590944,04ba,CHESSECAKE LOTUS GDE,1,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=CHESSECAKE GDE;score=0.667
+20694,1367,MJR010,1,,no_match,0,false,false,false,false,
+212,1010,3 DE 3/4 KG PIÑERO MEGA-FAMILIAR,1,,no_match,0,false,false,false,false,
+50,46,GELATINA YOGURTH GDE,1,,no_match,0,false,false,false,false,
+396,173,ARREGLO $200,1,,no_match,0,false,false,false,false,
+20498,101,OREO GDE,1,,no_match,0,false,false,false,false,
+20637,1310,NÑA014 3 leches,1,,no_match,0,false,false,false,false,
+20702,1375,MJR016 vainilla,1,,no_match,0,false,false,false,false,
+25,21,DUO DURAZNO CH,1,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=DURAZNO CH;score=0.667
+20569,1242,CO-008 3 leches,1,,no_match,0,false,false,false,false,
+188,F001,BOTE CON GALLETA GDE,1,,no_match,0,false,false,false,false,
+550945,co3,GRAVY COMPLEMENTO,1,,no_match,0,false,false,false,false,

@@ -27,24 +27,20 @@ node scripts/weekly-branch-forecast.cjs --month 2025-10 \
 - `ventas-diarias-sucursal.csv`: columnas `fecha,sucursal,producto,cantidad`, con **ventas de piso de las sucursales**. "Planta León · Piso de venta" es surtido a sucursales: desde el 26-sep-2026 el módulo descarta solo las filas cuya sucursal dice PLANTA (y Suc. Amado Nervo antes de ago-2024), igual que la serie oficial de demanda del mensual.
 - Para los factores de fechas especiales hace falta al menos el mismo mes del año anterior en el archivo diario. Sin esa historia el factor es 1.
 
-## Backtest 2025 (pepes_devBI, modelo mensual 91a2462 corrido sobre la venta de sucursales)
-WAPE %, meses ene–dic 2025. "4 semanas" = promedio diario de las 4 semanas previas al mes. "Año anterior" = misma semana de 2024 (364 días antes).
+## Backtest (pepes_devBI, modelo mensual `d0e61f7` sobre la venta de sucursales)
+WAPE %, con la víspera por SKU activa. 2025 = ene–dic; 2026 = ene–ago (fuera de muestra); 2024 = mar–dic sin Suc. Amado Nervo. El reparto no cambia el mensual: solo lo distribuye.
 
-| Nivel | Este reparto | 4 semanas | Año anterior | Mensual real repartido (piso del reparto) |
-|---|---|---|---|---|
-| SKU × semana | **17.37** | 23.23 | 27.90 | 12.94 |
-| Sucursal × SKU × semana | **42.18** | 46.62 | 63.10 | 40.48 |
-| Sucursal × SKU × mes | **24.21** | 29.36 | 44.70 | 20.59 |
-| Semana total | **6.67** | 13.84 | 20.37 | 6.14 |
-
-## Víspera por SKU (backtest con el mensual de sucursales de `967cdea`)
-WAPE %, mismo arnés que el backtest de arriba; 2024 = mar–dic sin Suc. Amado Nervo; 2026 = ene–ago (fuera de muestra). La víspera solo mueve piezas entre semanas del mismo mes; el mensual no cambia.
-
-| Nivel | 2025 | 2024 | 2026 |
+| Nivel | 2025 | 2026 | 2024 |
 |---|---|---|---|
-| SKU × semana | 17.24 → **17.09** | 21.57 → **21.51** | 18.09 → **17.99** |
-| Sucursal × SKU × semana | 42.22 → **42.14** | 45.12 → **45.07** | 43.00 → **42.92** |
-| Semana total | 6.85 → **6.66** | 13.02 → **12.88** | 6.92 → **6.84** |
+| SKU × semana | **16.98** (sin enero 17.10) | **17.73** | **21.54** |
+| Sucursal × SKU × semana | **42.21** | **42.89** | **45.14** |
+| Semana total | **6.48** | **6.86** | **12.81** |
 
-Peor mes (SKU × semana): abr-2025 +0.09, nov-2024 +0.02, ene-2026 +0.04. Entran de 2 a 12 SKU por mes (2–10% de las piezas). Con umbral 1.3–2.0 y encogimiento 15–60 piezas los tres años también bajan.
+Bases ingenuas (mismo universo y misma venta diaria): "4 semanas" = promedio diario de las 4 semanas previas al mes; "Año anterior" = misma semana 364 días antes.
 
+| Nivel | 2025: 4 semanas / año anterior | 2026: 4 semanas / año anterior |
+|---|---|---|
+| SKU × semana | 23.23 / 27.90 | 25.54 / 24.73 |
+| Sucursal × SKU × semana | 46.62 / 63.10 | 49.14 / 59.98 |
+
+Fuente: `backtest-2025-completo-pepes-sucursal/semanal/wk-suc-{2024,2025,2026}.json` (arnés `wk.cjs`) y `wk-naive.cjs`. La víspera por SKU (#30) bajó el error semanal en los tres años cuando se integró; el detalle de esa medición está en el PR #30.

@@ -1,0 +1,716 @@
+{
+  "13": {
+    "codigo": "13",
+    "productoOriginal": "DUO DURAZNO GDE",
+    "producto": "DUO DURAZNO GDE",
+    "inCatalog": true
+  },
+  "15": {
+    "codigo": "15",
+    "productoOriginal": "ZANAHORIA GDE",
+    "producto": "ZANAHORIA GDE",
+    "inCatalog": true
+  },
+  "16": {
+    "codigo": "16",
+    "productoOriginal": "PIÑA CH",
+    "producto": "PINA CH",
+    "inCatalog": true
+  },
+  "17": {
+    "codigo": "17",
+    "productoOriginal": "DURAZNO CH",
+    "producto": "DURAZNO CH",
+    "inCatalog": true
+  },
+  "18": {
+    "codigo": "18",
+    "productoOriginal": "FRESA CH",
+    "producto": "FRESA CH",
+    "inCatalog": true
+  },
+  "19": {
+    "codigo": "19",
+    "productoOriginal": "3 LECHES CH",
+    "producto": "3 LECHES CH",
+    "inCatalog": true
+  },
+  "20": {
+    "codigo": "20",
+    "productoOriginal": "FRUTAS CH",
+    "producto": "FRUTAS CH",
+    "inCatalog": true
+  },
+  "23": {
+    "codigo": "23",
+    "productoOriginal": "MOKA CH",
+    "producto": "MOKA CH",
+    "inCatalog": true
+  },
+  "25": {
+    "codigo": "25",
+    "productoOriginal": "CHOCOLATE CH",
+    "producto": "CHOCOLATE CH",
+    "inCatalog": true
+  },
+  "28": {
+    "codigo": "28",
+    "productoOriginal": "NUTELA CH",
+    "producto": "NUTELA CH",
+    "inCatalog": true
+  },
+  "29": {
+    "codigo": "29",
+    "productoOriginal": "ZANAHORIA CH",
+    "producto": "ZANAHORIA CH",
+    "inCatalog": true
+  },
+  "30": {
+    "codigo": "30",
+    "productoOriginal": "3 LECHES QUESO GDE",
+    "producto": "3 LECHES QUESO GDE",
+    "inCatalog": true
+  },
+  "31": {
+    "codigo": "31",
+    "productoOriginal": "SELVA NEGRA",
+    "producto": "SELVA NEGRA",
+    "inCatalog": false
+  },
+  "32": {
+    "codigo": "32",
+    "productoOriginal": "CHOCOQUESO",
+    "producto": "CHOCOQUESO",
+    "inCatalog": true
+  },
+  "36": {
+    "codigo": "36",
+    "productoOriginal": "M & M GDE",
+    "producto": "M & M GDE",
+    "inCatalog": true
+  },
+  "37": {
+    "codigo": "37",
+    "productoOriginal": "CHESSECAKE GDE",
+    "producto": "CHESSECAKE GDE",
+    "inCatalog": true
+  },
+  "40": {
+    "codigo": "40",
+    "productoOriginal": "GELATINA FRESA GDE",
+    "producto": "GELATINA FRESA GDE",
+    "inCatalog": true
+  },
+  "41": {
+    "codigo": "41",
+    "productoOriginal": "GELATINA FRESA CH",
+    "producto": "GELATINA FRESA CH",
+    "inCatalog": false
+  },
+  "44": {
+    "codigo": "44",
+    "productoOriginal": "GELATINA MOSAICO GDE",
+    "producto": "GELATINA MOSAICO GDE",
+    "inCatalog": true
+  },
+  "45": {
+    "codigo": "45",
+    "productoOriginal": "GELATINA MOSAICO CH",
+    "producto": "GELATINA MOSAICO CH",
+    "inCatalog": true
+  },
+  "48": {
+    "codigo": "48",
+    "productoOriginal": "GELATINA IND FRESA",
+    "producto": "GELATINA IND FRESA",
+    "inCatalog": true
+  },
+  "49": {
+    "codigo": "49",
+    "productoOriginal": "GELATINA IND MOSAICO",
+    "producto": "GELATINA IND MOSAICO",
+    "inCatalog": true
+  },
+  "54": {
+    "codigo": "54",
+    "productoOriginal": "PAY DE FRESA GDE",
+    "producto": "PAY FRESA GDE",
+    "inCatalog": true
+  },
+  "55": {
+    "codigo": "55",
+    "productoOriginal": "PAY DE GUAYABA GDE",
+    "producto": "PAY GUAYABA GDE",
+    "inCatalog": true
+  },
+  "58": {
+    "codigo": "58",
+    "productoOriginal": "MINI MEDIANO PIÑERO",
+    "producto": "MINI MED PINERO",
+    "inCatalog": true
+  },
+  "59": {
+    "codigo": "59",
+    "productoOriginal": "MINI PASTELITO PIÑERO",
+    "producto": "MINI PASTELITO PINERO",
+    "inCatalog": true
+  },
+  "60": {
+    "codigo": "60",
+    "productoOriginal": "MINI MEDIANO CHOCOLATE",
+    "producto": "MINI MED CHOCOLATE",
+    "inCatalog": true
+  },
+  "61": {
+    "codigo": "61",
+    "productoOriginal": "MINI PASTELITO CHOCOLATE",
+    "producto": "MINI PASTELITO CHOCOLATE",
+    "inCatalog": true
+  },
+  "62": {
+    "codigo": "62",
+    "productoOriginal": "CHESSECAKE MINIMED",
+    "producto": "CHESSECAKE MINIMED",
+    "inCatalog": true
+  },
+  "63": {
+    "codigo": "63",
+    "productoOriginal": "CHESSECAKE PETIT",
+    "producto": "CHESSECAKE PETIT",
+    "inCatalog": true
+  },
+  "64": {
+    "codigo": "64",
+    "productoOriginal": "CHOCOFLAN MINI MEDIANO",
+    "producto": "CHOCOFLAN MINI MED",
+    "inCatalog": true
+  },
+  "67": {
+    "codigo": "67",
+    "productoOriginal": "ZANAHORIA PETIT",
+    "producto": "ZANAHORIA PETIT",
+    "inCatalog": true
+  },
+  "69": {
+    "codigo": "69",
+    "productoOriginal": "PETIT DECORADO",
+    "producto": "PETIT DECORADO",
+    "inCatalog": true
+  },
+  "70": {
+    "codigo": "70",
+    "productoOriginal": "PLANCHA DE VAINILLA",
+    "producto": "PLANCHA VAINILLA",
+    "inCatalog": true
+  },
+  "72": {
+    "codigo": "72",
+    "productoOriginal": "BOLLOS C/4",
+    "producto": "BOLLOS C 4",
+    "inCatalog": true
+  },
+  "73": {
+    "codigo": "73",
+    "productoOriginal": "BOLLOS C/6",
+    "producto": "BOLLOS C 6",
+    "inCatalog": true
+  },
+  "74": {
+    "codigo": "74",
+    "productoOriginal": "VAINILLA NATURAL",
+    "producto": "VAINILLA NATURAL",
+    "inCatalog": true
+  },
+  "75": {
+    "codigo": "75",
+    "productoOriginal": "FLAN EN VASO",
+    "producto": "FLAN EN VASO",
+    "inCatalog": true
+  },
+  "78": {
+    "codigo": "78",
+    "productoOriginal": "ROSCA C/CAJETA",
+    "producto": "ROSCA C CAJETA",
+    "inCatalog": true
+  },
+  "84": {
+    "codigo": "84",
+    "productoOriginal": "COCO CH",
+    "producto": "COCO CH",
+    "inCatalog": false
+  },
+  "87": {
+    "codigo": "87",
+    "productoOriginal": "M & M CH",
+    "producto": "M & M CH",
+    "inCatalog": true
+  },
+  "91": {
+    "codigo": "91",
+    "productoOriginal": "VAINILLA MARMOLEADO",
+    "producto": "VAINILLA MARMOLEADO",
+    "inCatalog": true
+  },
+  "92": {
+    "codigo": "92",
+    "productoOriginal": "VAINILLA NARANJA",
+    "producto": "VAINILLA NARANJA",
+    "inCatalog": true
+  },
+  "96": {
+    "codigo": "96",
+    "productoOriginal": "CHEESECAKE MMD CORAZON",
+    "producto": "CHESSECAKE MMD CORAZON",
+    "inCatalog": true
+  },
+  "99": {
+    "codigo": "99",
+    "productoOriginal": "TRUFAS CON 9",
+    "producto": "TRUFAS CON 9",
+    "inCatalog": true
+  },
+  "160": {
+    "codigo": "160",
+    "productoOriginal": "bolsa de galleta de 60 grs",
+    "producto": "BOLSA GALLETA 60 GRS",
+    "inCatalog": false
+  },
+  "185": {
+    "codigo": "185",
+    "productoOriginal": "PAY DE QUESO",
+    "producto": "PAY QUESO",
+    "inCatalog": true
+  },
+  "197": {
+    "codigo": "197",
+    "productoOriginal": "1/4 Kg de GALLETA",
+    "producto": "1 4 KG GALLETA",
+    "inCatalog": true
+  },
+  "211": {
+    "codigo": "211",
+    "productoOriginal": "Gelatina de promocion semana santa",
+    "producto": "GELATINA PROMOCION SEMANA SANTA",
+    "inCatalog": true
+  },
+  "221": {
+    "codigo": "221",
+    "productoOriginal": "CAJITA FELIZ",
+    "producto": "CAJITA FELIZ",
+    "inCatalog": true
+  },
+  "233": {
+    "codigo": "233",
+    "productoOriginal": "PASTEL DE FRUTOS ROJOS 3 LECH MED",
+    "producto": "PASTEL FRUTOS ROJOS 3 LECH MED",
+    "inCatalog": true
+  },
+  "235": {
+    "codigo": "235",
+    "productoOriginal": "PASTEL DE FRUTOS ROJOS 3 LECH PETIT",
+    "producto": "PASTEL FRUTOS ROJOS 3 LECH PETIT",
+    "inCatalog": true
+  },
+  "250": {
+    "codigo": "250",
+    "productoOriginal": "MINI MEDIANO UVA",
+    "producto": "MINI MED UVA",
+    "inCatalog": true
+  },
+  "251": {
+    "codigo": "251",
+    "productoOriginal": "TARTALETA UVA",
+    "producto": "TARTALETA UVA",
+    "inCatalog": true
+  },
+  "326": {
+    "codigo": "326",
+    "productoOriginal": "RAMO FLORAL 12CM 3 CAPAS",
+    "producto": "RAMO FLORAL 12CM 3 CAPAS",
+    "inCatalog": true
+  },
+  "02": {
+    "codigo": "02",
+    "productoOriginal": "PIÑA GDE",
+    "producto": "PINA GDE",
+    "inCatalog": true
+  },
+  "04": {
+    "codigo": "04",
+    "productoOriginal": "DURAZNO GDE",
+    "producto": "DURAZNO GDE",
+    "inCatalog": true
+  },
+  "06": {
+    "codigo": "06",
+    "productoOriginal": "3 LECHES GDE",
+    "producto": "3 LECHES GDE",
+    "inCatalog": true
+  },
+  "03": {
+    "codigo": "03",
+    "productoOriginal": "FRUTAS GDE",
+    "producto": "FRUTAS GDE",
+    "inCatalog": true
+  },
+  "01": {
+    "codigo": "01",
+    "productoOriginal": "MOKA GDE",
+    "producto": "MOKA GDE",
+    "inCatalog": true
+  },
+  "09": {
+    "codigo": "09",
+    "productoOriginal": "NUTELA GDE",
+    "producto": "NUTELA GDE",
+    "inCatalog": true
+  },
+  "07": {
+    "codigo": "07",
+    "productoOriginal": "CHOCOLATE GDE",
+    "producto": "CHOCOLATE GDE",
+    "inCatalog": true
+  },
+  "04M": {
+    "codigo": "04M",
+    "productoOriginal": "TRES LECHES MEDIANO",
+    "producto": "3 LECHES MED",
+    "inCatalog": true
+  },
+  "23N": {
+    "codigo": "23N",
+    "productoOriginal": "FRUTAS MED",
+    "producto": "FRUTAS MED",
+    "inCatalog": true
+  },
+  "06M": {
+    "codigo": "06M",
+    "productoOriginal": "DUO DURAZNO MEDIANO",
+    "producto": "DUO DURAZNO MED",
+    "inCatalog": true
+  },
+  "08M": {
+    "codigo": "08M",
+    "productoOriginal": "PIÑA MED",
+    "producto": "PINA MED",
+    "inCatalog": true
+  },
+  "24N": {
+    "codigo": "24N",
+    "productoOriginal": "CHOCOLATE MED",
+    "producto": "CHOCOLATE MED",
+    "inCatalog": true
+  },
+  "07M": {
+    "codigo": "07M",
+    "productoOriginal": "M & M MEDIANO",
+    "producto": "M & M MED",
+    "inCatalog": true
+  },
+  "01M": {
+    "codigo": "01M",
+    "productoOriginal": "MOKA MEDIANO",
+    "producto": "MOKA MED",
+    "inCatalog": true
+  },
+  "30CH": {
+    "codigo": "30CH",
+    "productoOriginal": "3 LECHES QUESO CH",
+    "producto": "3 LECHES QUESO CH",
+    "inCatalog": true
+  },
+  "31CH": {
+    "codigo": "31CH",
+    "productoOriginal": "SELVA NEGRA CH",
+    "producto": "SELVA NEGRA CH",
+    "inCatalog": true
+  },
+  "32CH": {
+    "codigo": "32CH",
+    "productoOriginal": "CHOCOQUESO CH",
+    "producto": "CHOCOQUESO CH",
+    "inCatalog": true
+  },
+  "N01": {
+    "codigo": "N01",
+    "productoOriginal": "RED VELVET CHEESE CAKE GDE",
+    "producto": "RED VELVET CHESSECAKE GDE",
+    "inCatalog": true
+  },
+  "N02": {
+    "codigo": "N02",
+    "productoOriginal": "RED VELVET CHEESE CAKE MINI MEDIANO",
+    "producto": "RED VELVET CHESSECAKE MINI MED",
+    "inCatalog": true
+  },
+  "C3L": {
+    "codigo": "C3L",
+    "productoOriginal": "CAJITA DE TRES LECHES",
+    "producto": "CAJITA 3 LECHES",
+    "inCatalog": true
+  },
+  "21N": {
+    "codigo": "21N",
+    "productoOriginal": "PLANCHA 1/4",
+    "producto": "PLANCHA 1 4",
+    "inCatalog": true
+  },
+  "10B": {
+    "codigo": "10B",
+    "productoOriginal": "GELATINA PROMO $90",
+    "producto": "GELATINA PROMO $90",
+    "inCatalog": true
+  },
+  "01GE": {
+    "codigo": "01GE",
+    "productoOriginal": "GELATINA FRESA $150",
+    "producto": "GELATINA FRESA $150",
+    "inCatalog": true
+  },
+  "001T": {
+    "codigo": "001T",
+    "productoOriginal": "tartaleta",
+    "producto": "TARTALETA",
+    "inCatalog": true
+  },
+  "05M": {
+    "codigo": "05M",
+    "productoOriginal": "CHEESECAKE FRUTAL GDE",
+    "producto": "CHESSECAKE FRUTAL GDE",
+    "inCatalog": true
+  },
+  "015B": {
+    "codigo": "015B",
+    "productoOriginal": "BOCADITO PEPE 15 PIEZAS",
+    "producto": "BOCADITO PEPE 15 PIEZAS",
+    "inCatalog": true
+  },
+  "197A": {
+    "codigo": "197A",
+    "productoOriginal": "1/2 kg DE GALLETA",
+    "producto": "1 2 KG GALLETA",
+    "inCatalog": true
+  },
+  "F011": {
+    "codigo": "F011",
+    "productoOriginal": "VASO DE ARROZ",
+    "producto": "VASO ARROZ",
+    "inCatalog": true
+  },
+  "03J": {
+    "codigo": "03j",
+    "productoOriginal": "JERICALLA UN CUARTO $45",
+    "producto": "JERICALLA UN CUARTO $45",
+    "inCatalog": true
+  },
+  "PL01": {
+    "codigo": "pl01",
+    "productoOriginal": "PETIT 3 LECHES PIÑERO",
+    "producto": "PETIT 3 LECHES PINERO",
+    "inCatalog": true
+  },
+  "PL02": {
+    "codigo": "pl02",
+    "productoOriginal": "PETIT 3 LECHES CHOCOLATE",
+    "producto": "PETIT 3 LECHES CHOCOLATE",
+    "inCatalog": true
+  },
+  "C002": {
+    "codigo": "C002",
+    "productoOriginal": "CAPIROTADA DE LECHE IND",
+    "producto": "CAPIROTADA LECHE IND",
+    "inCatalog": true
+  },
+  "C009": {
+    "codigo": "c009",
+    "productoOriginal": "CAPIROTADA TRADICIONAL CON PILONCILLO",
+    "producto": "CAPIROTADA TRADICIONAL CON PILONCILLO",
+    "inCatalog": true
+  },
+  "F100": {
+    "codigo": "F100",
+    "productoOriginal": "PALETA GALLETA $35",
+    "producto": "PALETA GALLETA $35",
+    "inCatalog": true
+  },
+  "05VA": {
+    "codigo": "05VA",
+    "productoOriginal": "CORAZON DE BROWNIE",
+    "producto": "CORAZON BROWNIE",
+    "inCatalog": true
+  },
+  "F105": {
+    "codigo": "F105",
+    "productoOriginal": "PASTEL PRINCESA CORAZON CH",
+    "producto": "PASTEL PRINCESA CORAZON CH",
+    "inCatalog": true
+  },
+  "T01": {
+    "codigo": "T01",
+    "productoOriginal": "FERRERO CORAZON CH",
+    "producto": "FERRERO CORAZON CH",
+    "inCatalog": true
+  },
+  "F104": {
+    "codigo": "F104",
+    "productoOriginal": "CAJA DE BROWNIES CON 4 PIEZAS",
+    "producto": "CAJA BROWNIES CON 4 PIEZAS",
+    "inCatalog": true
+  },
+  "F013": {
+    "codigo": "f013",
+    "productoOriginal": "DOMO DE GALLETAS EMPANADAS",
+    "producto": "DOMO GALLETAS EMPANADAS",
+    "inCatalog": true
+  },
+  "F014": {
+    "codigo": "f014",
+    "productoOriginal": "DOMO DE GALLETAS OREJITAS",
+    "producto": "DOMO GALLETAS OREJITAS",
+    "inCatalog": true
+  },
+  "F002": {
+    "codigo": "f002",
+    "productoOriginal": "DOMO GALLETA DORADITA DE CAJETA",
+    "producto": "DOMO GALLETA DORADITA CAJETA",
+    "inCatalog": true
+  },
+  "01PG": {
+    "codigo": "01PG",
+    "productoOriginal": "GALLETA POLVORON BOLSA",
+    "producto": "GALLETA POLVORON BOLSA",
+    "inCatalog": true
+  },
+  "02PG": {
+    "codigo": "02PG",
+    "productoOriginal": "GALLETA CORAZON CHOCO BOLSA",
+    "producto": "GALLETA CORAZON CHOCO BOLSA",
+    "inCatalog": true
+  },
+  "03PG": {
+    "codigo": "03PG",
+    "productoOriginal": "GALLETA ALFAJOR BOLSA",
+    "producto": "GALLETA ALFAJOR BOLSA",
+    "inCatalog": true
+  },
+  "04PG": {
+    "codigo": "04PG",
+    "productoOriginal": "GALLETA ATE BOLSA",
+    "producto": "GALLETA ATE BOLSA",
+    "inCatalog": true
+  },
+  "01CF": {
+    "codigo": "01cf",
+    "productoOriginal": "CORAZON FUTYLLYN",
+    "producto": "CORAZON FUTYLLYN",
+    "inCatalog": true
+  },
+  "02CF": {
+    "codigo": "02cf",
+    "productoOriginal": "GALLETA 1/2 KG SAN VALENTIN",
+    "producto": "GALLETA 1 2 KG SAN VALENTIN",
+    "inCatalog": true
+  },
+  "03CF": {
+    "codigo": "03cf",
+    "productoOriginal": "GALLETA 1/4 KG SAN VALENTIN",
+    "producto": "GALLETA 1 4 KG SAN VALENTIN",
+    "inCatalog": true
+  },
+  "04CF": {
+    "codigo": "04cf",
+    "productoOriginal": "BOLSA DE GALLETA SAN VALENTIN $30",
+    "producto": "BOLSA GALLETA SAN VALENTIN $30",
+    "inCatalog": true
+  },
+  "015F": {
+    "codigo": "015F",
+    "productoOriginal": "PETIT CASERO FIGURITA",
+    "producto": "PETIT CASERO FIGURITA",
+    "inCatalog": true
+  },
+  "01CO": {
+    "codigo": "01CO",
+    "productoOriginal": "SANDWICH COREANO",
+    "producto": "SANDWICH COREANO",
+    "inCatalog": true
+  },
+  "02CO": {
+    "codigo": "02CO",
+    "productoOriginal": "GELATINA ROSCA CORAZON CH",
+    "producto": "GELATINA ROSCA CORAZON CH",
+    "inCatalog": true
+  },
+  "G002": {
+    "codigo": "G002",
+    "productoOriginal": "GELATINA MOSAICO CORAZON CH",
+    "producto": "GELATINA MOSAICO CORAZON CH",
+    "inCatalog": true
+  },
+  "03CO": {
+    "codigo": "03CO",
+    "productoOriginal": "RAMO FLORAL DE 16 CM",
+    "producto": "RAMO FLORAL 16 CM",
+    "inCatalog": true
+  },
+  "P16": {
+    "codigo": "P16",
+    "productoOriginal": "IMPERIAL CHOCOLATE GDE",
+    "producto": "IMPERIAL CHOCOLATE GDE",
+    "inCatalog": false
+  },
+  "P14V": {
+    "codigo": "P14V",
+    "productoOriginal": "PLANCHA 1/4 3 LECHES VAINILLA",
+    "producto": "PLANCHA 1 4 3 LECHES VAINILLA",
+    "inCatalog": false
+  },
+  "P15C": {
+    "codigo": "P15C",
+    "productoOriginal": "PLANCHA 1/4 3 LECHES CHOCOLATE",
+    "producto": "PLANCHA 1 4 3 LECHES CHOCOLATE",
+    "inCatalog": false
+  },
+  "P17": {
+    "codigo": "P17",
+    "productoOriginal": "IMPERIAL CHOCOLATE MED",
+    "producto": "IMPERIAL CHOCOLATE MED",
+    "inCatalog": false
+  },
+  "P18": {
+    "codigo": "P18",
+    "productoOriginal": "IMPERIAL CHOCOLATE CH",
+    "producto": "IMPERIAL CHOCOLATE CH",
+    "inCatalog": false
+  },
+  "01T": {
+    "codigo": "01t",
+    "productoOriginal": "QUESO TIRAMISU CH",
+    "producto": "QUESO TIRAMISU CH",
+    "inCatalog": false
+  },
+  "195M": {
+    "codigo": "195m",
+    "productoOriginal": "QUESO TIRAMISU MMD",
+    "producto": "QUESO TIRAMISU MMD",
+    "inCatalog": false
+  },
+  "P19": {
+    "codigo": "P19",
+    "productoOriginal": "PASTEL CASERO DE CHOCOLATE",
+    "producto": "PASTEL CASERO CHOCOLATE",
+    "inCatalog": false
+  },
+  "01P": {
+    "codigo": "01p",
+    "productoOriginal": "GELATINA PIÑA COLADA",
+    "producto": "GELATINA PINA COLADA",
+    "inCatalog": false
+  },
+  "N10": {
+    "codigo": "n10",
+    "productoOriginal": "GELATINA DE PIÑA IND",
+    "producto": "GELATINA PINA IND",
+    "inCatalog": false
+  }
+}
