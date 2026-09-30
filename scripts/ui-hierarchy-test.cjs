@@ -73,12 +73,18 @@ for (const [pattern, label] of [
   assert.doesNotMatch(page, pattern, `${label} ya no aparece en la página.`);
 }
 
-// Sin captura de inventario en la página, el cálculo diario no resta inventario.
+// «Inventario de hoy»: una sola tarjeta de carga (sin cuadrícula de captura). Lo cargado
+// (piso de venta de sucursales + cuarto frío) se resta de «Mandar a producir».
+assert.match(page, /title="Inventario de hoy"/, "Se sube el inventario de hoy.");
+assert.match(page, /onFile=\{handleDailyBranchStockFile\}/, "La tarjeta usa el lector de inventario diario.");
 assert.match(
   dashboard,
-  /calculateDailyForecast\(\{[\s\S]*?dailyBranchStock: \[\],\s*dailyColdRoom: \[\],/,
-  "La tabla diaria se calcula con inventario vacío."
+  /calculateDailyForecast\(\{[\s\S]*?dailyBranchStock: effectiveDailyBranchStock,\s*dailyColdRoom: effectiveDailyColdRoom,\s*branchStockTargets,/,
+  "La tabla diaria recibe el inventario cargado y el stock fijo por sucursal."
 );
+assert.match(dashboard, /buildBranchStockTargetMap\(stockRows\)/, "El stock fijo por sucursal sale de la carga «Stock fijo».");
+assert.match(dashboard, /setStockRows\(attachBranchStockTargets\(parseStock\(workbook\), parseBranchStockTargets\(workbook\)\)\)/, "Al subir Stock fijo se leen las hojas por sucursal.");
+assert.match(page, /formatNumber\(dailySummary\.aProducirMensual, 0\)/, "El KPI mensual suma «Mandar a producir».");
 
 assert.doesNotMatch(app, /<FreezeReadinessStrip[\s\S]*<\/header>/, "Las tiras de freeze/salud no hinchan el header.");
 
@@ -124,6 +130,84 @@ function monthClose(month, producto, cantidad) {
     assert.strictEqual(row.produccionSugeridaDia, row.produccionBrutaDia, `${row.producto} ${row.fecha}: sin inventario, pedido = bruto`);
     assert.strictEqual(row.promedioUsado, row.pronosticoVentaDia, "Promedio aplicado es el mismo número que el pronóstico de venta");
   }
+  // Con inventario: Mandar a producir = bruto − (sucursales + cuarto frío), nunca menos de 0.
+  const fecha = "2026-07-02";
+  const conInv = calculateDailyForecast({
+    monthlyRows, ventasReales: [], realProduction: [], selectedMonth: "2026-07", dailyBufferPct: 10, activePromos: [],
+    dailyBranchStock: [{ fecha, sucursal: "Suc. Plaza", producto: "FRUTAS GDE", cantidad: 3 }, { fecha, sucursal: "Suc. Vistas", producto: "FRUTAS GDE", cantidad: 2 }, { fecha, sucursal: "Suc. Plaza", producto: "GELATINA IND FRESA", cantidad: 999 }],
+    dailyColdRoom: [{ fecha, producto: "FRUTAS GDE", cantidad: 1 }],
+  });
+  const sin = new Map(daily.map((r) => [`${r.fecha}|${r.producto}`, r]));
+  for (const row of conInv) {
+    const base = sin.get(`${row.fecha}|${row.producto}`);
+    const esperado = row.fecha !== fecha ? base.aProducirDia
+      : row.producto === "FRUTAS GDE" ? Math.max(0, base.produccionBrutaDia - 6) : 0;
+    assert.strictEqual(row.aProducirDia, esperado, `${row.producto} ${row.fecha}: producir con inventario`);
+  }
+  // Regla elegida (sep 2026): de sucursales solo se resta lo que sobra de su stock fijo.
+  const {
+    parseBranchStockTargets, attachBranchStockTargets, buildBranchStockTargetMap, branchStockKey, parseStock,
+  } = await loadApp();
+  const XLSX = require(path.join(ROOT, "node_modules", "xlsx"));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["PRODUCTO", "STOCK"], ["FRUTAS GDE", 40], ["GELATINA IND FRESA", 60],
+  ]), "STOCK DE SUCURSALES");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["2026-09-01", "", "", "SUCURSAL", "", "Suc. Plaza"],
+    ["PRODUCTO ", "CODIGO", "EXISTENCIA EN SUCURSAL", "STOCK DETERMINADO"],
+    ["FRUTAS GDE", "1", 0, 2], ["GELATINA IND FRESA", "2", 0, 0],
+  ]), "Suc. Plaza");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["2026-09-01", "", "", "SUCURSAL", "", "Vistas"],
+    ["PRODUCTO", "CODIGO", "EXISTENCIA EN SUCURSAL", "STOCK DETERMINADO FIN SEMANA"],
+    ["FRUTAS GDE", "1", 0, 5], ["GELATINA IND FRESA", "2", 0, ""],
+  ]), "Suc. Vistas");
+  const targets = parseBranchStockTargets(wb);
+  assert.strictEqual(targets.length, 3, "Celda en blanco = sin stock fijo; 0 sí cuenta como stock fijo.");
+  assert.strictEqual(branchStockKey("Suc. Vistas"), branchStockKey("VISTAS"), "Sucursal se cruza sin «Suc.» ni mayúsculas.");
+  const stockConSucursal = attachBranchStockTargets(parseStock(wb), targets);
+  const targetMap = buildBranchStockTargetMap(JSON.parse(JSON.stringify(stockConSucursal)));
+  assert.strictEqual(targetMap.get(`FRUTAS GDE|${branchStockKey("Suc. Plaza")}`), 2, "El stock fijo por sucursal sobrevive el respaldo (JSON).");
+  const excedente = calculateDailyForecast({
+    monthlyRows, ventasReales: [], realProduction: [], selectedMonth: "2026-07", dailyBufferPct: 10, activePromos: [],
+    dailyBranchStock: [
+      { fecha, sucursal: "Suc. Plaza", producto: "FRUTAS GDE", cantidad: 3 },
+      { fecha, sucursal: "Suc. Vistas", producto: "FRUTAS GDE", cantidad: 2 },
+      { fecha, sucursal: "Suc. Allende", producto: "FRUTAS GDE", cantidad: 9 },
+      { fecha, sucursal: "Suc. Plaza", producto: "GELATINA IND FRESA", cantidad: 4 },
+      { fecha, sucursal: "Suc. Vistas", producto: "GELATINA IND FRESA", cantidad: 999 },
+    ],
+    dailyColdRoom: [{ fecha, producto: "FRUTAS GDE", cantidad: 1 }],
+    branchStockTargets: targetMap,
+  });
+  for (const row of excedente) {
+    const base = sin.get(`${row.fecha}|${row.producto}`);
+    if (row.fecha !== fecha) {
+      assert.strictEqual(row.aProducirDia, base.aProducirDia, `${row.producto} ${row.fecha}: otros días sin cambio`);
+      continue;
+    }
+    // FRUTAS: Plaza 3−2 = 1; Vistas 2−5 → 0 (no compensa); Allende sin stock fijo → 0. CF 1 completo.
+    // GELATINA: Plaza 4−0 = 4; Vistas sin stock fijo (en blanco) → no se resta nada de sus 999.
+    const descuento = row.producto === "FRUTAS GDE" ? 1 + 1 : 4;
+    assert.strictEqual(row.aProducirDia, Math.max(0, base.produccionBrutaDia - descuento), `${row.producto}: solo se resta el excedente`);
+    assert.strictEqual(row.sucursalesSinStockFijo, 1, `${row.producto}: una sucursal sin stock fijo`);
+    assert.match(row.reglaOperativa, /que sobra del stock fijo en sucursales/, "La leyenda dice qué se descontó.");
+    assert.match(row.reglaOperativa, /sin stock fijo: no se restan/, "La leyenda avisa la sucursal sin stock fijo.");
+  }
+  const frutas = excedente.find((row) => row.fecha === fecha && row.producto === "FRUTAS GDE");
+  assert.strictEqual(frutas.excedenteSucursalesDia, 1);
+  assert.match(frutas.reglaOperativa, /menos 1 que sobra del stock fijo en sucursales \(piso 5 vs stock fijo 7\)/);
+  assert.match(frutas.reglaOperativa, /menos 1 en cuarto frío/);
+  // Respaldo viejo sin stock fijo por sucursal: no se resta nada de sucursales, solo el cuarto frío.
+  const sinMapa = calculateDailyForecast({
+    monthlyRows, ventasReales: [], realProduction: [], selectedMonth: "2026-07", dailyBufferPct: 10, activePromos: [],
+    dailyBranchStock: [{ fecha, sucursal: "Suc. Plaza", producto: "FRUTAS GDE", cantidad: 30 }],
+    dailyColdRoom: [{ fecha, producto: "FRUTAS GDE", cantidad: 1 }],
+    branchStockTargets: new Map(),
+  }).find((row) => row.fecha === fecha && row.producto === "FRUTAS GDE");
+  assert.strictEqual(sinMapa.aProducirDia, Math.max(0, sin.get(`${fecha}|FRUTAS GDE`).produccionBrutaDia - 1));
+
   console.log("ui-hierarchy-test: página simplificada (carga, salud mínima, promo y «Mandar a producir») intacta");
 })().catch((error) => {
   console.error(error);
