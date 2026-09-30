@@ -730,13 +730,18 @@ function formatPromoWindowLabel(promo) {
   return `${start} → ${displayDate(end)}`;
 }
 
-function applyPromoUpliftToQuantity(product, baseQuantity, promo) {
+// Cantidad del día con la promo aplicada, antes de redondear a lote.
+function applyPromoUpliftRaw(baseQuantity, promo) {
   const base = Math.max(0, Number(baseQuantity) || 0);
-  if (!promo) return getProduccionSugerida(product, base);
+  if (!promo) return base;
   const multiplier = Number(promo.multiplier);
   const safeMultiplier = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
   const extra = Math.max(0, Number(promo.extraPiecesPerDay) || 0);
-  return getProduccionSugerida(product, base * safeMultiplier + extra);
+  return base * safeMultiplier + extra;
+}
+
+function applyPromoUpliftToQuantity(product, baseQuantity, promo) {
+  return getProduccionSugerida(product, applyPromoUpliftRaw(baseQuantity, promo));
 }
 
 function dailyBranchStockKey(row) {
@@ -821,13 +826,43 @@ function applyDailyBranchStockToPlantSuggestion(baseQuantity, stockOnHand) {
   return applyInventoryToProductionSuggestion(baseQuantity, stockOnHand, 0);
 }
 
-// A producir: el target del día es el bruto (promo + lote). Se resta lo que
-// ya está en sucursales y lo que queda en cuarto frío. Sin rearmar lote.
+// Resta simple sobre el bruto (promo + lote), sin rearmar lote. La usa el pedido
+// de planta; «Mandar a producir» resta primero y luego aplica el lote con
+// applyInventoryThenProductionLot.
 function applyInventoryToProductionSuggestion(baseQuantity, stockSucursales = 0, cuartoFrio = 0) {
   const base = Math.max(0, Number(baseQuantity) || 0);
   const stock = Math.max(0, Number(stockSucursales) || 0);
   const cold = Math.max(0, Number(cuartoFrio) || 0);
   return Math.max(0, Math.round(base - stock - cold));
+}
+
+// «Mandar a producir» con inventario (oct 2026): primero se resta y DESPUÉS se
+// aplica el lote de planta al neto, con la misma regla de getProduccionSugerida
+// (pastel: menos de 8 no se produce; de 8 en adelante 10 + múltiplos de 5, o sea
+// 8→10, 13→15, 18→20; lo demás redondea hacia arriba). Neto ≤ 0 → 0.
+// baseSinLote = pronóstico + margen del día (con domingo y promo), sin lote.
+function applyInventoryThenProductionLot(producto, baseSinLote, stockSucursales = 0, cuartoFrio = 0) {
+  const base = Math.max(0, Number(baseSinLote) || 0);
+  const stock = Math.max(0, Number(stockSucursales) || 0);
+  const cold = Math.max(0, Number(cuartoFrio) || 0);
+  const neto = base - stock - cold;
+  if (!(neto > 0)) return { neto, aProducir: 0 };
+  return { neto, aProducir: getProduccionSugerida(producto, neto) };
+}
+
+function formatLoteNumber(value) {
+  const text = new Intl.NumberFormat("es-MX", { maximumFractionDigits: 1 }).format(Number.isFinite(value) ? value : 0);
+  return text.replace(/^-/, "−");
+}
+
+// Leyenda breve del orden nuevo: «9.4 base − 4 sobrante − 6 cuarto frío = −0.6 → 0».
+function getLoteTrasRestarLabel(producto, neto, aProducir) {
+  if (!(neto > 0)) return "0";
+  if (!isOperationalCakeProduct(producto)) return formatNumber(aProducir, 0);
+  if (aProducir === 0) return "0 (menor a 8: no producir)";
+  if (aProducir === 10 && neto < 10) return "mínimo 10";
+  if (Math.abs(aProducir - neto) < 1e-9) return formatNumber(aProducir, 0);
+  return `${formatNumber(aProducir, 0)} (múltiplo de 5)`;
 }
 
 function dailyColdRoomKey(row) {
@@ -4979,11 +5014,23 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
       const produccionSugeridaDia = hasDailyBranchStock
         ? applyDailyBranchStockToPlantSuggestion(produccionBrutaDia, excedenteSucursalesDia)
         : produccionBrutaDia;
-      const aProducirDia = applyInventoryToProductionSuggestion(
-        produccionBrutaDia,
+      // Base sin lote: pastel = pronóstico + margen (+ domingo); con promo, el valor
+      // que antes se redondeaba a lote. Lo que no es pastel ya viene en piezas enteras.
+      const baseSinLoteDia = promo && row.weekday !== 0
+        ? applyPromoUpliftRaw(allocated[index], promo)
+        : isOperationalCakeProduct(product)
+          ? productionWeights[index]
+          : allocated[index];
+      const hasInventoryDia = hasDailyBranchStock || hasDailyColdRoom;
+      const loteTrasRestar = applyInventoryThenProductionLot(
+        product,
+        baseSinLoteDia,
         hasDailyBranchStock ? excedenteSucursalesDia : 0,
         hasDailyColdRoom ? cuartoFrioDia : 0
       );
+      // Sin inventario del día queda idéntico al bruto de siempre.
+      const aProducirDia = hasInventoryDia ? loteTrasRestar.aProducir : produccionBrutaDia;
+      const netoAntesDeLoteDia = hasInventoryDia ? loteTrasRestar.neto : null;
       const realKey = `${product}|${row.key}`;
       const hasRealData = realDailyMap.has(realKey);
       const produccionRealDia = hasRealData ? realDailyMap.get(realKey) : null;
@@ -5011,23 +5058,24 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
 
       let reglaOperativa = getReglaOperativaLabel(product, productionWeights[index]);
       if (row.weekday === 0) reglaOperativa = "Domingo: no producir; demanda al sábado";
-      else if (receivedSunday) reglaOperativa = `${reglaOperativa} · incluye demanda del domingo`;
-      if (hasDailyBranchStock && row.weekday !== 0 && !excessByProductDate) {
-        reglaOperativa = `${reglaOperativa} · menos ${formatNumber(inventarioSucursalesDia, 0)} en sucursales`;
-      } else if (hasDailyBranchStock && row.weekday !== 0) {
-        const conStock = excessEntry && excessEntry.pisoConStockFijo + excessEntry.stockFijo > 0
-          ? ` (piso ${formatNumber(excessEntry.pisoConStockFijo, 0)} vs stock fijo ${formatNumber(excessEntry.stockFijo, 0)})`
-          : "";
-        if (conStock) {
-          reglaOperativa = `${reglaOperativa} · menos ${formatNumber(excedenteSucursalesDia, 0)} que sobra del stock fijo en sucursales${conStock}`;
+      else if (hasInventoryDia) {
+        // Orden nuevo: base − sobrante − cuarto frío = neto → lote.
+        let formula = `${formatLoteNumber(baseSinLoteDia)} base`;
+        if (hasDailyBranchStock && !excessByProductDate) {
+          formula = `${formula} − ${formatNumber(inventarioSucursalesDia, 0)} en sucursales`;
+        } else if (hasDailyBranchStock) {
+          const conStock = excessEntry && excessEntry.pisoConStockFijo + excessEntry.stockFijo > 0
+            ? ` (piso ${formatNumber(excessEntry.pisoConStockFijo, 0)} vs stock fijo ${formatNumber(excessEntry.stockFijo, 0)})`
+            : "";
+          if (conStock) formula = `${formula} − ${formatNumber(excedenteSucursalesDia, 0)} sobrante${conStock}`;
         }
-        if (sucursalesSinStockFijo > 0) {
+        if (hasDailyColdRoom) formula = `${formula} − ${formatNumber(cuartoFrioDia, 0)} cuarto frío`;
+        reglaOperativa = `${formula} = ${formatLoteNumber(netoAntesDeLoteDia)} → ${getLoteTrasRestarLabel(product, netoAntesDeLoteDia, aProducirDia)}`;
+        if (receivedSunday) reglaOperativa = `${reglaOperativa} · incluye demanda del domingo`;
+        if (hasDailyBranchStock && excessByProductDate && sucursalesSinStockFijo > 0) {
           reglaOperativa = `${reglaOperativa} · ${sucursalesSinStockFijo} ${sucursalesSinStockFijo === 1 ? "sucursal" : "sucursales"} sin stock fijo: no se restan sus ${formatNumber(piezasSinStockFijo, 0)} pzs`;
         }
-      }
-      if (hasDailyColdRoom && row.weekday !== 0) {
-        reglaOperativa = `${reglaOperativa} · menos ${formatNumber(cuartoFrioDia, 0)} en cuarto frío`;
-      }
+      } else if (receivedSunday) reglaOperativa = `${reglaOperativa} · incluye demanda del domingo`;
 
       return {
         fecha: row.key,
@@ -5049,6 +5097,8 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
         cuartoFrioDia,
         hasDailyColdRoom,
         produccionSugeridaDia,
+        baseSinLoteDia,
+        netoAntesDeLoteDia,
         aProducirDia,
         promoActiva: Boolean(promo && row.weekday !== 0),
         promoEtiqueta: promo && row.weekday !== 0 ? formatPromoUpliftLabel(promo) : "",
@@ -8888,9 +8938,9 @@ function Dashboard({ session, onLogout }) {
             )}
             {dailyRows.length > 0 && (
               <small className="daily-stock-hint">
-                Mandar a producir = producción sugerida del mes repartida por día (pronóstico + margen), con lotes de pastel, la demanda del domingo pasada al sábado y la promo activa si hay.
+                Mandar a producir = producción sugerida del mes repartida por día (pronóstico + margen), con lotes de pastel (menos de 8 no se produce; mínimo 10 y múltiplos de 5), la demanda del domingo pasada al sábado y la promo activa si hay.
                 {dailyHasInventory
-                  ? " En los días con inventario cargado se resta lo que sobra del stock fijo en cada sucursal (piso − stock fijo; lo que falta no se compensa) y todo el cuarto frío. Una sucursal sin stock fijo no descuenta nada. Nunca baja de 0; pasa el cursor sobre la cifra para ver qué se descontó."
+                  ? " En los días con inventario cargado primero se resta lo que sobra del stock fijo en cada sucursal (piso − stock fijo; lo que falta no se compensa) y todo el cuarto frío, y después se aplica el lote de pastel al neto; si el neto es 0 o menos, no se produce. Una sucursal sin stock fijo no descuenta nada. Pasa el cursor sobre la cifra para ver la cuenta."
                   : " Sin inventario cargado no se descuenta nada."}
                 {dailyHasInventory && branchStockTargets.size === 0
                   ? " El stock fijo cargado no trae las hojas por sucursal: vuelve a subir «Stock fijo» para restar lo que sobra en sucursales."
@@ -9059,6 +9109,8 @@ export {
   mapDailyColdRoomByProductDate,
   applyDailyBranchStockToPlantSuggestion,
   applyInventoryToProductionSuggestion,
+  applyInventoryThenProductionLot,
+  applyPromoUpliftRaw,
   collectSucursales,
   parseMonthlySummaryWorkbook,
   parseProductionReal,

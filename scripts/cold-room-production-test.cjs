@@ -58,6 +58,7 @@ async function main() {
     mapDailyColdRoomByProductDate,
     applyDailyBranchStockToPlantSuggestion,
     applyInventoryToProductionSuggestion,
+    applyInventoryThenProductionLot,
     applyPromoUpliftToQuantity,
     calculateForecast,
     calculateDailyForecast,
@@ -327,9 +328,10 @@ async function main() {
     "pedido de pastel no reaplica lote al restar sucursales"
   );
   assert(
-    cakeDay.aProducirDia === applyInventoryToProductionSuggestion(cakeDay.produccionBrutaDia, 8, 3),
-    "A producir de pastel = lote − sucursales − CF, sin rearmar a 10/15/20"
+    cakeDay.aProducirDia === applyInventoryThenProductionLot("FRUTAS GDE", cakeDay.baseSinLoteDia, 8, 3).aProducir,
+    "A producir de pastel = lote(pronóstico + margen − sucursales − CF): primero se resta, luego el lote"
   );
+  assert(cakeDay.netoAntesDeLoteDia <= 0 && cakeDay.aProducirDia === 0, "neto ≤ 0 → no se produce");
 
   const otherSkuCold = calculateDailyForecast({
     monthlyRows: gelatinaRows,
