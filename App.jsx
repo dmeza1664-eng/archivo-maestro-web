@@ -6063,46 +6063,32 @@ function exportToExcel(rows, summary) {
   XLSX.writeFile(wb, "dashboard_produccion_archivo_maestro.xlsx");
 }
 
-function exportDailyToExcel(rows, summary) {
-  const resumen = [
-    { Indicador: "Pronostico venta mensual", Valor: Number(summary.pronosticoVentaMensual.toFixed(2)) },
-    { Indicador: "Margen de seguridad mensual", Valor: Number(summary.colchonDiarioMensual.toFixed(2)) },
-    { Indicador: "Base con margen mensual", Valor: Number(summary.baseConColchonMensual.toFixed(2)) },
-    { Indicador: "Produccion sugerida mensual", Valor: summary.produccionSugeridaMensual },
-    { Indicador: "A producir mensual", Valor: summary.aProducirMensual ?? summary.produccionSugeridaMensual },
-    { Indicador: "Regla domingo", Valor: "Sin produccion; la demanda se cubre el sabado. La suma diaria iguala el total mensual." },
-    { Indicador: "Produccion real mensual", Valor: summary.produccionRealMensual },
-    { Indicador: "Diferencia mensual", Valor: summary.diferenciaMensual },
-    { Indicador: "Precision %", Valor: Number(summary.precision.toFixed(1)) },
-  ];
+// Excel del botón «Exportar diario»: una sola hoja con Día, Producto y «Mandar a producir»
+// (el mismo número que muestra la tabla diaria, con inventario restado y lote de pastel).
+const DAILY_EXPORT_COLUMNS = ["Día", "Producto", "Mandar a producir"];
 
-  const detalle = rows.map((row) => ({
-    Fecha: row.fechaDisplay,
-    Dia: row.dia,
+function buildDailyExportRows(rows) {
+  return rows.map((row) => ({
+    Día: row.fecha,
     Producto: row.producto,
-    "Promedio aplicado": Number(row.promedioUsado.toFixed(2)),
-    "Pronostico venta dia": Number(row.pronosticoVentaDia.toFixed(2)),
-    "Margen de seguridad diario": Number(row.colchonDiario.toFixed(2)),
-    "Base con margen de seguridad": Number((row.baseConColchonDia || 0).toFixed(2)),
-    "Regla operativa": row.reglaOperativa,
-    "Produccion bruta dia": row.produccionBrutaDia ?? row.produccionSugeridaDia,
-    "Inventario sucursales": row.hasDailyBranchStock ? row.inventarioSucursalesDia : "",
-    "Excedente sobre stock fijo": row.hasDailyBranchStock ? row.excedenteSucursalesDia : "",
-    "Pedido planta": row.produccionSugeridaDia,
-    "Cuarto frio": row.hasDailyColdRoom ? row.cuartoFrioDia : "",
-    "A producir": row.aProducirDia ?? row.produccionSugeridaDia,
-    "Produccion sugerida dia": row.produccionSugeridaDia,
-    "Promo activa": row.promoActiva ? row.promoEtiqueta || "Sí" : "",
-    "Produccion destino": row.produccionDestino || row.fecha,
-    "Produccion real dia": row.produccionRealDia ?? "",
-    "Diferencia piezas": row.diferenciaPiezas ?? "",
-    Estatus: STATUS_META[row.estatus]?.label || row.estatus,
+    "Mandar a producir": row.aProducirDia ?? row.produccionSugeridaDia,
   }));
+}
 
+function buildDailyExportWorkbook(rows) {
+  const data = buildDailyExportRows(rows);
+  const sheet = XLSX.utils.json_to_sheet(data, { header: DAILY_EXPORT_COLUMNS });
+  const productWidth = data.reduce((max, row) => Math.max(max, String(row.Producto || "").length), "Producto".length);
+  sheet["!cols"] = [{ wch: 12 }, { wch: Math.min(Math.max(productWidth + 2, 20), 60) }, { wch: 18 }];
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resumen), "Resumen mensual");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(detalle), "Pronostico diario");
-  XLSX.writeFile(wb, "produccion_diaria_sugerida.xlsx");
+  XLSX.utils.book_append_sheet(wb, sheet, "Mandar a producir");
+  return wb;
+}
+
+function exportDailyToExcel(rows) {
+  const fechas = [...new Set(rows.map((row) => row.fecha).filter(Boolean))].sort();
+  const sufijo = fechas.length === 1 ? fechas[0] : fechas.length ? `${fechas[0]}_a_${fechas[fechas.length - 1]}` : "sugerida";
+  XLSX.writeFile(buildDailyExportWorkbook(rows), `produccion_diaria_${sufijo}.xlsx`);
 }
 
 function exportWeeklyProgress(progress, selectedWeek, selectedMonth) {
@@ -8825,7 +8811,7 @@ function Dashboard({ session, onLogout }) {
               <h3>Producción diaria sugerida</h3>
               <p>«Mandar a producir» es la cantidad del día para planta. El mes se cambia arriba, junto a Congelar.</p>
             </div>
-            <button className="primary" onClick={() => exportDailyToExcel(filteredDailyRows, dailySummary)} disabled={!filteredDailyRows.length}>
+            <button className="primary" onClick={() => exportDailyToExcel(filteredDailyRows)} disabled={!filteredDailyRows.length}>
               <Download size={18} /> Exportar diario
             </button>
           </div>
@@ -9043,6 +9029,9 @@ function App() {
 }
 
 export {
+  DAILY_EXPORT_COLUMNS,
+  buildDailyExportRows,
+  buildDailyExportWorkbook,
   attachBranchStockTargets,
   branchStockKey,
   buildBranchStockTargetMap,
