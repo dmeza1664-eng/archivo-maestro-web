@@ -113,7 +113,23 @@ function monthClose(month, producto, cantidad) {
 }
 
 (async () => {
-  const { calculateForecast, calculateDailyForecast } = await loadApp();
+  const { calculateForecast, calculateDailyForecast, applyInventoryThenProductionLot, getProduccionSugerida } = await loadApp();
+  // Lote tras restar (oct 2026): neto = pronóstico + margen − sobrante − cuarto frío, y
+  // DESPUÉS el lote de planta de getProduccionSugerida (pastel: < 8 no se produce;
+  // 8→10, 13→15, 18→20). Se respeta esa forma de redondear: neto 3 queda en 0.
+  const lote = (base, suc, cf, producto = "FRUTAS GDE") => applyInventoryThenProductionLot(producto, base, suc, cf).aProducir;
+  assert.strictEqual(lote(10, 4, 6), 0, "neto 0 → 0");
+  assert.strictEqual(lote(9.4, 4, 6), 0, "neto negativo → 0");
+  assert.strictEqual(lote(9, 0, 6), 0, "neto 3 → 0 (regla actual: menos de 8 no se produce)");
+  assert.strictEqual(lote(11, 0, 3), 10, "neto 8 → mínimo 10");
+  assert.strictEqual(lote(9.5, 0, 0), 10, "neto 9.5 → mínimo 10");
+  assert.strictEqual(lote(16, 0, 6), 10, "neto 10 → 10");
+  assert.strictEqual(lote(20, 4, 3), 15, "neto 13 → 15");
+  assert.strictEqual(lote(20, 2, 0), 20, "neto 18 → 20");
+  assert.strictEqual(lote(12, 0, 0), getProduccionSugerida("FRUTAS GDE", 12), "sin restar nada = lote de hoy");
+  assert.strictEqual(lote(13, 4, 6, "GELATINA IND FRESA"), 3, "lo que no es pastel no lleva lote: neto 3 → 3");
+  assert.strictEqual(lote(12.2, 0, 2, "GELATINA IND FRESA"), 11, "lo que no es pastel redondea hacia arriba");
+  assert.strictEqual(lote(2, 4, 6, "GELATINA IND FRESA"), 0, "nunca baja de 0");
   const products = ["GELATINA IND FRESA", "FRUTAS GDE"];
   const monthlyRows = calculateForecast({
     stockRows: products.map((producto, i) => ({ producto, stock: 30, orden: i + 1 })),
@@ -130,7 +146,7 @@ function monthClose(month, producto, cantidad) {
     assert.strictEqual(row.produccionSugeridaDia, row.produccionBrutaDia, `${row.producto} ${row.fecha}: sin inventario, pedido = bruto`);
     assert.strictEqual(row.promedioUsado, row.pronosticoVentaDia, "Promedio aplicado es el mismo número que el pronóstico de venta");
   }
-  // Con inventario: Mandar a producir = bruto − (sucursales + cuarto frío), nunca menos de 0.
+  // Con inventario: primero se resta (sucursales + cuarto frío) y luego se aplica el lote.
   const fecha = "2026-07-02";
   const conInv = calculateDailyForecast({
     monthlyRows, ventasReales: [], realProduction: [], selectedMonth: "2026-07", dailyBufferPct: 10, activePromos: [],
@@ -141,7 +157,7 @@ function monthClose(month, producto, cantidad) {
   for (const row of conInv) {
     const base = sin.get(`${row.fecha}|${row.producto}`);
     const esperado = row.fecha !== fecha ? base.aProducirDia
-      : row.producto === "FRUTAS GDE" ? Math.max(0, base.produccionBrutaDia - 6) : 0;
+      : row.producto === "FRUTAS GDE" ? lote(base.baseSinLoteDia, 5, 1) : 0;
     assert.strictEqual(row.aProducirDia, esperado, `${row.producto} ${row.fecha}: producir con inventario`);
   }
   // Regla elegida (sep 2026): de sucursales solo se resta lo que sobra de su stock fijo.
@@ -190,15 +206,15 @@ function monthClose(month, producto, cantidad) {
     // FRUTAS: Plaza 3−2 = 1; Vistas 2−5 → 0 (no compensa); Allende sin stock fijo → 0. CF 1 completo.
     // GELATINA: Plaza 4−0 = 4; Vistas sin stock fijo (en blanco) → no se resta nada de sus 999.
     const descuento = row.producto === "FRUTAS GDE" ? 1 + 1 : 4;
-    assert.strictEqual(row.aProducirDia, Math.max(0, base.produccionBrutaDia - descuento), `${row.producto}: solo se resta el excedente`);
+    assert.strictEqual(row.aProducirDia, lote(base.baseSinLoteDia, descuento, 0, row.producto), `${row.producto}: solo se resta el excedente y luego el lote`);
     assert.strictEqual(row.sucursalesSinStockFijo, 1, `${row.producto}: una sucursal sin stock fijo`);
-    assert.match(row.reglaOperativa, /que sobra del stock fijo en sucursales/, "La leyenda dice qué se descontó.");
+    assert.match(row.reglaOperativa, /base − \d+ sobrante \(piso/, "La leyenda dice qué se descontó.");
     assert.match(row.reglaOperativa, /sin stock fijo: no se restan/, "La leyenda avisa la sucursal sin stock fijo.");
   }
   const frutas = excedente.find((row) => row.fecha === fecha && row.producto === "FRUTAS GDE");
   assert.strictEqual(frutas.excedenteSucursalesDia, 1);
-  assert.match(frutas.reglaOperativa, /menos 1 que sobra del stock fijo en sucursales \(piso 5 vs stock fijo 7\)/);
-  assert.match(frutas.reglaOperativa, /menos 1 en cuarto frío/);
+  assert.match(frutas.reglaOperativa, /− 1 sobrante \(piso 5 vs stock fijo 7\) − 1 cuarto frío = /);
+  assert.match(frutas.reglaOperativa, /^[\d.]+ base − /, "La leyenda empieza por la base sin lote.");
   // Respaldo viejo sin stock fijo por sucursal: no se resta nada de sucursales, solo el cuarto frío.
   const sinMapa = calculateDailyForecast({
     monthlyRows, ventasReales: [], realProduction: [], selectedMonth: "2026-07", dailyBufferPct: 10, activePromos: [],
@@ -206,7 +222,42 @@ function monthClose(month, producto, cantidad) {
     dailyColdRoom: [{ fecha, producto: "FRUTAS GDE", cantidad: 1 }],
     branchStockTargets: new Map(),
   }).find((row) => row.fecha === fecha && row.producto === "FRUTAS GDE");
-  assert.strictEqual(sinMapa.aProducirDia, Math.max(0, sin.get(`${fecha}|FRUTAS GDE`).produccionBrutaDia - 1));
+  assert.strictEqual(sinMapa.aProducirDia, lote(sin.get(`${fecha}|FRUTAS GDE`).baseSinLoteDia, 0, 1));
+
+  // Tabla diaria de un pastel de más volumen: el lote se aplica al neto y la leyenda
+  // muestra la cuenta en el orden nuevo.
+  const moka = calculateForecast({
+    stockRows: [{ producto: "MOKA GDE", stock: 30, orden: 1 }],
+    historicalVentas: ["2026-04", "2026-05", "2026-06"].map((m) => monthClose(m, "MOKA GDE", 700)),
+    bajas: [], existencias: [], realProduction: [], selectedMonth: "2026-07", dailyBufferPct: 10,
+  });
+  const mokaSin = calculateDailyForecast({ monthlyRows: moka, ventasReales: [], realProduction: [], selectedMonth: "2026-07", dailyBufferPct: 10, activePromos: [], dailyBranchStock: [], dailyColdRoom: [] })
+    .find((row) => row.fecha === fecha);
+  const b = mokaSin.baseSinLoteDia;
+  assert(b > 16, `base de MOKA suficiente para el caso (${b})`);
+  assert.strictEqual(mokaSin.aProducirDia, getProduccionSugerida("MOKA GDE", b), "sin inventario: lote de siempre");
+  const mokaCon = (cf) => calculateDailyForecast({
+    monthlyRows: moka, ventasReales: [], realProduction: [], selectedMonth: "2026-07", dailyBufferPct: 10, activePromos: [],
+    dailyBranchStock: [], dailyColdRoom: [{ fecha, producto: "MOKA GDE", cantidad: cf }],
+  }).find((row) => row.fecha === fecha);
+  const frac = b - Math.floor(b);
+  for (const [netoEntero, esperado, leyenda] of [
+    [13, 15, /= 13(\.\d)? → 15 \(múltiplo de 5\)$/],
+    [10, 10, /= 10(\.\d)? → 10( \(múltiplo de 5\))?$/],
+    [8, 10, /= 8(\.\d)? → mínimo 10$/],
+    [3, 0, /= 3(\.\d)? → 0 \(menor a 8: no producir\)$/],
+  ]) {
+    const row = mokaCon(Math.floor(b) - netoEntero);
+    assert(Math.abs(row.netoAntesDeLoteDia - (netoEntero + frac)) < 1e-9, `neto ${netoEntero}`);
+    assert.strictEqual(row.aProducirDia, esperado, `MOKA neto ${row.netoAntesDeLoteDia.toFixed(2)} → ${esperado}`);
+    assert.match(row.reglaOperativa, leyenda, `leyenda neto ${netoEntero}: ${row.reglaOperativa}`);
+    assert.match(row.reglaOperativa, /^[\d.]+ base − \d+ cuarto frío = /, "leyenda: base − cuarto frío = neto → lote");
+  }
+  const mokaCero = mokaCon(Math.ceil(b) + 4);
+  assert.strictEqual(mokaCero.aProducirDia, 0, "neto ≤ 0 → 0");
+  assert.match(mokaCero.reglaOperativa, /= −[\d.]+ → 0$/, `leyenda neto negativo: ${mokaCero.reglaOperativa}`);
+  // Página: la nota bajo la tabla explica el orden (primero restar, luego lote).
+  assert.match(page, /primero se resta[\s\S]*después se aplica el lote de pastel al neto/, "La nota explica el orden nuevo.");
 
   console.log("ui-hierarchy-test: página simplificada (carga, salud mínima, promo y «Mandar a producir») intacta");
 })().catch((error) => {
