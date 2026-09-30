@@ -7800,11 +7800,6 @@ function Dashboard({ session, onLogout }) {
     return [...keys].sort();
   }, [effectiveVentas]);
 
-  const historicalMonthKeys = useMemo(() => {
-    const keys = new Set(historicalVentas.map((record) => monthKeyFromRecord(record)).filter(Boolean));
-    return [...keys].sort();
-  }, [historicalVentas]);
-
   const liveForecast = useMemo(
     () =>
       calculateForecast({
@@ -8829,16 +8824,6 @@ function Dashboard({ session, onLogout }) {
               <span className="eyebrow">Paso 3 · Planta</span>
               <h3>Producción diaria sugerida</h3>
               <p>«Mandar a producir» es la cantidad del día para planta. El mes se cambia arriba, junto a Congelar.</p>
-              <strong className="row-counter">{formatNumber(dailyRows.length)} filas diarias generadas</strong>
-              {files.ventas && (
-                <p className={`real-validation-message ${historicalVentas.length ? "success" : "warning"}`}>
-                  {!effectiveVentas.length
-                    ? "El archivo de ventas se cargó, pero no se reconocieron registros. Revisa las columnas Fecha, Producto y Cantidad."
-                    : historicalVentas.length
-                      ? `${formatNumber(historicalVentas.length)} registros históricos reconocidos de ${historicalMonthKeys.join(", ")}.`
-                      : `Se reconocieron ${formatNumber(effectiveVentas.length)} registros, pero ninguno tiene fecha anterior a ${selectedMonth}. Revisa el mes del archivo.`}
-                </p>
-              )}
             </div>
             <button className="primary" onClick={() => exportDailyToExcel(filteredDailyRows, dailySummary)} disabled={!filteredDailyRows.length}>
               <Download size={18} /> Exportar diario

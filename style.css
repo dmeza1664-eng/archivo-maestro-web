@@ -606,13 +606,6 @@ label select {
   margin-top: 5px;
 }
 
-.row-counter {
-  color: #2e241c;
-  display: block;
-  font-size: 13px;
-  margin-top: 8px;
-}
-
 .loaded-context {
   color: #82705f;
   display: flex;
@@ -1586,7 +1579,6 @@ label {
   accent-color: var(--accent);
 }
 
-.row-counter,
 .validation-block-heading strong,
 .priority-row strong {
   color: var(--accent-strong);
