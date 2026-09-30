@@ -792,6 +792,29 @@ function sumDailyBranchStockByProductDate(rows) {
   return totals;
 }
 
+// Excedente = lo que sobra del stock fijo de cada sucursal: max(0, piso − stock
+// fijo). Lo que falta para llegar al stock fijo no se compensa con otra sucursal.
+// Sin stock fijo para esa sucursal y producto no se resta nada; se cuenta aparte.
+function sumDailyBranchExcessByProductDate(rows, targets) {
+  const totals = new Map();
+  for (const row of sanitizeDailyBranchStock(rows)) {
+    const key = `${row.fecha}|${normalizeProduct(row.producto)}`;
+    const entry = totals.get(key) || { inventario: 0, pisoConStockFijo: 0, stockFijo: 0, excedente: 0, sinStockFijo: 0, piezasSinStockFijo: 0 };
+    entry.inventario += row.cantidad;
+    const target = targets?.get(`${normalizeProduct(row.producto)}|${branchStockKey(row.sucursal)}`);
+    if (target === undefined) {
+      entry.sinStockFijo += 1;
+      entry.piezasSinStockFijo += row.cantidad;
+    } else {
+      entry.pisoConStockFijo += row.cantidad;
+      entry.stockFijo += target;
+      entry.excedente += Math.max(0, row.cantidad - target);
+    }
+    totals.set(key, entry);
+  }
+  return totals;
+}
+
 // El pedido de planta ya trajo lote y promo. Aquí se resta lo que la sucursal
 // ya tiene: importa no sobrerepartir, no volver a redondear a lote de pastel.
 function applyDailyBranchStockToPlantSuggestion(baseQuantity, stockOnHand) {
@@ -1427,6 +1450,80 @@ function parseStockSheet(sheet) {
     parsed.push({ producto: product, productoOriginal, stock, orden: parsed.length + 1 });
   }
   return parsed;
+}
+
+// Stock fijo por sucursal. El mismo archivo de stock ideal trae una hoja por
+// sucursal con la columna "STOCK DETERMINADO". Una celda en blanco es "sin
+// stock fijo" (no es 0): esa sucursal no descuenta nada de Mandar a producir.
+function branchStockKey(value) {
+  return norm(value)
+    .replace(/^SUC(URSAL)?\.?\s+/, "")
+    .replace(/^SUC\./, "")
+    .replace(/[^A-Z0-9]/g, "");
+}
+
+function parseBranchStockTargets(workbook) {
+  const targets = [];
+  for (const sheetName of workbook?.SheetNames || []) {
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: "" });
+    let headerIndex = -1;
+    let productCol = -1;
+    let stockCol = -1;
+    for (let i = 0; i < Math.min(rows.length, 6); i++) {
+      const row = rows[i].map(norm);
+      const productIndex = row.findIndex((cell) => cell.includes("PRODUCTO"));
+      const stockIndex = row.findIndex((cell) => cell.startsWith("STOCK DETERMINADO"));
+      if (productIndex >= 0 && stockIndex >= 0) {
+        headerIndex = i;
+        productCol = productIndex;
+        stockCol = stockIndex;
+        break;
+      }
+    }
+    if (headerIndex < 0) continue;
+
+    let sucursal = "";
+    for (let i = 0; i < headerIndex && !sucursal; i++) {
+      const labelIndex = rows[i].findIndex((cell) => norm(cell) === "SUCURSAL");
+      if (labelIndex >= 0) sucursal = String(rows[i].slice(labelIndex + 1).find((cell) => String(cell ?? "").trim()) ?? "").trim();
+    }
+    if (!sucursal) sucursal = String(sheetName).trim();
+
+    for (let i = headerIndex + 1; i < rows.length; i++) {
+      if (!isValidInventoryProduct(rows[i][productCol], rows[i])) continue;
+      const raw = rows[i][stockCol];
+      if (raw === "" || raw === null || raw === undefined || String(raw).trim() === "") continue;
+      targets.push({ sucursal, producto: normalizeProduct(rows[i][productCol]), stock: Math.max(0, toNumber(raw)) });
+    }
+  }
+  return targets;
+}
+
+// Se guarda dentro de cada fila del stock fijo para que viaje en el respaldo.
+function attachBranchStockTargets(stockRows, targets) {
+  const byProduct = new Map();
+  for (const target of targets || []) {
+    if (!byProduct.has(target.producto)) byProduct.set(target.producto, {});
+    byProduct.get(target.producto)[target.sucursal] = target.stock;
+  }
+  return (stockRows || []).map((row) => {
+    const porSucursal = byProduct.get(normalizeProduct(row.producto));
+    return porSucursal ? { ...row, stockSucursales: porSucursal } : row;
+  });
+}
+
+function buildBranchStockTargetMap(stockRows) {
+  const targets = new Map();
+  for (const row of stockRows || []) {
+    if (!row?.stockSucursales || typeof row.stockSucursales !== "object") continue;
+    const product = normalizeProduct(row.producto);
+    for (const [sucursal, stock] of Object.entries(row.stockSucursales)) {
+      const value = Number(stock);
+      if (!Number.isFinite(value)) continue;
+      targets.set(`${product}|${branchStockKey(sucursal)}`, Math.max(0, value));
+    }
+  }
+  return targets;
 }
 
 function parseExistencias(workbook) {
@@ -4831,10 +4928,13 @@ function calculateForecastModel(records, selectedMonth) {
   };
 }
 
-function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, selectedMonth, dailyBufferPct, activePromos = [], dailyBranchStock = [], dailyColdRoom = [] }) {
+function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, selectedMonth, dailyBufferPct, activePromos = [], dailyBranchStock = [], dailyColdRoom = [], branchStockTargets = null }) {
   const realDailyMap = aggregateDailyProductionRows(realProduction);
   const salesDailyMap = aggregateDailySalesRows(ventasReales);
   const stockByProductDate = sumDailyBranchStockByProductDate(dailyBranchStock);
+  // Con el mapa de stock fijo por sucursal solo se resta el excedente; sin mapa
+  // (llamadas antiguas) se resta todo el piso como antes.
+  const excessByProductDate = branchStockTargets ? sumDailyBranchExcessByProductDate(dailyBranchStock, branchStockTargets) : null;
   const coldByProductDate = mapDailyColdRoomByProductDate(dailyColdRoom);
   const monthDates = datesForMonth(selectedMonth);
   const monthKeySet = new Set(monthDates.map((date) => dateKey(date)));
@@ -4872,12 +4972,16 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
       const inventarioSucursalesDia = hasDailyBranchStock ? stockByProductDate.get(stockKey) : 0;
       const hasDailyColdRoom = coldByProductDate.has(stockKey);
       const cuartoFrioDia = hasDailyColdRoom ? coldByProductDate.get(stockKey) : 0;
+      const excessEntry = hasDailyBranchStock && excessByProductDate ? excessByProductDate.get(stockKey) || null : null;
+      const excedenteSucursalesDia = !hasDailyBranchStock ? 0 : excessByProductDate ? excessEntry?.excedente || 0 : inventarioSucursalesDia;
+      const sucursalesSinStockFijo = excessEntry?.sinStockFijo || 0;
+      const piezasSinStockFijo = excessEntry?.piezasSinStockFijo || 0;
       const produccionSugeridaDia = hasDailyBranchStock
-        ? applyDailyBranchStockToPlantSuggestion(produccionBrutaDia, inventarioSucursalesDia)
+        ? applyDailyBranchStockToPlantSuggestion(produccionBrutaDia, excedenteSucursalesDia)
         : produccionBrutaDia;
       const aProducirDia = applyInventoryToProductionSuggestion(
         produccionBrutaDia,
-        hasDailyBranchStock ? inventarioSucursalesDia : 0,
+        hasDailyBranchStock ? excedenteSucursalesDia : 0,
         hasDailyColdRoom ? cuartoFrioDia : 0
       );
       const realKey = `${product}|${row.key}`;
@@ -4908,8 +5012,18 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
       let reglaOperativa = getReglaOperativaLabel(product, productionWeights[index]);
       if (row.weekday === 0) reglaOperativa = "Domingo: no producir; demanda al sábado";
       else if (receivedSunday) reglaOperativa = `${reglaOperativa} · incluye demanda del domingo`;
-      if (hasDailyBranchStock && row.weekday !== 0) {
+      if (hasDailyBranchStock && row.weekday !== 0 && !excessByProductDate) {
         reglaOperativa = `${reglaOperativa} · menos ${formatNumber(inventarioSucursalesDia, 0)} en sucursales`;
+      } else if (hasDailyBranchStock && row.weekday !== 0) {
+        const conStock = excessEntry && excessEntry.pisoConStockFijo + excessEntry.stockFijo > 0
+          ? ` (piso ${formatNumber(excessEntry.pisoConStockFijo, 0)} vs stock fijo ${formatNumber(excessEntry.stockFijo, 0)})`
+          : "";
+        if (conStock) {
+          reglaOperativa = `${reglaOperativa} · menos ${formatNumber(excedenteSucursalesDia, 0)} que sobra del stock fijo en sucursales${conStock}`;
+        }
+        if (sucursalesSinStockFijo > 0) {
+          reglaOperativa = `${reglaOperativa} · ${sucursalesSinStockFijo} ${sucursalesSinStockFijo === 1 ? "sucursal" : "sucursales"} sin stock fijo: no se restan sus ${formatNumber(piezasSinStockFijo, 0)} pzs`;
+        }
       }
       if (hasDailyColdRoom && row.weekday !== 0) {
         reglaOperativa = `${reglaOperativa} · menos ${formatNumber(cuartoFrioDia, 0)} en cuarto frío`;
@@ -4928,6 +5042,9 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
         reglaOperativa,
         produccionBrutaDia,
         inventarioSucursalesDia,
+        excedenteSucursalesDia,
+        sucursalesSinStockFijo,
+        piezasSinStockFijo,
         hasDailyBranchStock,
         cuartoFrioDia,
         hasDailyColdRoom,
@@ -5920,6 +6037,7 @@ function exportDailyToExcel(rows, summary) {
     "Regla operativa": row.reglaOperativa,
     "Produccion bruta dia": row.produccionBrutaDia ?? row.produccionSugeridaDia,
     "Inventario sucursales": row.hasDailyBranchStock ? row.inventarioSucursalesDia : "",
+    "Excedente sobre stock fijo": row.hasDailyBranchStock ? row.excedenteSucursalesDia : "",
     "Pedido planta": row.produccionSugeridaDia,
     "Cuarto frio": row.hasDailyColdRoom ? row.cuartoFrioDia : "",
     "A producir": row.aProducirDia ?? row.produccionSugeridaDia,
@@ -7014,7 +7132,7 @@ function Dashboard({ session, onLogout }) {
   async function handleStockFile(file) {
     if (!file) return;
     const workbook = await readWorkbook(file);
-    setStockRows(parseStock(workbook));
+    setStockRows(attachBranchStockTargets(parseStock(workbook), parseBranchStockTargets(workbook)));
     const notice = assessStockSheetSelection(workbook);
     setStockSheetNotice(notice.missingTotal ? notice : null);
     if (notice.missingTotal) setToast({ tone: "warning", message: notice.message });
@@ -7969,6 +8087,7 @@ function Dashboard({ session, onLogout }) {
   const comparableForecast = showMissingReal || !hasAnyRealProduction ? forecast : forecast.filter((r) => r.hasRealData);
   const filtered = comparableForecast.filter((r) => r.producto.includes(norm(query)));
 
+  const branchStockTargets = useMemo(() => buildBranchStockTargetMap(stockRows), [stockRows]);
   const dailyRows = useMemo(
     () =>
       calculateDailyForecast({
@@ -7978,11 +8097,13 @@ function Dashboard({ session, onLogout }) {
         selectedMonth,
         dailyBufferPct,
         activePromos,
-        dailyBranchStock: [],
-        dailyColdRoom: [],
+        dailyBranchStock: effectiveDailyBranchStock,
+        dailyColdRoom: effectiveDailyColdRoom,
+        branchStockTargets,
       }),
-    [forecast, ventasRealesMes, effectiveRealProduction, selectedMonth, dailyBufferPct, activePromos]
+    [forecast, ventasRealesMes, effectiveRealProduction, selectedMonth, dailyBufferPct, activePromos, effectiveDailyBranchStock, effectiveDailyColdRoom, branchStockTargets]
   );
+  const dailyHasInventory = dailyRows.some((row) => row.hasDailyBranchStock || row.hasDailyColdRoom);
   const filteredDailyRows = dailyRows.filter((row) => {
     if (dailyDateFilter && row.fecha !== dailyDateFilter) return false;
     if (dailyProductQuery && !row.producto.includes(norm(dailyProductQuery))) return false;
@@ -8341,7 +8462,7 @@ function Dashboard({ session, onLogout }) {
             <div>
               <span className="eyebrow">Paso 1 · Datos</span>
               <h3>Cargar stock y ventas</h3>
-              <p>Con estos dos archivos se calcula el pronóstico. El stock se sube aquí; ya no hace falta capturar inventario del día.</p>
+              <p>Con stock fijo y ventas se calcula el pronóstico. El inventario de hoy es opcional y se resta de «Mandar a producir».</p>
             </div>
             <div className="loaded-context">
               <span>Mes: {selectedMonth || "Sin mes"}</span>
@@ -8387,6 +8508,12 @@ function Dashboard({ session, onLogout }) {
             multiple
             onFile={handleSalesFiles}
             fileName={files.ventas}
+          />
+          <UploadBox
+            title="Inventario de hoy"
+            description="Piso de venta de sucursales y cuarto frío del corte de la noche. Se resta de «Mandar a producir» del día en la columna Fecha del archivo."
+            onFile={handleDailyBranchStockFile}
+            fileName={files.dailyBranchStock}
           />
         </section>
 
@@ -8505,7 +8632,7 @@ function Dashboard({ session, onLogout }) {
             <KpiCard
               icon={ShieldCheck}
               label="Producción sugerida mensual"
-              value={formatNumber(dailySummary.produccionSugeridaMensual, 0)}
+              value={formatNumber(dailySummary.aProducirMensual, 0)}
               caption="Suma de «Mandar a producir» del mes"
             />
           </section>
@@ -8761,7 +8888,13 @@ function Dashboard({ session, onLogout }) {
             )}
             {dailyRows.length > 0 && (
               <small className="daily-stock-hint">
-                Mandar a producir = producción sugerida del mes repartida por día (pronóstico + margen), con lotes de pastel, la demanda del domingo pasada al sábado y la promo activa si hay. No se descuenta inventario.
+                Mandar a producir = producción sugerida del mes repartida por día (pronóstico + margen), con lotes de pastel, la demanda del domingo pasada al sábado y la promo activa si hay.
+                {dailyHasInventory
+                  ? " En los días con inventario cargado se resta lo que sobra del stock fijo en cada sucursal (piso − stock fijo; lo que falta no se compensa) y todo el cuarto frío. Una sucursal sin stock fijo no descuenta nada. Nunca baja de 0; pasa el cursor sobre la cifra para ver qué se descontó."
+                  : " Sin inventario cargado no se descuenta nada."}
+                {dailyHasInventory && branchStockTargets.size === 0
+                  ? " El stock fijo cargado no trae las hojas por sucursal: vuelve a subir «Stock fijo» para restar lo que sobra en sucursales."
+                  : ""}
               </small>
             )}
           </section>
@@ -8875,6 +9008,11 @@ function App() {
 }
 
 export {
+  attachBranchStockTargets,
+  branchStockKey,
+  buildBranchStockTargetMap,
+  parseBranchStockTargets,
+  sumDailyBranchExcessByProductDate,
   assessForecastFreezeReadiness,
   assessStockSheetSelection,
   analyzeForecastProductErrors,
