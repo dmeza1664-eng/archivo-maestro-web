@@ -1,0 +1,67 @@
+{
+  "id": "dia-muertos",
+  "estatus": "ESTACIONAL",
+  "decision": {
+    "fecha": "2026-10-03",
+    "aprobadaPor": "Ángel",
+    "nota": "Los 16 productos de pan de muerto / calabaza, incluidos PAN DE MUERTO CHOCOLATE GDE y PAN DE MUERTO IND CHOCOLATE, son ESTACIONAL. Se pronostican en temporada (octubre hasta el 2 de noviembre) y se dejan de pronosticar al cerrar la temporada."
+  },
+  "temporada": {
+    "inicioMesDia": "10-01",
+    "finMesDia": "11-02",
+    "mesesPronostico": ["10", "11"]
+  },
+  "demanda": "sucursal",
+  "crecimientoMin": 0.7,
+  "crecimientoMax": 1.6,
+  "productos": [
+    "CAJITA 3 LECHES CALABAZA",
+    "CALAVERA CHOCOLATE",
+    "CHAROLA C/8 PAN DE MUERTO",
+    "DEDOS DE BRUJA",
+    "HUESITOS PAN DE MUERTO",
+    "PAN DE MUERTO CHOCOLATE GDE",
+    "PAN DE MUERTO IND CHOCOLATE",
+    "PAN DE MUERTO IND RELLENO CAJETA 100GR",
+    "PAN DE MUERTO RELLENO CAJETA GDE 250GR",
+    "PAN MUERTO AZUCAR GDE 250GR",
+    "PAN MUERTO IND AZUCAR 50GR",
+    "PAN MUERTO IND RELLENO NUTELLA 100gr",
+    "PAN MUERTO RELLENO NUTELLA GDE 250GR",
+    "PANQUE DE CALABAZA",
+    "PASTEL DE CALABAZA CHICO",
+    "PAY DE CALABAZA GDE"
+  ],
+  "historiaSucursales": {
+    "_fuente": "CONTROL_MODELO_PRONOSTICO.md (3,889 sucursales; 399 sep / 3,490 oct / 0 nov) + PAN MUERTO IND AZUCAR 50GR = 2,174. Septiembre 2025 se asigna a ese SKU porque en 2026 solo él vendió en septiembre. El resto de octubre (1,715) se reparte con el peso de qtyTotal2025 del mapeo, ya sin Planta. Los dos de chocolate vendieron 0.",
+    "2025-09": {
+      "PAN MUERTO IND AZUCAR 50GR": 399
+    },
+    "2025-10": {
+      "CAJITA 3 LECHES CALABAZA": 129,
+      "CALAVERA CHOCOLATE": 138,
+      "CHAROLA C/8 PAN DE MUERTO": 199,
+      "DEDOS DE BRUJA": 137,
+      "HUESITOS PAN DE MUERTO": 149,
+      "PAN DE MUERTO CHOCOLATE GDE": 0,
+      "PAN DE MUERTO IND CHOCOLATE": 0,
+      "PAN DE MUERTO IND RELLENO CAJETA 100GR": 222,
+      "PAN DE MUERTO RELLENO CAJETA GDE 250GR": 81,
+      "PAN MUERTO AZUCAR GDE 250GR": 82,
+      "PAN MUERTO IND AZUCAR 50GR": 1775,
+      "PAN MUERTO IND RELLENO NUTELLA 100gr": 317,
+      "PAN MUERTO RELLENO NUTELLA GDE 250GR": 86,
+      "PANQUE DE CALABAZA": 62,
+      "PASTEL DE CALABAZA CHICO": 51,
+      "PAY DE CALABAZA GDE": 62
+    },
+    "2025-11": {}
+  },
+  "temporadaActualParcial": {
+    "_fuente": "ventas-2026-09-dia.json (espejo 28-sep-2026). Solo sucursales; Planta León excluida. El cierre 1–27 no trae estos SKU porque no estaban en el catálogo.",
+    "corte": "2026-09-28",
+    "2026-09": {
+      "PAN MUERTO IND AZUCAR 50GR": 555
+    }
+  }
+}

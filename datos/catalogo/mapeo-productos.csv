@@ -58,7 +58,7 @@ nProductoPK,cCodigo,cDescripcion,qtyTotal2025,producto,method,confidence,inCatal
 22,18,FRESA CH,5948,FRESA CH,exact_code,0.99,true,false,false,true,
 33,29,ZANAHORIA CH,5938,ZANAHORIA CH,exact_code,0.99,true,false,false,true,
 34,30,3 LECHES QUESO GDE,5754,3 LECHES QUESO GDE,exact_code,0.99,true,false,false,true,
-20494,11C,PAN MUERTO IND AZUCAR 50GR,5741,,no_match,0,false,false,false,false,
+20494,11C,PAN MUERTO IND AZUCAR 50GR,5741,PAN MUERTO IND AZUCAR 50GR,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
 250912,08m,PIÑA MED,5717,PINA MED,exact_code,0.99,true,false,false,true,
 57,54,PAY DE FRESA GDE,5636,PAY FRESA GDE,exact_code,0.99,true,false,false,true,
 20803,30ch,3 LECHES QUESO CH,5628,3 LECHES QUESO CH,exact_code,0.99,true,false,false,true,
@@ -128,7 +128,7 @@ nProductoPK,cCodigo,cDescripcion,qtyTotal2025,producto,method,confidence,inCatal
 243,37R,REBANADA DE CHESSECAKE GDE,1084,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 284,03R,REBANADA DE FRUTAS GDE,1080,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 193,18R,REBANADA DE FRESA CH,1045,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
-320,11b,PAN MUERTO IND RELLENO NUTELLA 100gr,1037,,no_match,0,false,false,false,false,
+320,11b,PAN MUERTO IND RELLENO NUTELLA 100gr,1037,PAN MUERTO IND RELLENO NUTELLA 100gr,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
 165,007r,ROSCA NATILLA DE FRUTOS SECOS,1000,,no_match,0,false,false,false,false,
 376,C002,CAPIROTADA DE LECHE IND,987,CAPIROTADA LECHE IND,exact_code,0.99,true,false,false,true,
 20860,24nR,REBANADA DE CHOCOLATE MED,978,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
@@ -151,11 +151,11 @@ nProductoPK,cCodigo,cDescripcion,qtyTotal2025,producto,method,confidence,inCatal
 76,73,BOLLOS C/6,733,BOLLOS C 6,exact_code,0.99,true,false,false,true,
 300918,323,Brownie IND,728,,no_match,0,false,false,false,false,
 750951,C009,CAPIROTADA TRADICIONAL CON PILONCILLO,727,CAPIROTADA TRADICIONAL CON PILONCILLO,exact_code,0.99,true,false,false,true,
-20767,11D,PAN DE MUERTO IND RELLENO CAJETA 100GR,727,,no_match,0,false,false,false,false,
+20767,11D,PAN DE MUERTO IND RELLENO CAJETA 100GR,727,PAN DE MUERTO IND RELLENO CAJETA 100GR,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
 20792,a06,CAJA BROWNIE CON 6 PIEZAS,723,,fuzzy_candidate_rejected,0.6,false,false,false,false,best_candidate=CAJA BROWNIES CON 4 PIEZAS;score=0.600
 800971,F014,DOMO DE GALLETAS OREJITAS,722,DOMO GALLETAS OREJITAS,exact_code,0.99,true,false,false,true,
 348,015r,rosca tradicional rellena CAJETA,677,,no_match,0,false,false,false,false,
-112,90,CHAROLA C/8 PAN DE MUERTO,651,,no_match,0,false,false,false,false,
+112,90,CHAROLA C/8 PAN DE MUERTO,651,CHAROLA C/8 PAN DE MUERTO,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
 173,011r,rosca volteado de piña grande,600,,no_match,0,false,false,false,false,
 30862,23nR,REBANADA DE FRUTAS MED,595,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 40862,10m,PASTEL DE CARAJILLO MEDIANO,581,,no_match,0,false,false,false,false,
@@ -169,17 +169,17 @@ nProductoPK,cCodigo,cDescripcion,qtyTotal2025,producto,method,confidence,inCatal
 170875,05m,CHEESECAKE FRUTAL GDE,521,CHESSECAKE FRUTAL GDE,exact_code,0.99,true,false,false,true,
 176,009r,rosca milenium,509,,no_match,0,false,false,false,false,
 412,70R,REBANADA DE FANTASIA 3/4,490,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
-190879,11f,HUESITOS PAN DE MUERTO,488,,no_match,0,false,false,false,false,
+190879,11f,HUESITOS PAN DE MUERTO,488,HUESITOS PAN DE MUERTO,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
 371,54R,REBANADA DE PAY DE FRESA GDE,476,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 20741,10c,PASTEL DE CARAJILLO GDE,472,,no_match,0,false,false,false,false,
 425,44R,REBANADA DE GELATINA MOSAICO GDE,470,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 327,20R,REBANADA DE FRUTAS CH,451,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
-20755,h05,CALAVERA CHOCOLATE,451,,no_match,0,false,false,false,false,
-530941,90b,DEDOS DE BRUJA,448,,no_match,0,false,false,false,false,
+20755,h05,CALAVERA CHOCOLATE,451,CALAVERA CHOCOLATE,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
+530941,90b,DEDOS DE BRUJA,448,DEDOS DE BRUJA,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
 20746,10cR,REBANADA DE PASTEL DE CARAJILLO GDE,437,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 86,82,PASTEL VAINILLA FLORETIN,431,,no_match,0,false,false,false,false,
 389,74R,REBANADA DE VAINILLA FANTASIA GDE,430,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
-190882,C3LC,CAJITA 3 LECHES CALABAZA,422,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=CAJITA 3 LECHES;score=0.667
+190882,C3LC,CAJITA 3 LECHES CALABAZA,422,CAJITA 3 LECHES CALABAZA,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
 241,23R,REBANADA DE MOKA CH,420,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 780964,225,GELATINA DE CAFE CH,411,,no_match,0,false,false,false,false,
 730945,326,CASERO DE PAPÁ,408,RAMO FLORAL 12CM 3 CAPAS,exact_code,0.99,true,false,false,true,
@@ -205,14 +205,14 @@ nProductoPK,cCodigo,cDescripcion,qtyTotal2025,producto,method,confidence,inCatal
 290,91R,REBANADA DE VAINILLA MARMOLEADO,293,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 250913,21nR,REBANADA DE PLANCHA 1/4,286,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 260,29R,REBANADA DE ZANAHORIA CH,282,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
-325,17A,PAN MUERTO RELLENO NUTELLA GDE 250GR,281,,no_match,0,false,false,false,false,
+325,17A,PAN MUERTO RELLENO NUTELLA GDE 250GR,281,PAN MUERTO RELLENO NUTELLA GDE 250GR,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
 870977,230,PASTEL DE LIMON 3 LECHES CH,279,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=3 LECHES CH;score=0.667
 760957,220,PASTEL PALETA PAYASO MEDIANO,276,,no_match,0,false,false,false,false,
 500939,01z,ZANAHORIA TRES LECHE MINI MEDIANO,275,,no_match,0,false,false,false,false,
 540941,90CAR,REBANADA DE PASTEL DE CALABAZA CHICO,271,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 1010980,246R,REBANADA DE PASTEL MILKY PP GDE,271,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
-324,15B,PAN MUERTO AZUCAR GDE 250GR,268,,no_match,0,false,false,false,false,
-20766,17C,PAN DE MUERTO RELLENO CAJETA GDE 250GR,267,,no_match,0,false,false,false,false,
+324,15B,PAN MUERTO AZUCAR GDE 250GR,268,PAN MUERTO AZUCAR GDE 250GR,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
+20766,17C,PAN DE MUERTO RELLENO CAJETA GDE 250GR,267,PAN DE MUERTO RELLENO CAJETA GDE 250GR,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
 780969,224R,REBANADA DE PASTEL CHOCONUGGS MEDIANO,266,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 205,1003,3/4 KG VAINILLA FAMILIAR,263,,no_match,0,false,false,false,false,
 190885,T01,FERRERO CORAZON CH,262,FERRERO CORAZON CH,exact_code,0.99,true,false,false,true,
@@ -241,8 +241,8 @@ nProductoPK,cCodigo,cDescripcion,qtyTotal2025,producto,method,confidence,inCatal
 700943,01ne,ROSCA NEVADA,207,,no_match,0,false,false,false,false,
 154,F105,PASTEL PRINCESA CORAZON CH,207,PASTEL PRINCESA CORAZON CH,exact_code,0.99,true,false,false,true,
 20740,97ba,CAJITA GALLETA BAJA EN AZUCAR,204,,no_match,0,false,false,false,false,
-20751,h01,PAY DE CALABAZA GDE,204,,no_match,0,false,false,false,false,
-20753,h03,PANQUE DE CALABAZA,204,,no_match,0,false,false,false,false,
+20751,h01,PAY DE CALABAZA GDE,204,PAY DE CALABAZA GDE,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
+20753,h03,PANQUE DE CALABAZA,204,PANQUE DE CALABAZA,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
 214,1012,1 KG PIÑERO SUPER FAMILIAR,202,,no_match,0,false,false,false,false,
 770959,217R,REBANADA DE PASTEL TURIN MEDIANO,202,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 20855,22n,ROSCA 3 LECHES CH,199,,fuzzy_candidate_rejected,0.667,false,false,false,false,best_candidate=3 LECHES CH;score=0.667
@@ -258,7 +258,7 @@ nProductoPK,cCodigo,cDescripcion,qtyTotal2025,producto,method,confidence,inCatal
 89,84,COCO CH,178,COCO CH,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
 980980,244,BOLSA DE GALLETAS NAVIDEÑAS 10pzas,172,,no_match,0,false,false,false,false,
 400934,P17,IMPERIAL CHOCOLATE MED,168,IMPERIAL CHOCOLATE MED,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
-530942,90CA,PASTEL DE CALABAZA CHICO,168,,no_match,0,false,false,false,false,
+530942,90CA,PASTEL DE CALABAZA CHICO,168,PASTEL DE CALABAZA CHICO,temporada_dia_muertos,1,true,false,false,false,estacional_muertos_2026-10-03
 460938,01p,GELATINA PIÑA COLADA,166,GELATINA PINA COLADA,exact_code,0.7,false,false,false,false,code_in_stock_sheet_but_name_not_in_parseStock_catalog;mapped_name_not_in_stock
 390929,01tR,REBANADA DE QUESO TIRAMISU CH,166,,slice_excluded,0,false,false,false,false,rebanada_or_slice_outside_wape_catalog
 590947,07ba,CHESSECAKE MANZANA MMD,166,,no_match,0,false,false,false,false,
