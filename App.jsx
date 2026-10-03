@@ -22,6 +22,7 @@ import {
   Warehouse,
 } from "lucide-react";
 import "./style.css";
+import diaDeMuertosTemporada from "./datos/catalogo/temporada-dia-muertos.json";
 
 const INVALID_PRODUCTS = new Set([
   "",
@@ -409,7 +410,8 @@ function loadStoredProductAliases() {
 
 function getOfficialProducts(stockRows) {
   const seen = new Set();
-  return stockRows
+  const rows = stockRows?.length ? attachSeasonalCatalog(stockRows) : [];
+  return rows
     .map((row) => normalizeProduct(row.producto))
     .filter((product) => {
       if (!product || seen.has(product)) return false;
@@ -1415,7 +1417,7 @@ function findStockSheet(workbook) {
 }
 
 function parseStock(workbook) {
-  return parseStockSheet(findStockSheet(workbook));
+  return attachSeasonalCatalog(parseStockSheet(findStockSheet(workbook)), workbook);
 }
 
 // El catalogo de productos sale de una sola hoja del stock ideal. El archivo
@@ -1437,12 +1439,15 @@ function assessStockSheetSelection(workbook) {
     if (missing.length) alternatives.push({ sheet: name, missing });
   }
 
-  const missingProducts = [...new Set(alternatives.flatMap((item) => item.missing))];
+  const missingProducts = [...new Set(alternatives.flatMap((item) => item.missing))]
+    .filter((product) => !isDiaDeMuertosSeasonalProduct(product));
   const sample = missingProducts.slice(0, 3).join(", ");
   return {
     chosenSheet,
     products: chosenProducts.size,
-    alternatives,
+    alternatives: alternatives
+      .map((item) => ({ ...item, missing: item.missing.filter((product) => !isDiaDeMuertosSeasonalProduct(product)) }))
+      .filter((item) => item.missing.length),
     missingTotal: missingProducts.length,
     message: missingProducts.length
       ? `El catálogo se tomó de la hoja "${chosenSheet}" con ${chosenProducts.size} productos. Otras hojas del archivo traen ${missingProducts.length} productos que esta no incluye (${sample}${missingProducts.length > 3 ? ", entre otros" : ""}). Confirma que sea la hoja correcta: el universo del pronóstico depende de esta elección.`
@@ -1485,6 +1490,223 @@ function parseStockSheet(sheet) {
     parsed.push({ producto: product, productoOriginal, stock, orden: parsed.length + 1 });
   }
   return parsed;
+}
+
+function isDistribucionChannel(value) {
+  const p = norm(value);
+  return Boolean(p) && /DISTRIBUC/.test(p);
+}
+
+function diaDeMuertosProductNames() {
+  return (diaDeMuertosTemporada.productos || []).map((name) => normalizeProduct(name)).filter(Boolean);
+}
+
+const DIA_DE_MUERTOS_PRODUCTS = new Set(diaDeMuertosProductNames());
+
+function isDiaDeMuertosSeasonalProduct(value) {
+  return DIA_DE_MUERTOS_PRODUCTS.has(normalizeProduct(value));
+}
+
+function diaDeMuertosSeasonBounds(year) {
+  const y = Number(year);
+  if (!Number.isFinite(y)) return null;
+  return {
+    start: new Date(y, 9, 1),
+    end: new Date(y, 10, 2),
+  };
+}
+
+function isDiaDeMuertosForecastMonth(monthKey) {
+  const month = Number(String(monthKey || "").slice(5, 7));
+  return month === 10 || month === 11;
+}
+
+function isDiaDeMuertosSeasonDate(value) {
+  const date = value instanceof Date ? value : parseDateCell(value);
+  if (!date || Number.isNaN(date.getTime())) return false;
+  const bounds = diaDeMuertosSeasonBounds(date.getFullYear());
+  if (!bounds) return false;
+  const t = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  return t >= bounds.start.getTime() && t <= bounds.end.getTime();
+}
+
+function diaDeMuertosHistoryTable() {
+  const table = {};
+  const add = (bucket) => {
+    for (const [month, byProduct] of Object.entries(bucket || {})) {
+      if (!/^\d{4}-\d{2}$/.test(month) || !byProduct || typeof byProduct !== "object") continue;
+      table[month] = table[month] || {};
+      for (const [product, qty] of Object.entries(byProduct)) {
+        const name = normalizeProduct(product);
+        const amount = toNumber(qty);
+        if (!name || !(amount > 0)) continue;
+        table[month][name] = (table[month][name] || 0) + amount;
+      }
+    }
+  };
+  add(diaDeMuertosTemporada.historiaSucursales);
+  add(diaDeMuertosTemporada.temporadaActualParcial);
+  return table;
+}
+
+function diaDeMuertosBuiltinRecords(beforeMonth) {
+  const records = [];
+  for (const [month, byProduct] of Object.entries(diaDeMuertosHistoryTable())) {
+    if (beforeMonth && month >= beforeMonth) continue;
+    const [year, monthNumber] = month.split("-").map(Number);
+    for (const [producto, cantidad] of Object.entries(byProduct)) {
+      records.push({
+        fecha: new Date(year, monthNumber - 1, 1),
+        producto,
+        cantidad,
+        monthlyTotal: true,
+        monthDays: new Date(year, monthNumber, 0).getDate(),
+        temporadaDiaMuertos: true,
+      });
+    }
+  }
+  return records;
+}
+
+function mergeDiaDeMuertosHistory(historicalVentas, selectedMonth) {
+  const rows = filterDemandSales(historicalVentas || []);
+  const seen = new Set();
+  for (const row of rows) {
+    const product = normalizeProduct(row.producto);
+    const month = monthKeyFromRecord(row);
+    if (product && month && toNumber(row.cantidad) > 0) seen.add(`${product}|${month}`);
+  }
+  const extra = diaDeMuertosBuiltinRecords(selectedMonth).filter((row) => {
+    const key = `${normalizeProduct(row.producto)}|${monthKeyFromRecord(row)}`;
+    return !seen.has(key);
+  });
+  return extra.length ? [...rows, ...extra] : rows;
+}
+
+function shouldAttachDiaDeMuertosCatalog(stockRows, workbook) {
+  if (workbook && (
+    matchSheetName(workbook, "TOTAL A TENER SUC.(EXIST.+DIST)")
+    || matchSheetName(workbook, "EXIST. SUCURSALES Y RESTANTE CF")
+  )) return true;
+  const rows = stockRows || [];
+  if (rows.some((row) => isDiaDeMuertosSeasonalProduct(row.producto))) return true;
+  return rows.length >= 40;
+}
+
+function attachSeasonalCatalog(stockRows, workbook) {
+  if (!shouldAttachDiaDeMuertosCatalog(stockRows, workbook)) return [...(stockRows || [])];
+  const rows = [...(stockRows || [])];
+  const have = new Set(rows.map((row) => normalizeProduct(row.producto)).filter(Boolean));
+  const stockFromWorkbook = new Map();
+  if (workbook) {
+    const oldSheet = matchSheetName(workbook, "EXIST. SUCURSALES Y RESTANTE CF");
+    if (oldSheet) {
+      for (const row of parseStockSheet(workbook.Sheets[oldSheet])) {
+        if (isDiaDeMuertosSeasonalProduct(row.producto)) {
+          stockFromWorkbook.set(normalizeProduct(row.producto), Number.isFinite(row.stock) ? Math.max(0, row.stock) : 0);
+        }
+      }
+    }
+  }
+  const originals = new Map((diaDeMuertosTemporada.productos || []).map((name) => [normalizeProduct(name), name]));
+  let added = 0;
+  for (const product of diaDeMuertosProductNames()) {
+    if (have.has(product)) continue;
+    const stock = stockFromWorkbook.has(product) ? stockFromWorkbook.get(product) : 0;
+    rows.push({
+      producto: product,
+      productoOriginal: originals.get(product) || product,
+      stock,
+      orden: rows.length + 1,
+      temporada: "dia-muertos",
+      estatusOperativo: "ESTACIONAL",
+    });
+    have.add(product);
+    added += 1;
+  }
+  return added ? rows : rows;
+}
+
+function diaDeMuertosMonthTotal(product, monthKey, monthlyData) {
+  const fromData = monthTotalFromData(monthlyData, monthKey);
+  if (fromData > 0) return fromData;
+  const fallback = diaDeMuertosHistoryTable()[monthKey]?.[normalizeProduct(product)] || 0;
+  return fallback;
+}
+
+function forecastDiaDeMuertosProduct(product, selectedMonth, records) {
+  const name = normalizeProduct(product);
+  if (!isDiaDeMuertosForecastMonth(selectedMonth)) {
+    return { total: 0, growth: 1, method: "Temporada de muertos: fuera de octubre–2 nov", priorMonth: "", thisSeasonToDate: 0, lastSeasonToDate: 0 };
+  }
+  const monthlyData = buildMonthlyForecastData(records || []);
+  const priorMonth = sameMonthPreviousYear(selectedMonth);
+  const lastYearSame = diaDeMuertosMonthTotal(name, priorMonth, monthlyData);
+  const year = String(selectedMonth).slice(0, 4);
+  const priorYear = String(Number(year) - 1);
+  const seasonSuffixes = ["09", "10", "11"];
+  let thisSeasonToDate = 0;
+  let lastSeasonToDate = 0;
+  for (const suffix of seasonSuffixes) {
+    const current = `${year}-${suffix}`;
+    const previous = `${priorYear}-${suffix}`;
+    if (current < selectedMonth) thisSeasonToDate += diaDeMuertosMonthTotal(name, current, monthlyData);
+    if (current < selectedMonth) lastSeasonToDate += diaDeMuertosMonthTotal(name, previous, monthlyData);
+  }
+  const lo = Number(diaDeMuertosTemporada.crecimientoMin) || 0.7;
+  const hi = Number(diaDeMuertosTemporada.crecimientoMax) || 1.6;
+  let growth = 1;
+  if (thisSeasonToDate > 0 && lastSeasonToDate > 0) {
+    growth = clamp(thisSeasonToDate / lastSeasonToDate, lo, hi);
+  }
+  let total = lastYearSame * growth;
+  if (String(selectedMonth).endsWith("-11") && total > 0) {
+    total *= 2 / Math.max(1, daysInMonthKey(selectedMonth));
+  }
+  const growthLabel = Math.abs(growth - 1) > 0.001 ? ` · ritmo ${growth.toFixed(2)} vs temporada anterior` : "";
+  return {
+    total,
+    growth,
+    method: `Temporada de muertos: mismo mes ${priorMonth || "año anterior"} (sucursales)${growthLabel}`,
+    priorMonth,
+    thisSeasonToDate,
+    lastSeasonToDate,
+  };
+}
+
+function weekdayAveragesForDiaDeMuertos(selectedMonth, monthlyTotal) {
+  const dates = datesForMonth(selectedMonth);
+  const seasonDates = dates.filter((date) => isDiaDeMuertosSeasonDate(date));
+  const perDay = seasonDates.length ? Math.max(0, monthlyTotal) / seasonDates.length : 0;
+  const totals = new Map();
+  const counts = new Map();
+  for (const date of seasonDates) {
+    const weekday = date.getDay();
+    totals.set(weekday, (totals.get(weekday) || 0) + perDay);
+    counts.set(weekday, (counts.get(weekday) || 0) + 1);
+  }
+  return new Map(WEEKDAYS.map((day) => {
+    const count = counts.get(day.index) || 0;
+    return [day.index, count ? (totals.get(day.index) || 0) / count : 0];
+  }));
+}
+
+function applyDiaDeMuertosDailyWindow(row) {
+  if (!isDiaDeMuertosSeasonalProduct(row.producto)) return row;
+  if (isDiaDeMuertosSeasonDate(row.fecha)) return row;
+  return {
+    ...row,
+    promedioUsado: 0,
+    pronosticoVentaDia: 0,
+    colchonDiario: 0,
+    baseConColchonDia: 0,
+    produccionBrutaDia: 0,
+    produccionSugeridaDia: 0,
+    aProducirDia: 0,
+    baseSinLoteDia: 0,
+    netoAntesDeLoteDia: row.hasDailyBranchStock || row.hasDailyColdRoom ? 0 : row.netoAntesDeLoteDia,
+    reglaOperativa: "Fuera de temporada de muertos (después del 2 de noviembre): no pronosticar.",
+  };
 }
 
 // Stock fijo por sucursal. El mismo archivo de stock ideal trae una hoja por
@@ -1674,6 +1896,7 @@ function looksLikeRollupOrTargetName(value) {
   if (p.includes("GRAL") || p.includes("GENERAL")) return true;
   if (p === "TOTAL" || p.startsWith("TOTAL ") || p.includes("TOTAL")) return true;
   if (p.includes("STOCK") && p.includes("SUCURSAL")) return true;
+  if (isDistribucionChannel(p)) return true;
   return false;
 }
 
@@ -3092,24 +3315,105 @@ function calculateForecast({
   activePromos = [],
   demandSeries = DEMAND_SERIES_DEFAULT,
 }) {
-  const usableHistoricalVentas = filterIncompleteHistoricalMonths(filterDemandSales(historicalVentas, demandSeries));
+  const catalogRows = attachSeasonalCatalog(stockRows);
+  const catalogHasSeasonal = catalogRows.some((row) => isDiaDeMuertosSeasonalProduct(row.producto));
+  const usableHistoricalVentas = filterIncompleteHistoricalMonths(
+    catalogHasSeasonal
+      ? mergeDiaDeMuertosHistory(filterDemandSales(historicalVentas, demandSeries), selectedMonth)
+      : filterDemandSales(historicalVentas, demandSeries)
+  );
   const completeHistoricalMonths = [...new Set(
     usableHistoricalVentas.map((row) => monthKeyFromRecord(row)).filter(Boolean)
   )].sort();
-  const officialProducts = getOfficialProducts(stockRows);
+  const officialProducts = getOfficialProducts(catalogRows);
   const ventasByProduct = groupByProduct(usableHistoricalVentas);
   const bajasByProduct = groupByProduct(bajas);
   const existMap = new Map(existencias.map((e) => [e.producto, e]));
   const realMap = new Map(aggregateProductionRows(realProduction).map((e) => [e.producto, e.cantidad]));
   const monthDates = datesForMonth(selectedMonth);
 
-  return stockRows.filter((s) => !isSliceProduct(s.producto) && !isPromotionalProduct(s.producto)).map((s) => {
+  return catalogRows.filter((s) => {
+    if (isSliceProduct(s.producto) || isPromotionalProduct(s.producto)) return false;
+    if (isDiaDeMuertosSeasonalProduct(s.producto) && !isDiaDeMuertosForecastMonth(selectedMonth)) return false;
+    return true;
+  }).map((s) => {
     const product = normalizeProduct(s.producto);
     const observed = collectProductRecords(ventasByProduct, product, s.producto, officialProducts);
     const history = prepareProductForecastHistory(observed, selectedMonth, completeHistoricalMonths);
     const v = history.records;
     const b = collectProductRecords(bajasByProduct, product, s.producto, officialProducts);
     const activePromo = findActivePromoForProductInMonth(activePromos, s.producto || product, selectedMonth);
+    if (isDiaDeMuertosSeasonalProduct(product)) {
+      const seasonal = forecastDiaDeMuertosProduct(product, selectedMonth, v);
+      const averages = weekdayAveragesForDiaDeMuertos(selectedMonth, seasonal.total);
+      const weekdayRow = buildWeekdayRow(averages);
+      let pronosticoVenta = 0;
+      let colchonOperativo = 0;
+      for (const date of monthDates) {
+        const pronosticoDia = isDiaDeMuertosSeasonDate(date) ? getWeekdayAverage(weekdayRow, weekdayLabel(date.getDay())) : 0;
+        pronosticoVenta += pronosticoDia;
+        colchonOperativo += pronosticoDia * (dailyBufferPct / 100);
+      }
+      const values = v.map((x) => x.cantidad);
+      const promedioHistorico = values.length ? values.reduce((a, n) => a + n, 0) / values.length : 0;
+      const promedioDiario = monthDates.length > 0 ? pronosticoVenta / monthDates.length : promedioHistorico;
+      const registrosHistoricos = v.length;
+      const bajasTotal = b.reduce((a, n) => a + n.cantidad, 0);
+      const ventasTotal = v.reduce((a, n) => a + n.cantidad, 0);
+      const tasaBajas = ventasTotal > 0 ? bajasTotal / ventasTotal : 0;
+      const bajasEsperadas = pronosticoVenta * tasaBajas;
+      const baseConColchon = pronosticoVenta + colchonOperativo;
+      const produccionSugerida = getProduccionSugerida(s.producto, baseConColchon);
+      const ex = existMap.get(product) || existMap.get(s.producto) || { totalSuc: 0, cf: 0, sumaSucCf: 0 };
+      const sumaSucCf = ex.sumaSucCf || ex.totalSuc + ex.cf;
+      const inventarioObjetivo = s.stock;
+      const produccionBalanceada = (inventarioObjetivo - sumaSucCf + produccionSugerida) / 2;
+      const produccionRecomendada = Math.max(0, getProduccionSugerida(s.producto, produccionBalanceada));
+      const hasRealData = realMap.has(product) || realMap.has(s.producto);
+      const produccionReal = hasRealData ? (realMap.get(product) ?? realMap.get(s.producto) ?? 0) : 0;
+      const diferenciaReal = produccionReal - produccionSugerida;
+      const precision = hasRealData && produccionReal > 0 ? precisionScore(produccionSugerida, produccionReal) : null;
+      return {
+        producto: s.producto,
+        orden: s.orden,
+        promedioHistorico,
+        promedioDiario,
+        registrosHistoricos,
+        ...weekdayRow,
+        demandaPronosticada: pronosticoVenta,
+        pronosticoVenta,
+        tasaBajas,
+        bajasEsperadas,
+        colchonOperativo,
+        baseConColchon,
+        reglaOperativa: getReglaOperativaLabel(s.producto, baseConColchon),
+        produccionSugerida,
+        inventarioObjetivo,
+        produccionBalanceada,
+        totalSuc: ex.totalSuc || 0,
+        cf: ex.cf || 0,
+        sumaSucCf,
+        produccionRecomendada,
+        tendenciaAplicada: seasonal.growth,
+        mesesUsados: [seasonal.priorMonth, selectedMonth].filter(Boolean).join(", "),
+        metodoPronostico: seasonal.method,
+        catalogCleanup: "",
+        promoActiva: Boolean(activePromo),
+        promoEtiqueta: formatPromoUpliftLabel(activePromo),
+        mesValidacionModelo: seasonal.priorMonth,
+        realValidacionModelo: seasonal.lastSeasonToDate,
+        pronosticoValidacionModelo: seasonal.thisSeasonToDate,
+        errorValidacionModelo: 0,
+        produccionReal,
+        hasRealData,
+        diferenciaReal,
+        precision,
+        confianza: registrosHistoricos > 0 ? 75 : 50,
+        estatus: "Sin dato real",
+        estatusOperativo: "ESTACIONAL",
+        temporada: "dia-muertos",
+      };
+    }
     const rawForecastModel = applyPriorYearPulseFade(
       applyEventPriorYearIndex(
         applyColdStartDormantPriorYearGuard(
@@ -4118,7 +4422,7 @@ function buildForecastHealth({
   dailyBufferPct = 10,
   currentForecastRows = null,
 } = {}) {
-  const catalog = stockRows.filter((row) => !isSliceProduct(row.producto) && !isPromotionalProduct(row.producto));
+  const catalog = attachSeasonalCatalog(stockRows).filter((row) => !isSliceProduct(row.producto) && !isPromotionalProduct(row.producto));
   const months = [...new Set(ventas.map((row) => monthKeyFromRecord(row)).filter(Boolean))].sort();
   const coverage = buildSalesMonthCoverage(ventas);
   const omitted = coverage.filter((row) => row.status === "partial-daily");
@@ -5113,7 +5417,7 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
         precisionVenta,
         estatusVenta,
       };
-    });
+    }).map(applyDiaDeMuertosDailyWindow);
   });
 }
 
@@ -5437,7 +5741,9 @@ function buildProductValidationSummary(dailyRows, forecastRows) {
       const diferencia = row.ventaRealMensual - row.pronosticoMensual;
       const precision = precisionScore(row.pronosticoMensual, row.ventaRealMensual);
       const errorPct =
-        row.ventaRealMensual > 0 ? (Math.abs(diferencia) / row.ventaRealMensual) * 100 : null;
+        isDistribucionChannel(row.producto)
+          ? null
+          : (row.ventaRealMensual > 0 ? (Math.abs(diferencia) / row.ventaRealMensual) * 100 : null);
       let estatus = "Sin dato real";
       if (row.diasConReal > 0) {
         if (precision !== null && precision >= 90) estatus = "Dentro de rango";
@@ -5784,6 +6090,7 @@ function buildMonthlyReviewRows({
   loadedExistencias,
   inputs = {},
   inventoryUsable = false,
+  selectedMonth = "",
 }) {
   const forecastByProduct = new Map(forecastRows.map((row) => [normalizeProduct(row.producto), row]));
   const existenceByProduct = new Map(
@@ -5797,7 +6104,9 @@ function buildMonthlyReviewRows({
     const product = normalizeProduct(sourceRow.producto);
     const forecastRow = forecastByProduct.get(product) || {};
     const input = inputs[product] || {};
-    const productStatus = MONTHLY_REVIEW_STATUSES.includes(input.status) ? input.status : "ACTIVO";
+    const productStatus = MONTHLY_REVIEW_STATUSES.includes(input.status)
+      ? input.status
+      : (isDiaDeMuertosSeasonalProduct(product) ? "ESTACIONAL" : "ACTIVO");
     const baseForecast = toNumber(sourceRow.pronosticoBase ?? sourceRow.pronosticoVenta);
     const baseOperational = toNumber(
       sourceRow.pronosticoOperativo ?? sourceRow.produccionSugerida ?? baseForecast * (1 + OPERATIONAL_MARGIN_PCT / 100)
@@ -5842,8 +6151,18 @@ function buildMonthlyReviewRows({
     } else if (productStatus === "ESTACIONAL") {
       proposed = baseOperational;
       marginPct = OPERATIONAL_MARGIN_PCT;
-      reasons.unshift("Producto ESTACIONAL: requiere confirmar su temporada; no se ajustó automáticamente.");
-      severity = "warn";
+      if (isDiaDeMuertosSeasonalProduct(product) && isDiaDeMuertosForecastMonth(selectedMonth)) {
+        reasons.unshift("Producto ESTACIONAL de muertos: temporada 1 oct–2 nov, aprobada por Ángel el 2026-10-03.");
+        severity = "ok";
+      } else if (isDiaDeMuertosSeasonalProduct(product)) {
+        reasons.unshift("Producto ESTACIONAL de muertos: fuera de temporada no se produce.");
+        proposed = 0;
+        marginPct = 0;
+        severity = "warn";
+      } else {
+        reasons.unshift("Producto ESTACIONAL: requiere confirmar su temporada; no se ajustó automáticamente.");
+        severity = "warn";
+      }
     } else {
       proposed = Math.max(0, getProduccionSugerida(product, baseForecast * (1 + marginPct / 100) - deductedInventory));
       if (!inventoryUsable && (hasLoadedInventory || capturedInventory > 0)) {
@@ -5926,7 +6245,7 @@ function exportMonthlyReview({ rows, review, selectedMonth, sourceVersion }) {
     { Regla: "Sin look-ahead", Detalle: "Solo usa información anterior al mes objetivo, estatus, notas y existencias capturadas." },
     { Regla: "Volatilidad", Detalle: "Colchón de 8%, 12% o 15% según la variación de los últimos seis meses disponibles." },
     { Regla: "Existencias", Detalle: "Solo se descuentan si la fecha de corte cae entre el mes anterior y el mes planificado." },
-    { Regla: "Estatus", Detalle: "BAJA y BAJO PEDIDO salen del plan regular. ESTACIONAL exige confirmación manual." },
+    { Regla: "Estatus", Detalle: "BAJA y BAJO PEDIDO salen del plan regular. ESTACIONAL de muertos (1 oct–2 nov) se pronostica en temporada; el resto de ESTACIONAL exige confirmación manual." },
   ];
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summary), "Resumen");
@@ -7876,8 +8195,9 @@ function Dashboard({ session, onLogout }) {
       loadedExistencias: effectiveExistencias,
       inputs: monthlyReview.inputs,
       inventoryUsable: inventoryCutoff.status === "fresh",
+      selectedMonth,
     }),
-    [monthlyReviewSourceRows, liveForecast, historicalVentas, effectiveExistencias, monthlyReview.inputs, inventoryCutoff.status]
+    [monthlyReviewSourceRows, liveForecast, historicalVentas, effectiveExistencias, monthlyReview.inputs, inventoryCutoff.status, selectedMonth]
   );
   const filteredMonthlyReviewRows = useMemo(
     () => monthlyReviewRows.filter((row) => {
@@ -9125,6 +9445,16 @@ export {
   isPromotionalProduct,
   isOperationalCakeProduct,
   applyCatalogOutlierCleanup,
+  attachSeasonalCatalog,
+  isDiaDeMuertosSeasonalProduct,
+  isDiaDeMuertosForecastMonth,
+  isDiaDeMuertosSeasonDate,
+  isDistribucionChannel,
+  mergeDiaDeMuertosHistory,
+  forecastDiaDeMuertosProduct,
+  applyDiaDeMuertosDailyWindow,
+  buildMonthlyReviewRows,
+  buildProductValidationSummary,
 };
 
 if (typeof document !== "undefined") {
