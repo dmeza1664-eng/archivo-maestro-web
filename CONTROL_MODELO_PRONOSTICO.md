@@ -1,10 +1,43 @@
 # Control del modelo de pronostico
 
-Ultima actualizacion: 2026-09-28
+Ultima actualizacion: 2026-10-03
 
 > **Aviso de reproducibilidad.** Las cifras de este documento anteriores al
 > 2026-08-21 se midieron sobre un catalogo distinto al actual. Ver la seccion
 > "El catalogo cambio de hoja" antes de comparar contra cualquier corrida nueva.
+
+## Temporada de pan de muerto / calabaza (2026-10-03, Ángel)
+
+Decisión de Ángel (dueño del repo), 2026-10-03: los 16 productos de pan de
+muerto y calabaza se planean en el sistema. Los dos de chocolate
+(`PAN DE MUERTO CHOCOLATE GDE` y `PAN DE MUERTO IND CHOCOLATE`) son
+**ESTACIONAL**, no BAJA. Ver `patch-status-panmuerto.cjs` y
+`datos/catalogo/temporada-dia-muertos.json`.
+
+- El catálogo operativo ya no depende de que la hoja
+  `TOTAL A TENER SUC.(EXIST.+DIST)` los traiga. `parseStock` y
+  `calculateForecast` los agregan solos (stock de
+  `EXIST. SUCURSALES Y RESTANTE CF` si viene en el archivo; si no, 0).
+  **No hace falta volver a subir el stock ideal ni reescribir la hoja.**
+- Ventana: 1 de octubre al 2 de noviembre. En octubre y noviembre salen
+  fila de pronóstico y «Mandar a producir». Desde el 3 de noviembre el
+  diario queda en 0; en diciembre ya no hay fila.
+- Demanda = venta de sucursales (`filterDemandSales`). Planta León no
+  entra. Distribución no muestra porcentaje de error.
+- Pronóstico: mismo mes de la temporada anterior (sucursales). Si ya hay
+  venta de esta temporada anterior al mes (septiembre), se escala por
+  `esta / anterior` acotado a [0.7, 1.6]. El respaldo embebido reproduce
+  el total documentado de 2025: 3,889 piezas de sucursal (399 sep, 3,490
+  oct, 0 nov); `PAN MUERTO IND AZUCAR 50GR` = 2,174. Septiembre 2025 se
+  asigna a ese SKU (en 2026 solo él vendió en septiembre). El resto de
+  octubre 2025 (1,715) se reparte con el peso de `qtyTotal2025` del mapeo.
+  Los dos de chocolate van en 0. Si el usuario carga la venta 2025 de
+  sucursales, esa cifra gana al respaldo.
+- Septiembre 2026 al 28 (sucursales, sin Planta): solo
+  `PAN MUERTO IND AZUCAR 50GR`, 555 piezas. Con eso, octubre de ese SKU
+  = 1,775 × (555/399) ≈ 2,469. El resto de la línea copia octubre 2025.
+  Total octubre de los 16 ≈ 4,184 (+4,184 sobre el catálogo regular;
+  el resto de SKU no cambia).
 
 ## Pronóstico automático y pruebas sin integrar (2026-09-28, modelo `d0e61f7`)
 
@@ -550,7 +583,8 @@ trae productos que la elegida no incluye. No decide cual hoja es la correcta; so
 universo vuelva a cambiar en silencio.
 
 Pendiente de direccion: definir cual hoja es el stock ideal oficial, o si el catalogo debe ser la
-union de todas, y si la temporada de pan de muerto se planea este año en el sistema.
+union de todas. La temporada de pan de muerto **sí se planea** (Ángel, 2026-10-03): los 16
+ESTACIONAL se inyectan aunque la hoja actual no los traiga.
 
 ## Avance semanal
 
@@ -612,8 +646,8 @@ Fuente detallada: `PRONOSTICO_JULIO_CONGELADO.md`.
 - [x] Decidir si las 3,156 piezas de pasteleria fuera del catalogo entran al stock ideal: no entran.
       Los accesorios tampoco. El universo se queda en 111 productos.
 - [x] Capturar estatus operativo por producto: 25 BAJA, 14 ESTACIONAL, 1 BAJO PEDIDO, 71 ACTIVO.
-- [ ] Confirmar si PAN DE MUERTO CHOCOLATE GDE y PAN DE MUERTO IND CHOCOLATE son BAJA o ESTACIONAL;
-      como BAJA nunca se produciran en octubre.
+- [x] Confirmar si PAN DE MUERTO CHOCOLATE GDE y PAN DE MUERTO IND CHOCOLATE son BAJA o ESTACIONAL;
+      **ESTACIONAL** (Ángel, 2026-10-03). Entran a la temporada; la pasada vendieron 0.
 - [ ] Verificar que las lineas fuera de alcance se planeen por otra via antes de septiembre.
 - [x] Corregir el descarte silencioso del detalle diario cuando existe total mensual del mismo mes:
       ahora se conserva la forma diaria y se ajusta su nivel al total declarado.
@@ -629,8 +663,9 @@ Fuente detallada: `PRONOSTICO_JULIO_CONGELADO.md`.
 - [ ] **Vencido.** Congelar agosto antes de conocer sus ventas no ocurrio; agosto ya esta corrido.
       Aplica ahora a septiembre, y depende de definir la hoja oficial del catalogo.
 - [ ] Definir con direccion cual hoja del stock ideal es el catalogo oficial.
-- [ ] Decidir si la temporada de pan de muerto se planea en el sistema: 3,889 piezas el año pasado,
-      concentradas en octubre. Hoy esos 16 productos no existen en el catalogo.
+- [x] Decidir si la temporada de pan de muerto se planea en el sistema: sí, 2026-10-03 (Ángel).
+      Los 16 ESTACIONAL se agregan al catálogo aunque la hoja actual no los traiga;
+      octubre–2 nov se pronostican; después de la temporada no.
 - [ ] Rehacer la medicion del efecto del estatus cuando el catalogo quede definido; la de agosto
       cruzo listas que no empatan.
 - [ ] Revisar si septiembre 2025 tuvo una caida como la de julio 2025 antes de fijar el plan de

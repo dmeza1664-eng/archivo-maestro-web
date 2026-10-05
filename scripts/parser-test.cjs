@@ -168,7 +168,9 @@ async function main() {
     ],
   });
   const stockRows = parseStock(stockWorkbook);
-  assert(stockRows.length === 1 && stockRows[0].stock === 113, "stock debe leer la hoja TOTAL A TENER y la columna STOCK");
+  assert(stockRows.some((row) => row.producto === "BOLILLO" && row.stock === 113), "stock debe leer la hoja TOTAL A TENER y la columna STOCK");
+  assert(stockRows.filter((row) => row.producto === "BOLILLO").length === 1, "BOLILLO no se duplica al agregar la temporada");
+  assert(stockRows.some((row) => /PAN MUERTO IND AZUCAR/.test(row.producto)), "la temporada de muertos se agrega aunque no esté en la hoja actual");
 
   const existenciasWorkbook = workbookFromSheets({
     "EXISTENCIA EN SUCURSALES": [
@@ -195,9 +197,8 @@ async function main() {
   });
   const drift = assessStockSheetSelection(catalogDriftWorkbook);
   assert(drift.chosenSheet === "TOTAL A TENER SUC.(EXIST.+DIST)", "el catalogo debe seguir saliendo de la hoja prioritaria");
-  assert(drift.missingTotal === 1, "debe contar los productos que la hoja elegida no trae");
-  assert(/PAN MUERTO IND AZUCAR 50GR/.test(drift.message), "la advertencia debe nombrar el producto ausente");
-  assert(drift.alternatives[0]?.sheet === "EXIST. SUCURSALES Y RESTANTE CF", "debe decir en que hoja si estaba");
+  assert(drift.missingTotal === 0, "los SKU de muertos ya no advierten: se agregan solos al catálogo");
+  assert(parseStock(catalogDriftWorkbook).some((row) => /PAN MUERTO IND AZUCAR/.test(row.producto)), "parseStock incluye pan de muerto sin rehacer la hoja actual");
 
   const catalogAgreesWorkbook = workbookFromSheets({
     "TOTAL A TENER SUC.(EXIST.+DIST)": [
