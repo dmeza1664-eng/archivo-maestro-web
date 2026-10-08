@@ -1,0 +1,11 @@
+external_id,name,record_type,city,country,phone,email,industry,description,lifecyclestage
+pepes-suc-1,Suc. Centro,sucursal,León,Mexico,,,Food Production,Sucursal de Pastelería Pepe (fixture del repo; no es un dump de pepes_devBI).,customer
+pepes-suc-2,Suc. Norte,sucursal,León,Mexico,,,Food Production,Sucursal de Pastelería Pepe (fixture del repo; no es un dump de pepes_devBI).,customer
+pepes-suc-3,Suc. Amado Nervo,sucursal,León,Mexico,,,Food Production,Sucursal de Pastelería Pepe (fixture del repo; no es un dump de pepes_devBI).,customer
+pepes-suc-9,Planta León,planta,León,Mexico,,,Food Production,Planta / surtido interno. No es sucursal de venta al público.,customer
+pepes-suc-ejemplo-leon,Suc. León,sucursal,León,Mexico,,,Food Production,Sucursal de Pastelería Pepe (fixture del repo; no es un dump de pepes_devBI).,customer
+pepes-suc-ejemplo-cayetano,San Cayetano,sucursal,León,Mexico,,,Food Production,Sucursal de Pastelería Pepe (fixture del repo; no es un dump de pepes_devBI).,customer
+pepes-suc-ejemplo-hidalgo,Villa Hidalgo,sucursal,León,Mexico,,,Food Production,Sucursal de Pastelería Pepe (fixture del repo; no es un dump de pepes_devBI).,customer
+pepes-suc-ejemplo-plaza,Suc. Plaza,sucursal,León,Mexico,,,Food Production,Sucursal de Pastelería Pepe (fixture del repo; no es un dump de pepes_devBI).,customer
+pepes-suc-ejemplo-vistas,Suc. Vistas,sucursal,León,Mexico,,,Food Production,Sucursal de Pastelería Pepe (fixture del repo; no es un dump de pepes_devBI).,customer
+pepes-suc-ejemplo-allende,Suc. Allende,sucursal,León,Mexico,,,Food Production,Sucursal de Pastelería Pepe (fixture del repo; no es un dump de pepes_devBI).,customer

@@ -1,0 +1,35 @@
+{
+  "_SINTETICO": "DATOS SINTÉTICOS. Tiendas de consignación de galletas INVENTADAS para el prototipo de importación CRM. No son tiendas reales ni teléfonos reales de Pastelería Pepe. El esquema (nombre, municipio, colonia, direccion, zona, telefono, encargado) copia el de Firestore stores documentado en dmeza1664-eng/dashboard-pepes.",
+  "tiendas": [
+    {
+      "storeId": "EJEMPLO-G001",
+      "nombre": "Abarrotes El Farol (ejemplo)",
+      "municipio": "León",
+      "colonia": "Centro",
+      "direccion": "Calle Ejemplo 100",
+      "zona": "Ruta Norte",
+      "telefono": "+525500000001",
+      "encargado": "Ana Ejemplo"
+    },
+    {
+      "storeId": "EJEMPLO-G002",
+      "nombre": "Minisuper Los Pinos (ejemplo)",
+      "municipio": "León",
+      "colonia": "San Juan Bosco",
+      "direccion": "Av. Ejemplo 250",
+      "zona": "Ruta Sur",
+      "telefono": "+525500000002",
+      "encargado": "Luis Ejemplo"
+    },
+    {
+      "storeId": "EJEMPLO-G003",
+      "nombre": "Papelería y Abarrotes Sol (ejemplo)",
+      "municipio": "Silao",
+      "colonia": "Centro",
+      "direccion": "Plaza Ejemplo 8",
+      "zona": "Ruta Silao",
+      "telefono": "+525500000003",
+      "encargado": "Marta Ejemplo"
+    }
+  ]
+}
