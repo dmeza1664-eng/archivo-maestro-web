@@ -1,0 +1,22 @@
+{
+  "generado": "2026-10-08T02:04:14.143Z",
+  "aviso": "Datos de ejemplo / catálogo. No hay clientes de mostrador identificados. No conectar a producción.",
+  "fuentes": {
+    "sucursales": "fixtures de prueba del repo (no es dbo.Sucursales de pepes_devBI)",
+    "productos": "datos/catalogo/mapeo-productos.csv",
+    "tiendas_galletas": "scripts/crm/fixtures/tiendas-galletas-sinteticas.json"
+  },
+  "filas": {
+    "empresas-sucursales.csv": 10,
+    "productos.csv": 113,
+    "contactos-tiendas-galletas.csv": 3
+  },
+  "mapeo_crm": {
+    "HubSpot": "empresas → Companies; contactos → Contacts; productos → Products. Import API /crm/imports.",
+    "Zoho CRM": "empresas → Accounts; contactos → Contacts (Last Name obligatorio); productos → Products.",
+    "Kommo": "empresas → Companies; contactos → Contacts (phone como identificador).",
+    "Bitrix24": "empresas → Companies; contactos → Contacts; CSV nativo o crm.item.batchImport.",
+    "Odoo": "empresas/contactos → res.partner (is_company); productos → product.template. Usar External ID.",
+    "Pipedrive": "empresas → Organizations; contactos → Persons; productos → Products."
+  }
+}

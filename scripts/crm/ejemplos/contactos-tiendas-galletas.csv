@@ -1,0 +1,4 @@
+external_id,firstname,lastname,phone,email,company,company_external_id,city,address,zone,jobtitle,lifecyclestage
+pepes-galleta-EJEMPLO-G001,Ana,Ejemplo,+525500000001,,Abarrotes El Farol (ejemplo),pepes-galleta-tienda-EJEMPLO-G001,León,"Calle Ejemplo 100, Centro",Ruta Norte,Encargado de tienda (consignación galletas),lead
+pepes-galleta-EJEMPLO-G002,Luis,Ejemplo,+525500000002,,Minisuper Los Pinos (ejemplo),pepes-galleta-tienda-EJEMPLO-G002,León,"Av. Ejemplo 250, San Juan Bosco",Ruta Sur,Encargado de tienda (consignación galletas),lead
+pepes-galleta-EJEMPLO-G003,Marta,Ejemplo,+525500000003,,Papelería y Abarrotes Sol (ejemplo),pepes-galleta-tienda-EJEMPLO-G003,Silao,"Plaza Ejemplo 8, Centro",Ruta Silao,Encargado de tienda (consignación galletas),lead
