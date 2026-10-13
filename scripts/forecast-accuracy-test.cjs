@@ -1110,6 +1110,132 @@ async function main() {
     "sin año anterior el guard no debe tocar el modelo"
   );
 
+  // Diario + cierre del mismo mes: la tarjeta de salud no debe sumar ambas.
+  // El modelo ya usa el cierre como total; el WAPE debe hacer lo mismo.
+  const sepStock = [
+    { producto: "FRUTAS GDE", stock: 40, orden: 1 },
+    { producto: "MOKA GDE", stock: 40, orden: 2 },
+  ];
+  const sepHistory = {
+    "FRUTAS GDE": {
+      "2025-07": 480, "2025-08": 500, "2025-09": 492,
+      "2026-06": 503, "2026-07": 525, "2026-08": 518,
+    },
+    "MOKA GDE": {
+      "2025-07": 600, "2025-08": 620, "2025-09": 604,
+      "2026-06": 624, "2026-07": 650, "2026-08": 640,
+    },
+  };
+  const sepCloseQty = { "FRUTAS GDE": 510, "MOKA GDE": 630 };
+  const sepHistoryRows = [];
+  for (const [product, months] of Object.entries(sepHistory)) {
+    for (const [month, qty] of Object.entries(months)) {
+      sepHistoryRows.push(monthClose(month, product, qty));
+    }
+  }
+  const sepCloseRows = Object.entries(sepCloseQty).map(([product, qty]) => ({
+    ...monthClose("2026-09", product, qty),
+    sourceFile: "ventas septiembre 2026.xlsx",
+  }));
+  function septemberDaily(product, total) {
+    const rows = [];
+    for (let day = 1; day <= 30; day += 1) {
+      rows.push({
+        fecha: new Date(2026, 8, day),
+        producto: product,
+        cantidad: total / 30,
+        sourceFile: "VENTAS DIARIO SEPTIEMBRE 2026.xlsx",
+      });
+    }
+    return rows;
+  }
+  const sepDailyRows = Object.entries(sepCloseQty).flatMap(([product, qty]) => septemberDaily(product, qty));
+  const closeOnlyVentas = [...sepHistoryRows, ...sepCloseRows];
+  const dailyOnlyVentas = [...sepHistoryRows, ...sepDailyRows];
+  const sessionBoth = [...sepHistoryRows, ...sepCloseRows, ...sepDailyRows];
+  const baseAndSession = [
+    ...sepHistoryRows,
+    ...sepCloseRows,
+    ...sepDailyRows,
+    ...sepDailyRows.map((row) => ({ ...row, sourceFile: "Base de datos", databaseSynced: true })),
+  ];
+
+  const sepActualClose = app.actualSalesByProductForMonth(sessionBoth, "2026-09");
+  const sepActualDaily = app.actualSalesByProductForMonth(dailyOnlyVentas, "2026-09");
+  const sepActualMixed = app.actualSalesByProductForMonth(baseAndSession, "2026-09");
+  assert(sepActualClose.get("FRUTAS GDE") === 510, "con diario+cierre el actual de FRUTAS es el cierre, no la suma");
+  assert(sepActualClose.get("MOKA GDE") === 630, "con diario+cierre el actual de MOKA es el cierre");
+  assert(Math.abs(sepActualDaily.get("FRUTAS GDE") - 510) < 1e-6, "solo diario suma el mes una vez");
+  assert(sepActualMixed.get("FRUTAS GDE") === 510, "diario de base + diario de sesión no cuenta si hay cierre");
+
+  const naiveSepActual = sessionBoth
+    .filter((row) => `${row.fecha.getFullYear()}-${String(row.fecha.getMonth() + 1).padStart(2, "0")}` === "2026-09")
+    .reduce((sum, row) => sum + row.cantidad, 0);
+  assert(naiveSepActual > 1100 * 1.5, "la suma cruda de septiembre sí dobla (cierre + diario)");
+
+  function sepHealth(ventasSet) {
+    return app.buildForecastHealth({
+      stockRows: sepStock,
+      ventas: ventasSet,
+      selectedMonth: "2026-10",
+      dailyBufferPct: 10,
+    });
+  }
+  const healthClose = sepHealth(closeOnlyVentas);
+  const healthDaily = sepHealth(dailyOnlyVentas);
+  const healthBoth = sepHealth(sessionBoth);
+  const healthMixed = sepHealth(baseAndSession);
+  const pickSep = (health) => health.backtests.find((row) => row.month === "2026-09");
+  const sepCloseBt = pickSep(healthClose);
+  const sepDailyBt = pickSep(healthDaily);
+  const sepBothBt = pickSep(healthBoth);
+  const sepMixedBt = pickSep(healthMixed);
+  assert(sepCloseBt && sepBothBt && sepDailyBt && sepMixedBt, "octubre debe backtestear septiembre");
+  assert(Math.abs(sepBothBt.actual - sepCloseBt.actual) < 1e-6, "diario+cierre no debe doblar la venta real de septiembre");
+  assert(Math.abs(sepMixedBt.actual - sepCloseBt.actual) < 1e-6, "base + sesión tampoco debe doblar septiembre");
+  assert(Math.abs(sepDailyBt.actual - sepCloseBt.actual) < 1e-6, "solo diario debe empatar el cierre cuando suman lo mismo");
+  assert(Math.abs(sepBothBt.forecast - sepCloseBt.forecast) < 1e-6, "el pronóstico de septiembre no debe cambiar");
+  assert(
+    Math.abs(sepBothBt.wape - sepCloseBt.wape) < 0.05,
+    `WAPE sep con ambos archivos debe ser el de una sola cuenta (${sepBothBt.wape} vs ${sepCloseBt.wape})`
+  );
+  assert(sepBothBt.wape < 20, `WAPE sep no debe parecer ~50% por doble conteo (salió ${sepBothBt.wape.toFixed(2)}%)`);
+
+  const resolvedSep = app.resolveCanonicalMonthSources([
+    { name: "VENTAS DIARIO SEPTIEMBRE 2026.xlsx", rows: sepDailyRows },
+    { name: "ventas septiembre 2026.xlsx", rows: sepCloseRows },
+    { name: "historia.xlsx", rows: sepHistoryRows },
+  ]);
+  assert(resolvedSep.decisions.find((decision) => decision.month === "2026-09")?.strategy === "keep-daily-and-close", "septiembre diario+cierre se conserva");
+  const resolvedSepBt = pickSep(sepHealth(resolvedSep.entries.flatMap((entry) => entry.rows)));
+  assert(Math.abs(resolvedSepBt.wape - sepCloseBt.wape) < 0.05, "WAPE por resolveCanonical no dobla el cierre");
+
+  const octClose = app.calculateForecast({
+    stockRows: sepStock,
+    historicalVentas: closeOnlyVentas,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-10",
+    dailyBufferPct: 10,
+  });
+  const octBoth = app.calculateForecast({
+    stockRows: sepStock,
+    historicalVentas: sessionBoth,
+    bajas: [],
+    existencias: [],
+    realProduction: [],
+    selectedMonth: "2026-10",
+    dailyBufferPct: 10,
+  });
+  for (const row of octClose) {
+    const other = octBoth.find((item) => item.producto === row.producto);
+    assert(
+      other && Math.abs(row.pronosticoVenta - other.pronosticoVenta) < 1e-6,
+      `el pronóstico de ${row.producto} no debe cambiar al cargar diario+cierre`
+    );
+  }
+
   console.log("forecast-accuracy-test ok");
   console.log(
     JSON.stringify(

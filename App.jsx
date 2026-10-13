@@ -4415,6 +4415,30 @@ function forecastAccuracyTone(wape) {
   return "blocked";
 }
 
+// Misma regla que buildMonthlyForecastData / keep-daily-and-close: el cierre
+// (monthlyTotal) es el total del producto/mes; el diario solo aporta forma.
+// Sumar todas las filas dobla la venta real cuando coexisten ambos.
+function actualSalesByProductForMonth(records, monthKey) {
+  const closeByProduct = new Map();
+  const dailyByProduct = new Map();
+  for (const row of records || []) {
+    if (monthKeyFromRecord(row) !== monthKey) continue;
+    const product = normalizeProduct(row.producto);
+    if (!product) continue;
+    const qty = toNumber(row.cantidad);
+    if (row.monthlyTotal) {
+      closeByProduct.set(product, (closeByProduct.get(product) || 0) + qty);
+    } else {
+      dailyByProduct.set(product, (dailyByProduct.get(product) || 0) + qty);
+    }
+  }
+  const actualMap = new Map(dailyByProduct);
+  for (const [product, qty] of closeByProduct) {
+    actualMap.set(product, qty);
+  }
+  return actualMap;
+}
+
 function buildForecastHealth({
   stockRows = [],
   ventas = [],
@@ -4476,12 +4500,7 @@ function buildForecastHealth({
         selectedMonth: hideMonth,
         dailyBufferPct,
       });
-      const actualMap = new Map();
-      for (const row of ventas) {
-        if (monthKeyFromRecord(row) !== hideMonth) continue;
-        const product = normalizeProduct(row.producto);
-        actualMap.set(product, (actualMap.get(product) || 0) + toNumber(row.cantidad));
-      }
+      const actualMap = actualSalesByProductForMonth(ventas, hideMonth);
       const comparison = forecastRows.map((row) => ({
         producto: row.producto,
         metodoPronostico: row.metodoPronostico,
@@ -9360,6 +9379,7 @@ export {
   assessForecastFreezeReadiness,
   assessStockSheetSelection,
   analyzeForecastProductErrors,
+  actualSalesByProductForMonth,
   buildForecastHealth,
   buildMonthlyCloseSummary,
   buildOperationalForecastScenario,
