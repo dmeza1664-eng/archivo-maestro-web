@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import {
+  AlertTriangle,
   BarChart3,
   CalendarRange,
   CheckCircle2,
@@ -559,6 +560,11 @@ const WEEKDAY_BY_NORM = new Map(
 
 const PRODUCT_ALIAS_STORAGE_KEY = "archivoMaestroProductAliases";
 const ACTIVE_PROMOS_STORAGE_KEY = "archivoMaestroActivePromos";
+// Planta produce lunes a sábado. El pedido del domingo es para el lunes, así
+// que el corte esperado por defecto es el último día hábil ya cerrado (0 días
+// de atraso). Se puede aflojar el umbral sin tocar la regla de calendario.
+const DEFAULT_DATA_FRESHNESS_MAX_LAG_WORKING_DAYS = 0;
+const DATA_FRESHNESS_MAX_LAG_WORKING_DAYS = DEFAULT_DATA_FRESHNESS_MAX_LAG_WORKING_DAYS;
 // Grafías de Pepes/catálogo que normalizeProduct no alcanza por sí solo
 // cuando el mapeo entra por código o por el nombre crudo de 2024.
 const BUILTIN_PRODUCT_ALIASES = {
@@ -1184,6 +1190,105 @@ function inventoryCutoffStatus(cutoffDate, selectedMonth) {
     cutoff,
     windowStart,
     windowEnd,
+  };
+}
+
+function isProductionWorkingDay(value) {
+  const date = parseDateCell(value);
+  return Boolean(date) && date.getDay() !== 0;
+}
+
+function normalizeDataFreshnessLag(value, fallback = DEFAULT_DATA_FRESHNESS_MAX_LAG_WORKING_DAYS) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(14, Math.max(0, Math.round(parsed)));
+}
+
+function lastCompletedWorkingDay(asOf = new Date()) {
+  const cursor = parseDateCell(asOf);
+  if (!cursor) return "";
+  cursor.setDate(cursor.getDate() - 1);
+  while (cursor.getDay() === 0) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return dateKey(cursor);
+}
+
+function expectedDataFreshnessDate(asOf = new Date(), maxLagWorkingDays = DEFAULT_DATA_FRESHNESS_MAX_LAG_WORKING_DAYS) {
+  const lag = normalizeDataFreshnessLag(maxLagWorkingDays);
+  let expected = lastCompletedWorkingDay(asOf);
+  for (let step = 0; step < lag; step += 1) {
+    expected = lastCompletedWorkingDay(expected);
+  }
+  return expected;
+}
+
+function recordDailyDateKey(record) {
+  if (!record || record.monthlyTotal) return "";
+  return dateKey(record.fechaKey || record.fecha);
+}
+
+function latestLoadedDailyDate(records = []) {
+  const dates = (Array.isArray(records) ? records : [])
+    .map(recordDailyDateKey)
+    .filter(Boolean)
+    .sort();
+  return dates[dates.length - 1] || "";
+}
+
+function describeFreshnessSource(kind, latest) {
+  if (kind === "produccion") {
+    return latest
+      ? `la producción llega al ${displayDate(latest)}`
+      : `la producción cargada no tiene fecha diaria`;
+  }
+  return latest
+    ? `las ventas llegan al ${displayDate(latest)}`
+    : `las ventas cargadas no tienen fecha diaria`;
+}
+
+function assessDataFreshness({
+  ventas = [],
+  realProduction = [],
+  asOf = new Date(),
+  maxLagWorkingDays = DEFAULT_DATA_FRESHNESS_MAX_LAG_WORKING_DAYS,
+} = {}) {
+  const lag = normalizeDataFreshnessLag(maxLagWorkingDays);
+  const expectedDate = expectedDataFreshnessDate(asOf, lag);
+  const salesRecords = Array.isArray(ventas) ? ventas : [];
+  const productionRecords = Array.isArray(realProduction) ? realProduction : [];
+  const salesLoaded = salesRecords.length > 0;
+  const productionLoaded = productionRecords.length > 0;
+  const salesLatest = latestLoadedDailyDate(salesRecords);
+  const productionLatest = latestLoadedDailyDate(productionRecords);
+  const salesFresh = !salesLoaded || Boolean(salesLatest && expectedDate && salesLatest >= expectedDate);
+  const productionFresh = !productionLoaded || Boolean(productionLatest && expectedDate && productionLatest >= expectedDate);
+  const staleSources = [];
+  if (salesLoaded && !salesFresh) staleSources.push({ key: "ventas", latest: salesLatest });
+  if (productionLoaded && !productionFresh) staleSources.push({ key: "produccion", latest: productionLatest });
+  const checked = salesLoaded || productionLoaded;
+  const fresh = !checked || staleSources.length === 0;
+  const expectedLabel = expectedDate ? displayDate(expectedDate) : "";
+  const expectedPhrase = lag === 0
+    ? `falta el último día hábil (${expectedLabel})`
+    : `se esperaba dato del ${expectedLabel} (${lag} ${lag === 1 ? "día hábil" : "días hábiles"} de atraso permitido)`;
+  const sourceText = staleSources
+    .map((source) => describeFreshnessSource(source.key, source.latest))
+    .join(" y ");
+  const message = fresh || !checked
+    ? ""
+    : `${sourceText.charAt(0).toUpperCase()}${sourceText.slice(1)}; ${expectedPhrase}.`;
+  return {
+    fresh,
+    checked,
+    expectedDate,
+    maxLagWorkingDays: lag,
+    sales: { loaded: salesLoaded, latest: salesLatest, fresh: salesFresh },
+    production: { loaded: productionLoaded, latest: productionLatest, fresh: productionFresh },
+    staleSources,
+    title: "Datos atrasados",
+    message,
+    detail: "La planta produce de lunes a sábado. El pedido del domingo es para el lunes.",
   };
 }
 
@@ -6878,6 +6983,20 @@ function FrozenMonthBanner({ forecastLock, selectedMonth }) {
   );
 }
 
+function DataFreshnessBanner({ freshness }) {
+  if (!freshness?.checked || freshness.fresh) return null;
+  return (
+    <section className="data-freshness-banner" role="status" aria-live="polite">
+      <p className="freeze-strip-alert warn data-freshness-alert">
+        <AlertTriangle size={16} aria-hidden="true" />
+        <span>
+          <strong>{freshness.title}.</strong> {freshness.message} {freshness.detail}
+        </span>
+      </p>
+    </section>
+  );
+}
+
 function ForecastAccuracyPanel({ health, selectedMonth }) {
   const backtests = health?.backtests || [];
   const [focusMonth, setFocusMonth] = useState("");
@@ -7110,6 +7229,9 @@ function Dashboard({ session, onLogout }) {
   const [selectedMonth, setSelectedMonth] = useState(defaultMonthValue());
   const [selectedMonthTouched, setSelectedMonthTouched] = useState(false);
   const [dailyBufferPct, setDailyBufferPct] = useState(10);
+  const [dataFreshnessMaxLagWorkingDays, setDataFreshnessMaxLagWorkingDays] = useState(
+    DEFAULT_DATA_FRESHNESS_MAX_LAG_WORKING_DAYS
+  );
   const [dailyDateFilter, setDailyDateFilter] = useState(() => defaultInventoryDate(defaultMonthValue()));
   const [dailyProductQuery, setDailyProductQuery] = useState("");
   const [dailyWeekdayFilter, setDailyWeekdayFilter] = useState("");
@@ -7312,6 +7434,9 @@ function Dashboard({ session, onLogout }) {
       }
       if (data.selectedMonth) setSelectedMonth(data.selectedMonth);
       if (Number.isFinite(Number(data.dailyBufferPct))) setDailyBufferPct(Number(data.dailyBufferPct));
+      if (data.dataFreshnessMaxLagWorkingDays !== undefined) {
+        setDataFreshnessMaxLagWorkingDays(normalizeDataFreshnessLag(data.dataFreshnessMaxLagWorkingDays));
+      }
       setLastBackup(snapshot);
       setHasUnsavedChanges(false);
       const nextSync = {
@@ -7409,6 +7534,7 @@ function Dashboard({ session, onLogout }) {
         savedAt: new Date().toISOString(),
         selectedMonth,
         dailyBufferPct,
+        dataFreshnessMaxLagWorkingDays,
         stockRows,
         ventas: snapshotOperationalRows(ventas, salesRecordKey, persistedKeys.sales),
         ventasValidacion,
@@ -8169,6 +8295,22 @@ function Dashboard({ session, onLogout }) {
     () => inventoryCutoffStatus(existenciasCutoff.date, selectedMonth),
     [existenciasCutoff.date, selectedMonth]
   );
+  const dataFreshness = useMemo(
+    () =>
+      assessDataFreshness({
+        ventas: [...effectiveVentas, ...effectiveVentasValidacion, ...effectiveMonthlyCloseSales],
+        realProduction: [...effectiveRealProduction, ...effectiveMonthlyCloseProduction],
+        maxLagWorkingDays: dataFreshnessMaxLagWorkingDays,
+      }),
+    [
+      effectiveVentas,
+      effectiveVentasValidacion,
+      effectiveMonthlyCloseSales,
+      effectiveRealProduction,
+      effectiveMonthlyCloseProduction,
+      dataFreshnessMaxLagWorkingDays,
+    ]
+  );
   const inventoryBlocksApproval = existencias.length > 0 && inventoryCutoff.status !== "fresh";
   const freezeReadiness = useMemo(
     () =>
@@ -8756,6 +8898,23 @@ function Dashboard({ session, onLogout }) {
                     />
                     Incluir productos sin dato real
                   </label>
+                  <label className="freshness-lag-control">
+                    Días hábiles de atraso permitidos
+                    <input
+                      min="0"
+                      max="14"
+                      type="number"
+                      value={dataFreshnessMaxLagWorkingDays}
+                      onChange={(e) => {
+                        setDataFreshnessMaxLagWorkingDays(normalizeDataFreshnessLag(e.target.value));
+                        setHasUnsavedChanges(true);
+                      }}
+                    />
+                  </label>
+                  <p className="freshness-lag-hint">
+                    0 avisa si no hay venta o producción del último día de planta (lunes a sábado).
+                    El pedido del domingo es para el lunes.
+                  </p>
                   {session.user.rol === "admin" && (
                     <button className="secondary" type="button" onClick={toggleUsers}>
                       <UserRound size={18} /> Usuarios
@@ -8861,6 +9020,7 @@ function Dashboard({ session, onLogout }) {
               «Seleccionar Excel» en la tarjeta Ventas y pulsa «Guardar respaldo».
             </p>
           )}
+          <DataFreshnessBanner freshness={dataFreshness} />
         </section>
 
         <section className="uploads required-uploads">
@@ -8980,6 +9140,7 @@ function Dashboard({ session, onLogout }) {
             <strong className="decision-month-chip">{selectedMonth || "Sin mes"} · margen {dailyBufferPct}%</strong>
           </div>
 
+          <DataFreshnessBanner freshness={dataFreshness} />
           <ForecastHealthStrip health={forecastHealth} selectedMonth={selectedMonth} />
           <FrozenMonthBanner forecastLock={effectiveForecastState} selectedMonth={selectedMonth} />
           <FreezeReadinessStrip readiness={freezeReadiness} selectedMonth={selectedMonth} />
@@ -9470,6 +9631,14 @@ export {
   isDiaDeMuertosForecastMonth,
   isDiaDeMuertosSeasonDate,
   isDistribucionChannel,
+  assessDataFreshness,
+  expectedDataFreshnessDate,
+  isProductionWorkingDay,
+  lastCompletedWorkingDay,
+  latestLoadedDailyDate,
+  normalizeDataFreshnessLag,
+  DEFAULT_DATA_FRESHNESS_MAX_LAG_WORKING_DAYS,
+  DATA_FRESHNESS_MAX_LAG_WORKING_DAYS,
   mergeDiaDeMuertosHistory,
   forecastDiaDeMuertosProduct,
   applyDiaDeMuertosDailyWindow,
