@@ -1775,6 +1775,7 @@ td.strong,
 .main > .top { order: 0; }
 .main > .user-admin-section { order: 1; }
 .main > .loaded-files-section { order: 2; }
+.main > .data-freshness-banner { order: 5; }
 .main > .uploads.required-uploads { order: 3; }
 .main > .complementary-files { order: 4; }
 .main > .inventory-cutoff-bar,
@@ -4096,6 +4097,38 @@ tbody tr:hover {
 
 .sales-history-note {
   margin-top: 10px;
+}
+
+.data-freshness-banner {
+  margin-top: 10px;
+}
+
+.data-freshness-alert {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+}
+
+.data-freshness-alert svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.freshness-lag-control {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.freshness-lag-control input {
+  width: 100%;
+}
+
+.freshness-lag-hint {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 0;
 }
 
 .daily-table th:nth-child(-n+3),
