@@ -4661,6 +4661,10 @@ label.night-cut-toggle input:focus-visible + .night-cut-switch {
   gap: 14px;
 }
 
+.main.daily-vs-forecast-page > * {
+  order: 0;
+}
+
 .daily-vs-forecast-page .uploads,
 .daily-vs-forecast-page .loaded-files-section {
   display: grid;

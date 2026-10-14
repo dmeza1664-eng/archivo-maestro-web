@@ -64,6 +64,12 @@ async function main() {
   assert.match(viewSource, /solo de los Excel diarios/, "La vista declara que los datos salen de los archivos.");
   assert.match(appSource, /function detectDailyVsForecastDate/, "Se detecta la fecha del Día o del título.");
   assert.match(appSource, /se reemplaza; no se duplica/, "Re-subir un día reemplaza.");
+  const css = fs.readFileSync(path.join(ROOT, "style.css"), "utf8");
+  assert.match(
+    css,
+    /\.main\.daily-vs-forecast-page > \* \{\s*order: 0;/,
+    "En esta vista la carga no se manda al fondo por el order del dashboard."
+  );
 
   const {
     DAILY_VS_FORECAST_MARGIN_PCT,
