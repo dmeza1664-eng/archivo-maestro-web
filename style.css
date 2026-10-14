@@ -4607,7 +4607,7 @@ label.night-cut-toggle input:focus-visible + .night-cut-switch {
 }
 
 @media print {
-  .main > *:not(.night-cut-section) {
+  .main:has(.night-cut-section) > *:not(.night-cut-section) {
     display: none !important;
   }
 
@@ -4629,5 +4629,137 @@ label.night-cut-toggle input:focus-visible + .night-cut-switch {
   .night-cut-date,
   .night-cut-date-order {
     break-inside: avoid;
+  }
+}
+
+.app-view-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.app-view-nav button {
+  background: #f5efe7;
+  border: 1px solid #e6ddd2;
+  border-radius: 999px;
+  color: #6f5f50;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  min-height: 36px;
+  padding: 6px 14px;
+}
+
+.app-view-nav button.active {
+  background: #2e241c;
+  border-color: #2e241c;
+  color: #fff8ef;
+}
+
+.main.daily-vs-forecast-page {
+  gap: 14px;
+}
+
+.daily-vs-forecast-page .uploads,
+.daily-vs-forecast-page .loaded-files-section {
+  display: grid;
+  gap: 14px;
+}
+
+.daily-vs-forecast-page .upload-card {
+  max-width: 420px;
+}
+
+.daily-vs-day-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.daily-vs-day-chip {
+  background: #fff;
+  border: 1px solid #e6ddd2;
+  border-radius: 12px;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  min-width: 140px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.daily-vs-day-chip.active {
+  border-color: #c87d4a;
+  box-shadow: 0 0 0 2px rgba(200, 125, 74, 0.18);
+}
+
+.daily-vs-day-chip strong,
+.daily-vs-day-chip small {
+  display: block;
+}
+
+.daily-vs-day-chip small {
+  color: #82705f;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daily-vs-slices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.daily-vs-slices button {
+  background: #fff;
+  border: 1px solid #e6ddd2;
+  border-radius: 10px;
+  color: #6f5f50;
+  cursor: pointer;
+  font-weight: 700;
+  min-height: 40px;
+  padding: 8px 14px;
+}
+
+.daily-vs-slices button.active {
+  background: #c87d4a;
+  border-color: #c87d4a;
+  color: #1a120c;
+}
+
+.daily-vs-title,
+.daily-vs-note {
+  color: #6f5f50;
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 0 0 12px;
+}
+
+.daily-vs-title {
+  color: #2e241c;
+  font-weight: 700;
+}
+
+.daily-table tr.is-selected td {
+  background: #fff7ee;
+}
+
+.muted-cell {
+  color: #9a8b7c;
+}
+
+.daily-vs-forecast-page .app-toast {
+  position: sticky;
+  top: 12px;
+  z-index: 5;
+}
+
+@media (max-width: 880px) {
+  .daily-vs-forecast-page .upload-card {
+    max-width: none;
   }
 }

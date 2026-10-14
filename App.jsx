@@ -7629,6 +7629,822 @@ function exportValidationToExcel({
   XLSX.writeFile(wb, `validacion_pronostico_${selectedMonth || "mes"}.xlsx`);
 }
 
+const DAILY_VS_FORECAST_MARGIN_PCT = 10;
+const DAILY_VS_FORECAST_SLICES = [
+  { id: "dia", label: "Día" },
+  { id: "area", label: "Área" },
+  { id: "producto", label: "Producto" },
+  { id: "mtd", label: "Acumulado mes" },
+];
+const SPANISH_MONTH_NUMBER = {
+  enero: 1,
+  febrero: 2,
+  marzo: 3,
+  abril: 4,
+  mayo: 5,
+  junio: 6,
+  julio: 7,
+  agosto: 8,
+  septiembre: 9,
+  setiembre: 9,
+  octubre: 10,
+  noviembre: 11,
+  diciembre: 12,
+};
+
+function rowsFromNamedSheet(workbook, candidate) {
+  const name = matchSheetName(workbook, candidate);
+  if (!name) return null;
+  return XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: "", raw: true });
+}
+
+function firstNonEmptyCell(row = []) {
+  for (const cell of row) {
+    const text = String(cell ?? "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function detectDailyVsForecastDateFromText(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const diaIso = raw.match(/d[ií]a\s+(\d{4}-\d{2}-\d{2})/i);
+  if (diaIso) return diaIso[1];
+  const iso = raw.match(/\b(\d{4}-\d{2}-\d{2})\b/);
+  if (iso && dateKey(iso[1])) return iso[1];
+  const parsedCell = dateKey(raw);
+  if (parsedCell) return parsedCell;
+  const long = raw.match(/(\d{1,2})\s+de\s+([a-záéíóúñ]+)\s+de\s+(\d{4})/i);
+  if (!long) return "";
+  const day = Number(long[1]);
+  const month = SPANISH_MONTH_NUMBER[norm(long[2]).toLowerCase()] || SPANISH_MONTH_NUMBER[String(long[2] || "").toLowerCase()];
+  const year = Number(long[3]);
+  if (!day || !month || !year) return "";
+  return dateKey(new Date(year, month - 1, day));
+}
+
+function detectDailyVsForecastDate({ title = "", diaCell = "", note = "" } = {}) {
+  return detectDailyVsForecastDateFromText(diaCell)
+    || detectDailyVsForecastDateFromText(title)
+    || detectDailyVsForecastDateFromText(note)
+    || "";
+}
+
+function findRowIndex(rows, predicate) {
+  return rows.findIndex((row) => predicate(row || []));
+}
+
+function headerColumnIndex(headerRow = [], aliases) {
+  const cells = (headerRow || []).map((cell) => norm(cell));
+  for (const alias of aliases) {
+    const needle = norm(alias);
+    const exact = cells.findIndex((cell) => cell === needle);
+    if (exact >= 0) return exact;
+    const partial = cells.findIndex((cell) => cell.includes(needle));
+    if (partial >= 0) return partial;
+  }
+  return -1;
+}
+
+function dailyVsForecastColumnMap(headerRow) {
+  return {
+    concepto: headerColumnIndex(headerRow, ["Concepto"]),
+    area: headerColumnIndex(headerRow, ["Área", "Area"]),
+    producto: headerColumnIndex(headerRow, ["Producto"]),
+    recomendado: headerColumnIndex(headerRow, ["Recomendado"]),
+    mandado: headerColumnIndex(headerRow, ["Mandado a producir", "Mandado"]),
+    difPiezas: headerColumnIndex(headerRow, ["Dif. piezas", "Dif piezas", "Diferencia piezas"]),
+    difPct: headerColumnIndex(headerRow, ["Dif. %", "Dif %", "Diferencia %"]),
+    producido: headerColumnIndex(headerRow, ["Producido"]),
+    pronostico: headerColumnIndex(headerRow, ["Pronóstico de venta", "Pronostico de venta"]),
+  };
+}
+
+function cellAt(row, index) {
+  return index >= 0 ? row?.[index] : "";
+}
+
+function hidesDailyVsForecastError(area, producto) {
+  return isDistribucionChannel(area) || isDistribucionChannel(producto);
+}
+
+function buildDailyVsForecastMetrics({
+  recomendado,
+  mandado,
+  producido = 0,
+  pronosticoVenta = 0,
+  difPiezas,
+  difPct,
+  area = "",
+  producto = "",
+} = {}) {
+  const rec = toNumber(recomendado);
+  const man = toNumber(mandado);
+  const pieces = difPiezas === "" || difPiezas == null ? man - rec : toNumber(difPiezas);
+  const hideError = hidesDailyVsForecastError(area, producto);
+  let fraction = null;
+  if (!hideError) {
+    if (difPct !== "" && difPct != null && Number.isFinite(Number(difPct))) {
+      fraction = Number(difPct);
+    } else if (rec !== 0) {
+      fraction = pieces / rec;
+    }
+  }
+  return {
+    recomendado: rec,
+    mandado: man,
+    producido: toNumber(producido),
+    pronosticoVenta: toNumber(pronosticoVenta),
+    difPiezas: pieces,
+    difPct: hideError ? null : fraction,
+  };
+}
+
+function recommendedFromForecast(pronosticoVenta, marginPct = DAILY_VS_FORECAST_MARGIN_PCT) {
+  return toNumber(pronosticoVenta) * (1 + marginPct / 100);
+}
+
+function metricsFromSummaryRow(row, columns, extra = {}) {
+  return buildDailyVsForecastMetrics({
+    recomendado: cellAt(row, columns.recomendado),
+    mandado: cellAt(row, columns.mandado),
+    producido: cellAt(row, columns.producido),
+    pronosticoVenta: cellAt(row, columns.pronostico),
+    difPiezas: cellAt(row, columns.difPiezas),
+    difPct: cellAt(row, columns.difPct),
+    ...extra,
+  });
+}
+
+function parseDailyVsForecastResumenSheet(rows) {
+  const title = firstNonEmptyCell(rows[0]);
+  const note = firstNonEmptyCell(rows[1]);
+  const headerIndex = findRowIndex(rows, (row) => {
+    const map = dailyVsForecastColumnMap(row);
+    return map.concepto >= 0 && map.recomendado >= 0 && map.mandado >= 0;
+  });
+  if (headerIndex < 0) {
+    throw new Error("La hoja «Resumen del día» no tiene el encabezado Concepto | Recomendado | Mandado a producir.");
+  }
+  const columns = dailyVsForecastColumnMap(rows[headerIndex]);
+  const dayIndex = findRowIndex(rows, (row) => /^d[ií]a\b/i.test(String(cellAt(row, columns.concepto) || "").trim()));
+  const mtdIndex = findRowIndex(rows, (row) => /acumulado/i.test(String(cellAt(row, columns.concepto) || "")));
+  if (dayIndex < 0) {
+    throw new Error("La hoja «Resumen del día» no trae la fila «Día YYYY-MM-DD».");
+  }
+  const diaCell = String(cellAt(rows[dayIndex], columns.concepto) || "");
+  const fecha = detectDailyVsForecastDate({ title, diaCell, note });
+  if (!fecha) {
+    throw new Error("No se encontró la fecha del día en la celda Día ni en el título.");
+  }
+  const areaHeaderIndex = findRowIndex(rows, (row) => {
+    const map = dailyVsForecastColumnMap(row);
+    return map.area >= 0 && map.recomendado >= 0 && map.producto < 0;
+  });
+  const areaColumns = areaHeaderIndex >= 0 ? dailyVsForecastColumnMap(rows[areaHeaderIndex]) : columns;
+  const areas = [];
+  if (areaHeaderIndex >= 0) {
+    for (let i = areaHeaderIndex + 1; i < rows.length; i += 1) {
+      const area = String(cellAt(rows[i], areaColumns.area) || "").trim();
+      if (!area) continue;
+      if (/^total/i.test(area)) continue;
+      areas.push({
+        area,
+        ...metricsFromSummaryRow(rows[i], areaColumns, { area }),
+      });
+    }
+  }
+  const mtdConcept = mtdIndex >= 0 ? String(cellAt(rows[mtdIndex], columns.concepto) || "") : "";
+  const mtdFecha = detectDailyVsForecastDateFromText(mtdConcept) || fecha;
+  return {
+    fecha,
+    title,
+    note,
+    day: metricsFromSummaryRow(rows[dayIndex], columns),
+    monthToDate: {
+      fechaCorte: mtdFecha,
+      concepto: mtdConcept || `Acumulado mes al ${mtdFecha}`,
+      ...(mtdIndex >= 0 ? metricsFromSummaryRow(rows[mtdIndex], columns) : buildDailyVsForecastMetrics({})),
+    },
+    areas,
+  };
+}
+
+function parseDailyVsForecastProductSheet(rows) {
+  const headerIndex = findRowIndex(rows, (row) => {
+    const map = dailyVsForecastColumnMap(row);
+    return map.area >= 0 && map.producto >= 0 && map.recomendado >= 0;
+  });
+  if (headerIndex < 0) {
+    throw new Error("La hoja «Por producto» no tiene el encabezado Área | Producto | Recomendado.");
+  }
+  const columns = dailyVsForecastColumnMap(rows[headerIndex]);
+  const products = [];
+  for (let i = headerIndex + 1; i < rows.length; i += 1) {
+    const producto = String(cellAt(rows[i], columns.producto) || "").trim();
+    const area = String(cellAt(rows[i], columns.area) || "").trim();
+    if (!producto || INVALID_PRODUCTS.has(norm(producto))) continue;
+    products.push({
+      area,
+      producto: normalizeProduct(producto),
+      productoOriginal: producto,
+      ...metricsFromSummaryRow(rows[i], columns, { area, producto }),
+    });
+  }
+  return products;
+}
+
+function parseDailyProductionVsForecastWorkbook(workbook, { fileName = "" } = {}) {
+  const resumenRows = rowsFromNamedSheet(workbook, "Resumen del día");
+  if (!resumenRows) {
+    throw new Error("El archivo no tiene la hoja «Resumen del día».");
+  }
+  const productRows = rowsFromNamedSheet(workbook, "Por producto");
+  if (!productRows) {
+    throw new Error("El archivo no tiene la hoja «Por producto».");
+  }
+  const summary = parseDailyVsForecastResumenSheet(resumenRows);
+  return normalizeDailyVsForecastReport({
+    ...summary,
+    products: parseDailyVsForecastProductSheet(productRows),
+    sourceFile: fileName,
+    margenSeguridadPct: DAILY_VS_FORECAST_MARGIN_PCT,
+  });
+}
+
+function normalizeDailyVsForecastMetrics(raw, extra = {}) {
+  if (!raw || typeof raw !== "object") return buildDailyVsForecastMetrics(extra);
+  return buildDailyVsForecastMetrics({ ...raw, ...extra });
+}
+
+function normalizeDailyVsForecastReport(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const fecha = dateKey(raw.fecha);
+  if (!fecha) return null;
+  const areas = Array.isArray(raw.areas)
+    ? raw.areas
+      .map((row) => {
+        const area = String(row?.area || "").trim();
+        if (!area) return null;
+        return { area, ...normalizeDailyVsForecastMetrics(row, { area }) };
+      })
+      .filter(Boolean)
+    : [];
+  const products = Array.isArray(raw.products)
+    ? raw.products
+      .map((row) => {
+        const producto = normalizeProduct(row?.producto || row?.productoOriginal);
+        if (!producto) return null;
+        const area = String(row?.area || "").trim();
+        return {
+          area,
+          producto,
+          productoOriginal: String(row?.productoOriginal || row?.producto || producto).trim(),
+          ...normalizeDailyVsForecastMetrics(row, { area, producto }),
+        };
+      })
+      .filter(Boolean)
+    : [];
+  const monthToDateRaw = raw.monthToDate && typeof raw.monthToDate === "object" ? raw.monthToDate : {};
+  const fechaCorte = dateKey(monthToDateRaw.fechaCorte) || fecha;
+  return {
+    fecha,
+    title: String(raw.title || ""),
+    note: String(raw.note || ""),
+    sourceFile: String(raw.sourceFile || ""),
+    margenSeguridadPct: DAILY_VS_FORECAST_MARGIN_PCT,
+    day: normalizeDailyVsForecastMetrics(raw.day),
+    monthToDate: {
+      fechaCorte,
+      concepto: String(monthToDateRaw.concepto || `Acumulado mes al ${fechaCorte}`),
+      ...normalizeDailyVsForecastMetrics(monthToDateRaw),
+    },
+    areas,
+    products,
+  };
+}
+
+function sanitizeDailyVsForecastReports(rows) {
+  if (!Array.isArray(rows)) return [];
+  const byDate = new Map();
+  for (const raw of rows) {
+    const report = normalizeDailyVsForecastReport(raw);
+    if (!report) continue;
+    byDate.set(report.fecha, report);
+  }
+  return [...byDate.values()].sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
+function upsertDailyVsForecastReports(existing, incoming) {
+  const previous = new Set(sanitizeDailyVsForecastReports(existing).map((row) => row.fecha));
+  const nextIncoming = sanitizeDailyVsForecastReports(incoming);
+  const reports = sanitizeDailyVsForecastReports([...(existing || []), ...(incoming || [])]);
+  const replaced = nextIncoming.map((row) => row.fecha).filter((fecha) => previous.has(fecha));
+  return { reports, replaced };
+}
+
+function sumDailyVsForecastMetrics(rows, extra = {}) {
+  return buildDailyVsForecastMetrics({
+    recomendado: rows.reduce((sum, row) => sum + toNumber(row.recomendado), 0),
+    mandado: rows.reduce((sum, row) => sum + toNumber(row.mandado), 0),
+    producido: rows.reduce((sum, row) => sum + toNumber(row.producido), 0),
+    pronosticoVenta: rows.reduce((sum, row) => sum + toNumber(row.pronosticoVenta), 0),
+    ...extra,
+  });
+}
+
+function matchesDailyVsForecastProductQuery(row, query) {
+  const needle = norm(query);
+  if (!needle) return true;
+  return norm(row.producto).includes(needle) || norm(row.productoOriginal).includes(needle) || norm(row.area).includes(needle);
+}
+
+function collectDailyVsForecastProductRows(reports, { area = "", productQuery = "" } = {}) {
+  const rows = [];
+  for (const report of reports) {
+    for (const product of report.products || []) {
+      if (area && product.area !== area) continue;
+      if (!matchesDailyVsForecastProductQuery(product, productQuery)) continue;
+      rows.push({ ...product, fecha: report.fecha });
+    }
+  }
+  return rows;
+}
+
+function collectDailyVsForecastAreaRows(reports, { area = "" } = {}) {
+  const rows = [];
+  for (const report of reports) {
+    for (const item of report.areas || []) {
+      if (area && item.area !== area) continue;
+      rows.push({ ...item, fecha: report.fecha });
+    }
+  }
+  return rows;
+}
+
+function aggregateDailyVsForecastBy(rows, keyFn, extrasFn) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = keyFn(row);
+    if (!key) continue;
+    const current = groups.get(key) || [];
+    current.push(row);
+    groups.set(key, current);
+  }
+  return [...groups.entries()]
+    .map(([key, group]) => ({
+      key,
+      ...extrasFn(group[0], group),
+      ...sumDailyVsForecastMetrics(group, extrasFn(group[0], group)),
+    }))
+    .sort((left, right) => String(left.key).localeCompare(String(right.key), "es"));
+}
+
+function buildDailyVsForecastViewModel({
+  reports = [],
+  month = "",
+  fecha = "",
+  area = "",
+  productQuery = "",
+} = {}) {
+  const all = sanitizeDailyVsForecastReports(reports);
+  const monthReports = month ? all.filter((row) => row.fecha.startsWith(month)) : all;
+  const selected = fecha
+    ? monthReports.find((row) => row.fecha === fecha) || null
+    : monthReports[monthReports.length - 1] || null;
+  const dayReports = fecha ? monthReports.filter((row) => row.fecha === fecha) : monthReports;
+  const days = monthReports.map((report) => ({
+    fecha: report.fecha,
+    sourceFile: report.sourceFile,
+    title: report.title,
+    ...report.day,
+  }));
+  const productRows = collectDailyVsForecastProductRows(dayReports, { area, productQuery });
+  const areaRows = fecha || area
+    ? collectDailyVsForecastAreaRows(dayReports, { area })
+    : aggregateDailyVsForecastBy(
+      collectDailyVsForecastAreaRows(monthReports, { area }),
+      (row) => row.area,
+      (row) => ({ area: row.area })
+    );
+  const productsByMonth = aggregateDailyVsForecastBy(
+    collectDailyVsForecastProductRows(monthReports, { area, productQuery }),
+    (row) => `${row.area}|${row.producto}`,
+    (row) => ({ area: row.area, producto: row.producto, productoOriginal: row.productoOriginal })
+  );
+  const officialMtd = selected?.monthToDate || monthReports[monthReports.length - 1]?.monthToDate || null;
+  const uploadedMtd = monthReports.length
+    ? sumDailyVsForecastMetrics(monthReports.map((report) => report.day))
+    : buildDailyVsForecastMetrics({});
+  return {
+    months: [...new Set(all.map((row) => row.fecha.slice(0, 7)))].sort(),
+    dates: monthReports.map((row) => row.fecha),
+    areas: [...new Set(monthReports.flatMap((row) => (row.areas || []).map((item) => item.area)))].sort((a, b) => a.localeCompare(b, "es")),
+    selected,
+    days,
+    day: selected?.day || sumDailyVsForecastMetrics(dayReports.map((report) => report.day)),
+    areasForDay: areaRows,
+    productsForDay: productRows,
+    productsMonthToDate: productsByMonth,
+    officialMonthToDate: officialMtd,
+    uploadedMonthToDate: uploadedMtd,
+    note: selected?.note || "",
+    title: selected?.title || "",
+    margenSeguridadPct: DAILY_VS_FORECAST_MARGIN_PCT,
+  };
+}
+
+function formatDailyVsForecastPct(fraction, digits = 1) {
+  if (fraction === null || fraction === undefined || !Number.isFinite(Number(fraction))) return "—";
+  return formatPercent(Number(fraction) * 100, digits);
+}
+
+function formatSignedPieces(value, digits = 1) {
+  if (!Number.isFinite(Number(value))) return "—";
+  const amount = Number(value);
+  const formatted = formatNumber(Math.abs(amount), Number.isInteger(amount) ? 0 : digits);
+  if (amount > 0) return `+${formatted}`;
+  if (amount < 0) return `−${formatted}`;
+  return formatted;
+}
+
+function AppViewNav({ activeView, onChange }) {
+  return (
+    <nav className="app-view-nav" aria-label="Vistas">
+      <button
+        type="button"
+        className={activeView === "planta" ? "active" : ""}
+        onClick={() => onChange("planta")}
+      >
+        Decisión de planta
+      </button>
+      <button
+        type="button"
+        className={activeView === "vsPronostico" ? "active" : ""}
+        onClick={() => onChange("vsPronostico")}
+      >
+        Producción diaria vs pronóstico
+      </button>
+    </nav>
+  );
+}
+
+function DailyVsForecastMetricCells({ row, hideForecast = false }) {
+  const diffClass = row.difPiezas > 0 ? "positive" : row.difPiezas < 0 ? "negative" : "";
+  return (
+    <>
+      <td className="num">{formatNumber(row.recomendado, 1)}</td>
+      <td className="num">{formatNumber(row.mandado, 1)}</td>
+      <td className={`num ${diffClass}`}>{formatSignedPieces(row.difPiezas)}</td>
+      <td className={`num ${row.difPct == null ? "muted-cell" : diffClass}`}>{formatDailyVsForecastPct(row.difPct)}</td>
+      <td className="num">{formatNumber(row.producido, 1)}</td>
+      {!hideForecast && <td className="num">{formatNumber(row.pronosticoVenta, 1)}</td>}
+    </>
+  );
+}
+
+function DailyVsForecastPage({
+  reports,
+  session,
+  files,
+  onFiles,
+  onLogout,
+  onSwitchView,
+  toast,
+  onDismissToast,
+}) {
+  const allReports = useMemo(() => sanitizeDailyVsForecastReports(reports), [reports]);
+  const latest = allReports[allReports.length - 1] || null;
+  const [month, setMonth] = useState(latest?.fecha.slice(0, 7) || "");
+  const [fecha, setFecha] = useState(latest?.fecha || "");
+  const [area, setArea] = useState("");
+  const [productQuery, setProductQuery] = useState("");
+  const [slice, setSlice] = useState("dia");
+
+  useEffect(() => {
+    if (!allReports.length) {
+      setMonth("");
+      setFecha("");
+      return;
+    }
+    setMonth((current) => {
+      if (current && allReports.some((row) => row.fecha.startsWith(current))) return current;
+      return allReports[allReports.length - 1].fecha.slice(0, 7);
+    });
+    setFecha((current) => {
+      if (current && allReports.some((row) => row.fecha === current)) return current;
+      const inMonth = allReports.filter((row) => row.fecha.startsWith((latest?.fecha || "").slice(0, 7)));
+      return (inMonth[inMonth.length - 1] || allReports[allReports.length - 1]).fecha;
+    });
+  }, [allReports, latest]);
+
+  const model = useMemo(
+    () => buildDailyVsForecastViewModel({ reports: allReports, month, fecha, area, productQuery }),
+    [allReports, month, fecha, area, productQuery]
+  );
+  const monthDates = model.dates;
+  const loadedLabel = allReports.length
+    ? `${allReports.length} ${allReports.length === 1 ? "día" : "días"} cargados`
+    : "Sin reportes";
+
+  return (
+    <main className="main daily-vs-forecast-page">
+      {toast && (
+        <div className={`app-toast ${toast.tone}`} role="status" aria-live="polite">
+          <CheckCircle2 size={18} />
+          <span>{toast.message}</span>
+          <button type="button" onClick={onDismissToast} aria-label="Cerrar confirmación">×</button>
+        </div>
+      )}
+      <header className="top">
+        <div>
+          <span className="eyebrow">Archivo Maestro</span>
+          <h2>Producción diaria vs pronóstico</h2>
+          <p>
+            Compara lo mandado a producir contra lo recomendado. Recomendado = pronóstico de venta + margen de seguridad {DAILY_VS_FORECAST_MARGIN_PCT}%.
+            Los números de esta vista salen solo de los Excel diarios que cargues.
+          </p>
+          <AppViewNav activeView="vsPronostico" onChange={onSwitchView} />
+        </div>
+        <div className="top-toolbar">
+          <div className="session-user">
+            <UserRound size={17} />
+            <span>{session.user.nombre}</span>
+            <small>{session.user.rol}</small>
+          </div>
+          <button className="icon-button" type="button" onClick={onLogout} title="Cerrar sesión" aria-label="Cerrar sesión">
+            <LogOut size={18} />
+          </button>
+        </div>
+      </header>
+
+      <section className="loaded-files-section">
+        <div className="section-heading compact-heading">
+          <div>
+            <span className="eyebrow">Carga</span>
+            <h3>Reportes diarios Excel</h3>
+            <p>
+              Sube el reporte del día (hojas «Resumen del día» y «Por producto»). Si vuelves a cargar el mismo día, se reemplaza; no se duplica.
+            </p>
+          </div>
+          <div className="loaded-context">
+            <span>{loadedLabel}</span>
+            <span>Margen de seguridad {DAILY_VS_FORECAST_MARGIN_PCT}%</span>
+          </div>
+        </div>
+        <UploadBox
+          title="Reporte diario"
+          description="Excel de producción vs pronóstico. La fecha se lee de la celda «Día» o del título."
+          multiple
+          onFile={onFiles}
+          fileName={files.dailyVsForecast}
+        />
+        {allReports.length > 0 && (
+          <div className="daily-vs-day-chips" aria-label="Días cargados">
+            {allReports.map((report) => (
+              <button
+                type="button"
+                key={report.fecha}
+                className={`daily-vs-day-chip ${report.fecha === fecha ? "active" : ""}`}
+                onClick={() => {
+                  setMonth(report.fecha.slice(0, 7));
+                  setFecha(report.fecha);
+                  setSlice("dia");
+                }}
+              >
+                <strong>{displayDate(report.fecha)}</strong>
+                <small>{report.sourceFile || "Reporte diario"}</small>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="controls daily-controls">
+        <label>
+          Mes
+          <input
+            type="month"
+            value={month}
+            onChange={(event) => {
+              const next = event.target.value;
+              setMonth(next);
+              const inMonth = allReports.filter((row) => row.fecha.startsWith(next));
+              setFecha(inMonth[inMonth.length - 1]?.fecha || "");
+            }}
+          />
+        </label>
+        <label>
+          Día
+          <select value={fecha} onChange={(event) => setFecha(event.target.value)}>
+            {!monthDates.length && <option value="">Sin días cargados</option>}
+            {monthDates.map((value) => (
+              <option value={value} key={value}>{displayDate(value)}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Área
+          <select value={area} onChange={(event) => setArea(event.target.value)}>
+            <option value="">Todas</option>
+            {model.areas.map((name) => (
+              <option value={name} key={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+        <div className="search">
+          <Search size={18} />
+          <input
+            placeholder="Producto..."
+            value={productQuery}
+            onChange={(event) => setProductQuery(event.target.value)}
+          />
+        </div>
+      </section>
+
+      <section className="daily-vs-slices" aria-label="Cortes de la vista">
+        {DAILY_VS_FORECAST_SLICES.map((item) => (
+          <button
+            type="button"
+            key={item.id}
+            className={slice === item.id ? "active" : ""}
+            onClick={() => setSlice(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </section>
+
+      {!allReports.length && (
+        <div className="empty">
+          Carga un Excel de <strong>reporte diario</strong> para ver producción vs pronóstico. Esta vista no usa el pronóstico calculado en planta.
+        </div>
+      )}
+
+      {allReports.length > 0 && slice === "dia" && (
+        <>
+          <section className="executive-summary-kpis decision-kpis">
+            <KpiCard icon={Target} label="Recomendado" value={formatNumber(model.day.recomendado, 0)} caption={`Pronóstico + margen de seguridad ${DAILY_VS_FORECAST_MARGIN_PCT}%`} />
+            <KpiCard icon={PackageCheck} label="Mandado a producir" value={formatNumber(model.day.mandado, 0)} caption={fecha ? `Día ${displayDate(fecha)}` : "Días cargados"} />
+            <KpiCard
+              icon={TrendingUp}
+              label="Dif. piezas"
+              value={formatSignedPieces(model.day.difPiezas, 0)}
+              caption={`Dif. % ${formatDailyVsForecastPct(model.day.difPct)}`}
+              tone={model.day.difPiezas > 0 ? "warn" : model.day.difPiezas < 0 ? "danger" : "ok"}
+            />
+            <KpiCard icon={BarChart3} label="Producido" value={formatNumber(model.day.producido, 0)} caption={`Pronóstico de venta ${formatNumber(model.day.pronosticoVenta, 0)}`} />
+          </section>
+          {model.title && <p className="daily-vs-title">{model.title}</p>}
+          {model.note && <p className="daily-vs-note">{model.note}</p>}
+          <section className="table-card daily-table-card">
+            <table className="daily-table">
+              <thead>
+                <tr>
+                  <th>Día</th>
+                  <th className="num">Recomendado</th>
+                  <th className="num">Mandado a producir</th>
+                  <th className="num">Dif. piezas</th>
+                  <th className="num">Dif. %</th>
+                  <th className="num">Producido</th>
+                  <th className="num">Pronóstico de venta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {model.days.map((row) => (
+                  <tr key={row.fecha} className={row.fecha === fecha ? "is-selected" : ""}>
+                    <td>{row.fecha}</td>
+                    <DailyVsForecastMetricCells row={row} />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        </>
+      )}
+
+      {allReports.length > 0 && slice === "area" && (
+        <section className="table-card daily-table-card">
+          <table className="daily-table">
+            <thead>
+              <tr>
+                {!fecha && <th>Día</th>}
+                <th>Área</th>
+                <th className="num">Recomendado</th>
+                <th className="num">Mandado a producir</th>
+                <th className="num">Dif. piezas</th>
+                <th className="num">Dif. %</th>
+                <th className="num">Producido</th>
+              </tr>
+            </thead>
+            <tbody>
+              {model.areasForDay.map((row) => (
+                <tr key={`${row.fecha || "mes"}-${row.area}`}>
+                  {!fecha && <td>{row.fecha || month}</td>}
+                  <td>{row.area}</td>
+                  <DailyVsForecastMetricCells row={row} hideForecast />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!model.areasForDay.length && <div className="empty">No hay áreas para el filtro elegido.</div>}
+        </section>
+      )}
+
+      {allReports.length > 0 && slice === "producto" && (
+        <section className="table-card daily-table-card">
+          <table className="daily-table">
+            <thead>
+              <tr>
+                <th>Área</th>
+                <th>Producto</th>
+                <th className="num">Recomendado</th>
+                <th className="num">Mandado a producir</th>
+                <th className="num">Dif. piezas</th>
+                <th className="num">Dif. %</th>
+                <th className="num">Producido</th>
+                <th className="num">Pronóstico de venta</th>
+              </tr>
+            </thead>
+            <tbody>
+              {model.productsForDay.map((row) => (
+                <tr key={`${row.fecha}-${row.area}-${row.producto}`}>
+                  <td>{row.area}</td>
+                  <td>{row.productoOriginal || row.producto}</td>
+                  <DailyVsForecastMetricCells row={row} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!model.productsForDay.length && <div className="empty">No hay productos para el filtro elegido.</div>}
+        </section>
+      )}
+
+      {allReports.length > 0 && slice === "mtd" && (
+        <>
+          <section className="executive-summary-kpis decision-kpis">
+            <KpiCard
+              icon={CalendarRange}
+              label="Acumulado mes"
+              value={formatNumber(model.officialMonthToDate?.recomendado || 0, 0)}
+              caption={model.officialMonthToDate?.concepto || "Sin acumulado en el archivo"}
+            />
+            <KpiCard
+              icon={PackageCheck}
+              label="Mandado a producir"
+              value={formatNumber(model.officialMonthToDate?.mandado || 0, 0)}
+              caption="Del reporte cargado (no se recalcula)"
+            />
+            <KpiCard
+              icon={TrendingUp}
+              label="Dif. piezas"
+              value={formatSignedPieces(model.officialMonthToDate?.difPiezas || 0, 0)}
+              caption={`Dif. % ${formatDailyVsForecastPct(model.officialMonthToDate?.difPct)}`}
+              tone={(model.officialMonthToDate?.difPiezas || 0) > 0 ? "warn" : (model.officialMonthToDate?.difPiezas || 0) < 0 ? "danger" : "ok"}
+            />
+            <KpiCard
+              icon={BarChart3}
+              label="Suma de días cargados"
+              value={formatNumber(model.uploadedMonthToDate.mandado, 0)}
+              caption={`Recomendado ${formatNumber(model.uploadedMonthToDate.recomendado, 0)} · solo archivos subidos`}
+            />
+          </section>
+          <section className="table-card daily-table-card">
+            <table className="daily-table">
+              <thead>
+                <tr>
+                  <th>Área</th>
+                  <th>Producto</th>
+                  <th className="num">Recomendado</th>
+                  <th className="num">Mandado a producir</th>
+                  <th className="num">Dif. piezas</th>
+                  <th className="num">Dif. %</th>
+                  <th className="num">Producido</th>
+                  <th className="num">Pronóstico de venta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {model.productsMonthToDate.map((row) => (
+                  <tr key={`${row.area}-${row.producto}`}>
+                    <td>{row.area}</td>
+                    <td>{row.productoOriginal || row.producto}</td>
+                    <DailyVsForecastMetricCells row={row} />
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <small className="daily-stock-hint">
+              El acumulado del encabezado sale de la fila «Acumulado mes al {model.officialMonthToDate?.fechaCorte || "YYYY-MM-DD"}» del Excel.
+              La tabla suma los días cargados de este mes. Distribución no muestra porcentaje de error. Recomendado ya incluye el margen de seguridad {DAILY_VS_FORECAST_MARGIN_PCT}%.
+            </small>
+          </section>
+        </>
+      )}
+    </main>
+  );
+}
+
 function UploadBox({ title, description, onFile, fileName, required, accept = ".xlsx,.xls", multiple = false }) {
   return (
     <div className="upload-card">
@@ -8498,6 +9314,8 @@ function Dashboard({ session, onLogout }) {
   const [wasteImportStatus, setWasteImportStatus] = useState("");
   const [wasteImportRun, setWasteImportRun] = useState(null);
   const [toast, setToast] = useState(null);
+  const [activeView, setActiveView] = useState("planta");
+  const [dailyVsForecastReports, setDailyVsForecastReports] = useState([]);
 
   const salesImportPreview = useMemo(() => {
     const dailyRows = [];
@@ -8641,6 +9459,7 @@ function Dashboard({ session, onLogout }) {
       setMonthlyCloseProduction(Array.isArray(data.monthlyCloseProduction) ? data.monthlyCloseProduction : []);
       setMonthlyClosePeriod(String(data.monthlyClosePeriod || ""));
       setFiles(data.files && typeof data.files === "object" ? data.files : {});
+      setDailyVsForecastReports(sanitizeDailyVsForecastReports(data.dailyVsForecastReports));
       setProductAliases(data.productAliases && typeof data.productAliases === "object" ? data.productAliases : {});
       if (Array.isArray(data.activePromos)) {
         setActivePromos(sanitizeActivePromos(data.activePromos));
@@ -8768,6 +9587,7 @@ function Dashboard({ session, onLogout }) {
         monthlyCloseProduction,
         monthlyClosePeriod,
         files,
+        dailyVsForecastReports: sanitizeDailyVsForecastReports(dailyVsForecastReports),
         productAliases,
         activePromos,
       };
@@ -8868,6 +9688,43 @@ function Dashboard({ session, onLogout }) {
     });
     setFiles((current) => ({ ...current, existencias: file.name }));
     setHasUnsavedChanges(true);
+  }
+
+  async function handleDailyVsForecastFiles(fileList) {
+    const incoming = Array.from(fileList || []).filter(Boolean);
+    if (!incoming.length) return;
+    try {
+      const parsed = [];
+      for (const file of incoming) {
+        const workbook = await readWorkbook(file);
+        parsed.push(parseDailyProductionVsForecastWorkbook(workbook, { fileName: file.name }));
+      }
+      const { reports, replaced } = upsertDailyVsForecastReports(dailyVsForecastReports, parsed);
+      setDailyVsForecastReports(reports);
+      setFiles((current) => ({
+        ...current,
+        dailyVsForecast: incoming.map((file) => file.name).join(", "),
+      }));
+      setHasUnsavedChanges(true);
+      const dates = [...new Set(parsed.map((row) => row.fecha))].sort();
+      const replacedSet = new Set(replaced);
+      const dateLabel = dates.map((value) => displayDate(value)).join(", ");
+      const replacedLabel = replaced.length
+        ? ` Se reemplazó ${replaced.map((value) => displayDate(value)).join(", ")}.`
+        : "";
+      setActiveView("vsPronostico");
+      setToast({
+        tone: "success",
+        message: replacedSet.size === dates.length && dates.length
+          ? `Se actualizó ${dateLabel} (sin duplicar el día).`
+          : `Se cargó ${dateLabel}.${replacedLabel}`,
+      });
+    } catch (error) {
+      setToast({
+        tone: "error",
+        message: error.message || "No se pudo leer el reporte diario.",
+      });
+    }
   }
 
   async function handleDailyBranchStockFile(file) {
@@ -10157,6 +11014,23 @@ function Dashboard({ session, onLogout }) {
       ? "warning"
       : "";
 
+  if (activeView === "vsPronostico") {
+    return (
+      <div className="app">
+        <DailyVsForecastPage
+          reports={dailyVsForecastReports}
+          session={session}
+          files={files}
+          onFiles={handleDailyVsForecastFiles}
+          onLogout={onLogout}
+          onSwitchView={setActiveView}
+          toast={toast}
+          onDismissToast={() => setToast(null)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="app">
       <main className="main">
@@ -10165,6 +11039,7 @@ function Dashboard({ session, onLogout }) {
               <span className="eyebrow">Archivo Maestro</span>
             <h2>Decisión de planta</h2>
             <p>Carga datos, revisa la salud del pronóstico y congela la producción sugerida del mes.</p>
+            <AppViewNav activeView="planta" onChange={setActiveView} />
           </div>
           <div className="top-toolbar">
             <label className="month-control">
@@ -10878,7 +11753,17 @@ function App() {
 }
 
 export {
+  DAILY_VS_FORECAST_MARGIN_PCT,
   DAILY_EXPORT_COLUMNS,
+  detectDailyVsForecastDate,
+  detectDailyVsForecastDateFromText,
+  parseDailyProductionVsForecastWorkbook,
+  sanitizeDailyVsForecastReports,
+  upsertDailyVsForecastReports,
+  buildDailyVsForecastMetrics,
+  buildDailyVsForecastViewModel,
+  recommendedFromForecast,
+  formatDailyVsForecastPct,
   buildDailyExportRows,
   buildDailyExportWorkbook,
   attachBranchStockTargets,
