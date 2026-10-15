@@ -10,6 +10,7 @@ import {
   Database,
   Download,
   FileSpreadsheet,
+  Info,
   LogOut,
   PackageCheck,
   Save,
@@ -2100,12 +2101,14 @@ function isUsableBranchLocation(value) {
   return true;
 }
 
-// Corte de noche (Inventario de hoy): el libro real trae muchas hojas que no
-// son piso ni restante. EXISTENCIA EN SUCURSALES es el piso por local;
-// EXIST. SUCURSALES Y RESTANTE CF es el total y el cuarto frío que sí se
-// resta; STOCK DE SUCURSALES (2) es el stock fijo del mismo corte. La celda A1
-// a menudo queda vieja: se lee solo para mostrarla, no para fechar las filas.
-const NIGHT_CUT_FORMULA = "Mandar a producir = pronóstico del día de producción + margen de seguridad − cuarto frío restante − lo que sobra del stock fijo en sucursales; nunca baja de 0 y en pasteles se redondea al lote de planta.";
+// Corte de noche (Inventario de hoy). Si la última hoja visible es
+// TOTAL A TENER SUC.(EXIST.+DIST), esa es la fuente: total general = existencia
+// en sucursales, cuarto frío = lo que va a quedar, suma y stock para cotejar.
+// Las hojas que van después suelen estar ocultas (el resumen viejo) y no se leen.
+// Sin esa hoja se usa el corte anterior: EXISTENCIA EN SUCURSALES, el restante
+// de cuarto frío y el stock fijo por local. La celda A1 a menudo queda vieja:
+// se lee solo para mostrarla, no para fechar las filas.
+const NIGHT_CUT_FORMULA = "Mandar a producir = pronóstico del día de producción + margen de seguridad − cuarto frío restante − lo que sobra del stock en sucursales; nunca baja de 0 y en pasteles se redondea al lote de planta. Lo que sobra es la existencia por encima del stock; si faltan piezas, la diferencia se muestra en negativo y no se resta.";
 
 function sheetMatrix(sheet) {
   return sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" }) : [];
@@ -2130,8 +2133,27 @@ function isNightCutStockSheet(name) {
   return label.includes("STOCK") && label.includes("SUCURSAL") && !label.includes("TOTAL A TENER") && !label.includes("EXIST");
 }
 
+function isNightCutTotalSheet(name) {
+  const label = norm(name);
+  return label.includes("TOTAL") && label.includes("TENER") && label.includes("SUC") && (label.includes("EXIST") || label.includes("DIST"));
+}
+
+function nightCutSheetHidden(workbook, index) {
+  const flag = workbook?.Workbook?.Sheets?.[index]?.Hidden;
+  return flag === 1 || flag === 2 || flag === true;
+}
+
+function lastVisibleSheetName(workbook) {
+  const names = workbook?.SheetNames || [];
+  for (let index = names.length - 1; index >= 0; index -= 1) {
+    if (!nightCutSheetHidden(workbook, index)) return names[index];
+  }
+  return names[names.length - 1] || "";
+}
+
 function isNightCutWorkbook(workbook) {
   const names = workbook?.SheetNames || [];
+  if (isNightCutTotalSheet(lastVisibleSheetName(workbook))) return true;
   return names.some(isNightCutSummarySheet) && names.some(isNightCutExistenciaSheet);
 }
 
@@ -2171,7 +2193,9 @@ function findNightCutSummaryHeader(rows) {
 
 function readNightCutFileDate(workbook) {
   const names = workbook?.SheetNames || [];
+  const lastVisible = lastVisibleSheetName(workbook);
   const preferred = [
+    isNightCutTotalSheet(lastVisible) ? lastVisible : "",
     names.find(isNightCutSummarySheet),
     names.find(isNightCutExistenciaSheet),
     names[0],
@@ -2301,8 +2325,144 @@ function isNightCutRollup(details, suc, cf) {
   return false;
 }
 
+function nightCutNullableInt(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n);
+}
+
+// Subtotales de familia (3 LECHES GRANDES, MEDIANOS, CHICOS, Total Area…).
+// Van en la tabla como título de grupo, en el mismo lugar que en la hoja.
+function isNightCutCategorySubtotal(name) {
+  const label = norm(name);
+  return /^3 LECHES (GRANDES|MEDIANOS|CHICOS)$/.test(label);
+}
+
+function isNightCutSectionName(name) {
+  const label = norm(name);
+  if (!label) return false;
+  if (isNightCutCategorySubtotal(name)) return true;
+  if (label.startsWith("TOTAL")) return true;
+  if (label.includes("ESPECIALIDAD")) return true;
+  return false;
+}
+
+function isNightCutTotalGralHeader(label) {
+  return label === "TOTAL GRAL." || label === "TOTAL GRAL" || (label.startsWith("TOTAL GRAL") && !label.includes("SUMA"));
+}
+
+function isNightCutColdRemainHeader(label) {
+  return label.includes("CUARTO") && label.includes("FRIO");
+}
+
+function isNightCutSumaHeader(label) {
+  return label.includes("SUMA") && (label.includes("SUC") || label.includes("C.F") || label.includes("CF"));
+}
+
+function findNightCutTotalHeader(rows) {
+  for (let i = 0; i < Math.min(rows.length, 8); i += 1) {
+    const labels = (rows[i] || []).map(norm);
+    const productIdx = labels.findIndex((cell) => cell === "PRODUCTO" || cell.startsWith("PRODUCTO "));
+    const totalGralIdx = labels.findIndex(isNightCutTotalGralHeader);
+    const cfIdx = labels.findIndex(isNightCutColdRemainHeader);
+    const sumaIdx = labels.findIndex(isNightCutSumaHeader);
+    const stockIdxs = [];
+    labels.forEach((cell, index) => {
+      if (cell === "STOCK") stockIdxs.push(index);
+    });
+    if (productIdx < 0 || totalGralIdx < 0 || cfIdx < 0 || sumaIdx < 0 || !stockIdxs.length) continue;
+    const lastStock = stockIdxs[stockIdxs.length - 1];
+    return {
+      headerIndex: i,
+      productIdx,
+      totalGralIdx,
+      cfIdx,
+      sumaIdx,
+      stockAfIdx: stockIdxs[0],
+      stockAgIdx: stockIdxs[1] ?? -1,
+      diffIdx: lastStock + 1,
+    };
+  }
+  return null;
+}
+
+function parseNightCutTotalWorkbook(workbook) {
+  const sheetName = lastVisibleSheetName(workbook);
+  const rows = sheetMatrix(workbook.Sheets[sheetName]);
+  const header = findNightCutTotalHeader(rows);
+  if (!header) return null;
+  const codes = collectNightCutProductCodes(workbook);
+  const products = [];
+  const details = [];
+
+  for (let i = header.headerIndex + 1; i < rows.length; i += 1) {
+    const row = rows[i] || [];
+    const productoOriginal = String(row[header.productIdx] ?? "").trim();
+    if (!productoOriginal) continue;
+    const existenciaBlank = blankCell(row[header.totalGralIdx]);
+    const cfBlank = blankCell(row[header.cfIdx]);
+    const sumaBlank = blankCell(row[header.sumaIdx]);
+    const blankLine = existenciaBlank && cfBlank && sumaBlank;
+    const existenciaRaw = Math.round(toNumber(row[header.totalGralIdx]));
+    const cfRaw = Math.round(toNumber(row[header.cfIdx]));
+    const namedSection = isNightCutSectionName(productoOriginal);
+    const rollupSection = !namedSection && !blankLine && isValidInventoryProduct(productoOriginal, row) && isNightCutRollup(details, existenciaRaw, cfRaw);
+    if (!namedSection && !rollupSection && (!isValidInventoryProduct(productoOriginal, row) || blankLine)) continue;
+
+    const producto = normalizeProduct(productoOriginal);
+    const existenciaSucursales = Math.max(0, existenciaRaw);
+    const cuartoFrio = Math.max(0, cfRaw);
+    const sumaSucCf = nightCutNullableInt(sumaBlank ? null : row[header.sumaIdx]);
+    const stockAf = nightCutNullableInt(blankCell(row[header.stockAfIdx]) ? null : row[header.stockAfIdx]);
+    const stockAg = header.stockAgIdx < 0
+      ? null
+      : nightCutNullableInt(blankCell(row[header.stockAgIdx]) ? null : row[header.stockAgIdx]);
+    let diferenciaStock = nightCutNullableInt(blankCell(row[header.diffIdx]) ? null : row[header.diffIdx]);
+    if (diferenciaStock === null && sumaSucCf !== null && stockAf !== null) diferenciaStock = sumaSucCf - stockAf;
+    const esSeccion = namedSection || rollupSection;
+    if (!esSeccion) details.push({ suc: existenciaRaw, cf: cfRaw });
+    products.push({
+      producto: esSeccion ? productoOriginal : producto,
+      productoOriginal,
+      codigo: esSeccion ? "" : (codes.get(producto) || ""),
+      existenciaSucursales,
+      cuartoFrio,
+      sucursales: [],
+      targets: [],
+      sobra: esSeccion || stockAf === null ? 0 : Math.max(0, existenciaSucursales - stockAf),
+      piso: existenciaSucursales,
+      stockFijo: stockAf === null ? 0 : stockAf,
+      sinStockFijo: stockAf === null ? 1 : 0,
+      sinDetalleSucursal: !esSeccion && stockAf === null && existenciaSucursales > 0,
+      corteTotal: true,
+      esSeccion,
+      orden: products.length,
+      sumaSucCf,
+      stockAf,
+      stockAg,
+      diferenciaStock,
+    });
+  }
+
+  const coldRows = products.filter((product) => !product.esSeccion).map((product) => ({
+    producto: product.producto,
+    productoOriginal: product.productoOriginal,
+    cantidad: product.cuartoFrio,
+  }));
+  return {
+    format: "corte-noche",
+    fileDate: readNightCutFileDate(workbook),
+    products,
+    branchRows: [],
+    coldRows,
+    targets: [],
+  };
+}
+
 function parseNightCutWorkbook(workbook) {
   if (!isNightCutWorkbook(workbook)) return null;
+  if (isNightCutTotalSheet(lastVisibleSheetName(workbook))) return parseNightCutTotalWorkbook(workbook);
   const summaryName = workbook.SheetNames.find(isNightCutSummarySheet);
   const summaryRows = sheetMatrix(workbook.Sheets[summaryName]);
   const summaryHeader = findNightCutSummaryHeader(summaryRows);
@@ -2400,6 +2560,13 @@ function slimNightCutProduct(product) {
     cuartoFrio: Math.max(0, Math.round(toNumber(product?.cuartoFrio))),
     sobra: Math.max(0, Math.round(toNumber(product?.sobra))),
     sinDetalleSucursal: Boolean(product?.sinDetalleSucursal),
+    corteTotal: Boolean(product?.corteTotal),
+    esSeccion: Boolean(product?.esSeccion),
+    orden: Number.isFinite(Number(product?.orden)) ? Number(product.orden) : null,
+    sumaSucCf: nightCutNullableInt(product?.sumaSucCf),
+    stockAf: nightCutNullableInt(product?.stockAf),
+    stockAg: nightCutNullableInt(product?.stockAg),
+    diferenciaStock: nightCutNullableInt(product?.diferenciaStock),
   };
 }
 
@@ -2407,6 +2574,7 @@ function matchNightCutProducts(products, officialProducts = [], productAliases =
   const matched = [];
   const unmatched = [];
   for (const product of products || []) {
+    if (product?.esSeccion) continue;
     const producto = matchNightCutProduct(product, officialProducts, productAliases);
     if (producto) matched.push({ ...product, producto });
     else unmatched.push({ ...product, producto: "" });
@@ -2464,57 +2632,281 @@ function nightCutRowsForDate(matchedProducts, fecha) {
   };
 }
 
-function buildNightCutOrderRows(dailyRows, productionDate) {
+// Pronóstico = recomendado antes del margen de seguridad. En pasteles el
+// recomendado ya trae el domingo movido al sábado, así que se saca el margen
+// de esa base y Pronóstico + margen vuelve a dar Recomendado. Con promo se
+// muestra el pronóstico del día, porque el extra no es margen de seguridad.
+function splitNightCutForecast(row, recomendado, marginPct = 10) {
+  const rate = Math.max(0, Number(marginPct) || 0) / 100;
+  const base = Math.max(0, Number(recomendado) || 0);
+  if (row?.promoActiva) {
+    const pronostico = Math.max(0, Number(row.pronosticoVentaDia) || 0);
+    const dayMargin = Number(row.colchonDiario);
+    const margen = Number.isFinite(dayMargin) ? Math.max(0, dayMargin) : pronostico * rate;
+    return { pronostico, margen };
+  }
+  if (!(rate > 0) || !(base > 0)) {
+    const dayForecast = Number(row?.pronosticoVentaDia);
+    const pronostico = Number.isFinite(dayForecast) ? Math.max(0, dayForecast) : base;
+    return { pronostico, margen: Math.max(0, base - pronostico) };
+  }
+  const backedOut = base / (1 + rate);
+  const dayForecast = Number(row?.pronosticoVentaDia);
+  const dayMargin = Number(row?.colchonDiario);
+  if (Number.isFinite(dayForecast) && Math.abs(dayForecast - backedOut) < 0.05) {
+    const margen = Number.isFinite(dayMargin) ? dayMargin : base - dayForecast;
+    if (Math.abs(dayForecast + margen - base) < 0.05) return { pronostico: dayForecast, margen };
+  }
+  return { pronostico: backedOut, margen: base - backedOut };
+}
+
+function formatNightCutQty(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return formatNumber(0, 0);
+  const nearest = Math.round(n);
+  if (Math.abs(n - nearest) < 0.05) return formatNumber(nearest, 0);
+  return formatNumber(Math.round(n * 10) / 10, 1);
+}
+
+function formatNightCutOptional(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  return formatNightCutQty(value);
+}
+
+function nightCutExportQty(value) {
+  const n = Number(value) || 0;
+  if (Math.abs(n - Math.round(n)) < 0.05) return Math.round(n);
+  return Number(n.toFixed(2));
+}
+
+function nightCutForecastRow(row, marginPct) {
+  const recomendado = Number(row.baseSinLoteDia) || 0;
+  const split = splitNightCutForecast(row, recomendado, marginPct);
+  const tieneInventario = Boolean(row.hasDailyBranchStock || row.hasDailyColdRoom);
+  return {
+    producto: row.producto,
+    pronostico: split.pronostico,
+    margen: split.margen,
+    recomendado,
+    cuartoFrio: row.hasDailyColdRoom ? Number(row.cuartoFrioDia) || 0 : 0,
+    sobra: row.hasDailyBranchStock ? Number(row.excedenteSucursalesDia) || 0 : 0,
+    mandar: Number(row.aProducirDia ?? row.produccionSugeridaDia) || 0,
+    tieneInventario,
+    corteTotal: Boolean(row.corteTotal),
+    existencia: tieneInventario ? Number(row.inventarioSucursalesDia) || 0 : null,
+    sumaSucCf: nightCutNullableInt(row.sumaSucCf),
+    stockAf: nightCutNullableInt(row.stockAf),
+    stockAg: nightCutNullableInt(row.stockAg),
+    diferenciaStock: nightCutNullableInt(row.diferenciaStock),
+  };
+}
+
+function buildNightCutOrderRows(dailyRows, productionDate, marginPct = 10, sheetProducts = null) {
   const fecha = dateKey(productionDate);
   if (!fecha) return [];
-  return (dailyRows || [])
+  const built = (dailyRows || [])
     .filter((row) => row.fecha === fecha)
-    .map((row) => ({
-      producto: row.producto,
-      recomendado: Number(row.baseSinLoteDia) || 0,
-      cuartoFrio: row.hasDailyColdRoom ? Number(row.cuartoFrioDia) || 0 : 0,
-      sobra: row.hasDailyBranchStock ? Number(row.excedenteSucursalesDia) || 0 : 0,
-      mandar: Number(row.aProducirDia ?? row.produccionSugeridaDia) || 0,
-      tieneInventario: Boolean(row.hasDailyBranchStock || row.hasDailyColdRoom),
-    }));
+    .map((row) => nightCutForecastRow(row, marginPct));
+  const sheet = Array.isArray(sheetProducts) ? sheetProducts : null;
+  const useSheet = Boolean(sheet?.some((row) => row?.corteTotal || row?.esSeccion || Number.isFinite(Number(row?.orden))));
+  if (!useSheet) return built;
+  const byName = new Map();
+  for (const row of built) {
+    const key = normalizeProduct(row.producto);
+    if (key && !byName.has(key)) byName.set(key, row);
+  }
+  return sheet.map((source, index) => {
+    const orden = Number.isFinite(Number(source?.orden)) ? Number(source.orden) : index;
+    if (source?.esSeccion) {
+      return {
+        producto: String(source.productoOriginal || source.producto || "").trim(),
+        productoOriginal: String(source.productoOriginal || source.producto || "").trim(),
+        esSeccion: true,
+        orden,
+        pronostico: null,
+        margen: null,
+        recomendado: null,
+        cuartoFrio: Math.max(0, Math.round(toNumber(source.cuartoFrio))),
+        sobra: Math.max(0, Math.round(toNumber(source.sobra))),
+        mandar: null,
+        tieneInventario: true,
+        corteTotal: true,
+        existencia: Math.max(0, Math.round(toNumber(source.existenciaSucursales))),
+        sumaSucCf: nightCutNullableInt(source.sumaSucCf),
+        stockAf: nightCutNullableInt(source.stockAf),
+        stockAg: nightCutNullableInt(source.stockAg),
+        diferenciaStock: nightCutNullableInt(source.diferenciaStock),
+      };
+    }
+    const key = normalizeProduct(source?.producto || source?.productoOriginal);
+    const forecast = byName.get(key);
+    return {
+      producto: forecast?.producto || key,
+      productoOriginal: String(source?.productoOriginal || source?.producto || "").trim(),
+      esSeccion: false,
+      orden,
+      pronostico: forecast?.pronostico ?? 0,
+      margen: forecast?.margen ?? 0,
+      recomendado: forecast?.recomendado ?? 0,
+      cuartoFrio: Math.max(0, Math.round(toNumber(source?.cuartoFrio ?? forecast?.cuartoFrio))),
+      sobra: Math.max(0, Math.round(toNumber(source?.corteTotal ? source?.sobra : forecast?.sobra))),
+      mandar: forecast?.mandar ?? 0,
+      tieneInventario: Boolean(forecast?.tieneInventario || source?.corteTotal),
+      corteTotal: Boolean(source?.corteTotal || forecast?.corteTotal),
+      existencia: source?.corteTotal
+        ? Math.max(0, Math.round(toNumber(source.existenciaSucursales)))
+        : (forecast?.existencia ?? null),
+      sumaSucCf: source?.corteTotal ? nightCutNullableInt(source.sumaSucCf) : nightCutNullableInt(forecast?.sumaSucCf),
+      stockAf: source?.corteTotal ? nightCutNullableInt(source.stockAf) : nightCutNullableInt(forecast?.stockAf),
+      stockAg: source?.corteTotal ? nightCutNullableInt(source.stockAg) : nightCutNullableInt(forecast?.stockAg),
+      diferenciaStock: source?.corteTotal ? nightCutNullableInt(source.diferenciaStock) : nightCutNullableInt(forecast?.diferenciaStock),
+    };
+  });
 }
 
 function summarizeNightCutOrder(rows) {
-  return (rows || []).reduce((totals, row) => ({
+  return (rows || []).reduce((totals, row) => {
+    if (row?.esSeccion) return totals;
+    return {
     productos: totals.productos + 1,
+    pronostico: totals.pronostico + (Number(row.pronostico) || 0),
+    margen: totals.margen + (Number(row.margen) || 0),
     recomendado: totals.recomendado + (Number(row.recomendado) || 0),
     cuartoFrio: totals.cuartoFrio + (Number(row.cuartoFrio) || 0),
     sobra: totals.sobra + (Number(row.sobra) || 0),
     mandar: totals.mandar + (Number(row.mandar) || 0),
-  }), { productos: 0, recomendado: 0, cuartoFrio: 0, sobra: 0, mandar: 0 });
+    existencia: totals.existencia + (Number(row.existencia) || 0),
+    sumaSucCf: totals.sumaSucCf + (Number(row.sumaSucCf) || 0),
+    stockAf: totals.stockAf + (Number(row.stockAf) || 0),
+    diferenciaStock: totals.diferenciaStock + (Number(row.diferenciaStock) || 0),
+    conTotal: totals.conTotal || Boolean(row.corteTotal),
+    };
+  }, {
+    productos: 0,
+    pronostico: 0,
+    margen: 0,
+    recomendado: 0,
+    cuartoFrio: 0,
+    sobra: 0,
+    mandar: 0,
+    existencia: 0,
+    sumaSucCf: 0,
+    stockAf: 0,
+    diferenciaStock: 0,
+    conTotal: false,
+  });
 }
 
-function sortNightCutOrderRows(rows, sort = { key: "mandar", dir: "desc" }) {
-  const key = sort?.key || "mandar";
-  const dir = sort?.dir === "asc" ? 1 : -1;
-  return [...(rows || [])].sort((left, right) => {
+function sortNightCutOrderRows(rows, sort = null) {
+  const source = (rows || []).filter((row) => !row?.esSeccion);
+  if (!sort?.key) return [...source];
+  const key = sort.key;
+  const dir = sort.dir === "asc" ? 1 : -1;
+  return source.sort((left, right) => {
     if (key === "producto") return dir * String(left.producto).localeCompare(String(right.producto), "es");
     const delta = (Number(left[key]) || 0) - (Number(right[key]) || 0);
     if (delta) return dir * delta;
+    const orderDelta = (Number(left.orden) || 0) - (Number(right.orden) || 0);
+    if (orderDelta) return orderDelta;
     return String(left.producto).localeCompare(String(right.producto), "es");
   });
 }
 
-const NIGHT_CUT_EXPORT_COLUMNS = ["Producto", "Recomendado", "Cuarto frío restante", "Sobra en sucursales", "Mandar a producir"];
+function nightCutRowMatchesQuery(row, query) {
+  const needle = norm(query);
+  if (!needle) return true;
+  return norm(row?.producto).includes(needle) || norm(row?.productoOriginal).includes(needle);
+}
+
+function nightCutProductVisible(row, hideZeros, query) {
+  if (hideZeros && !(Number(row?.mandar) > 0)) return false;
+  return nightCutRowMatchesQuery(row, query);
+}
+
+// Sin clic en un encabezado, el orden es el de la hoja. El título de grupo
+// queda donde está el subtotal, después de sus productos.
+function presentNightCutRows(rows, { hideZeros = false, query = "", sort = null } = {}) {
+  const source = rows || [];
+  if (sort?.key) return sortNightCutOrderRows(source.filter((row) => nightCutProductVisible(row, hideZeros, query)), sort);
+  const visible = [];
+  let pending = [];
+  const flush = (section) => {
+    const shown = pending.filter((row) => nightCutProductVisible(row, hideZeros, query));
+    const sectionMatches = section && nightCutRowMatchesQuery(section, query);
+    if (shown.length) {
+      visible.push(...shown);
+      if (section) visible.push(section);
+    } else if (section && sectionMatches && norm(query)) {
+      visible.push(section);
+    } else if (section && !norm(query) && !hideZeros) {
+      visible.push(section);
+    }
+    pending = [];
+  };
+  for (const row of source) {
+    if (row?.esSeccion) flush(row);
+    else pending.push(row);
+  }
+  flush(null);
+  return visible;
+}
+
+const NIGHT_CUT_EXPORT_COLUMNS = [
+  "Producto",
+  "Pronóstico",
+  "Recomendado",
+  "En sucursales",
+  "Cuarto frío restante",
+  "Suma suc. y C.F.",
+  "Stock",
+  "Otro stock",
+  "Diferencia vs stock",
+  "Sobra en sucursales",
+  "Mandar a producir",
+];
+
+function nightCutExportInt(value) {
+  if (value === null || value === undefined || value === "") return "";
+  return Math.round(Number(value) || 0);
+}
 
 function buildNightCutExportRows(rows) {
-  const body = (rows || []).map((row) => ({
+  const body = (rows || []).map((row) => row?.esSeccion ? ({
     Producto: row.producto,
-    Recomendado: Number((Number(row.recomendado) || 0).toFixed(2)),
+    "Pronóstico": "",
+    Recomendado: "",
+    "En sucursales": nightCutExportInt(row.existencia),
     "Cuarto frío restante": Math.round(Number(row.cuartoFrio) || 0),
+    "Suma suc. y C.F.": nightCutExportInt(row.sumaSucCf),
+    Stock: nightCutExportInt(row.stockAf),
+    "Otro stock": nightCutExportInt(row.stockAg),
+    "Diferencia vs stock": nightCutExportInt(row.diferenciaStock),
+    "Sobra en sucursales": "",
+    "Mandar a producir": "",
+  }) : ({
+    Producto: row.producto,
+    "Pronóstico": nightCutExportQty(row.pronostico),
+    Recomendado: nightCutExportQty(row.recomendado),
+    "En sucursales": nightCutExportInt(row.existencia),
+    "Cuarto frío restante": Math.round(Number(row.cuartoFrio) || 0),
+    "Suma suc. y C.F.": nightCutExportInt(row.sumaSucCf),
+    Stock: nightCutExportInt(row.stockAf),
+    "Otro stock": nightCutExportInt(row.stockAg),
+    "Diferencia vs stock": nightCutExportInt(row.diferenciaStock),
     "Sobra en sucursales": Math.round(Number(row.sobra) || 0),
     "Mandar a producir": Math.round(Number(row.mandar) || 0),
   }));
   const totals = summarizeNightCutOrder(rows);
   body.push({
     Producto: "TOTAL",
-    Recomendado: Number(totals.recomendado.toFixed(2)),
+    "Pronóstico": nightCutExportQty(totals.pronostico),
+    Recomendado: nightCutExportQty(totals.recomendado),
+    "En sucursales": Math.round(totals.existencia),
     "Cuarto frío restante": Math.round(totals.cuartoFrio),
+    "Suma suc. y C.F.": totals.conTotal ? Math.round(totals.sumaSucCf) : "",
+    Stock: totals.conTotal ? Math.round(totals.stockAf) : "",
+    "Otro stock": "",
+    "Diferencia vs stock": totals.conTotal ? Math.round(totals.diferenciaStock) : "",
     "Sobra en sucursales": Math.round(totals.sobra),
     "Mandar a producir": Math.round(totals.mandar),
   });
@@ -5853,10 +6245,17 @@ function calculateForecastModel(records, selectedMonth) {
   };
 }
 
-function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, selectedMonth, dailyBufferPct, activePromos = [], dailyBranchStock = [], dailyColdRoom = [], branchStockTargets = null }) {
+function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, selectedMonth, dailyBufferPct, activePromos = [], dailyBranchStock = [], dailyColdRoom = [], branchStockTargets = null, nightCutInventory = [] }) {
   const realDailyMap = aggregateDailyProductionRows(realProduction);
   const salesDailyMap = aggregateDailySalesRows(ventasReales);
   const stockByProductDate = sumDailyBranchStockByProductDate(dailyBranchStock);
+  const directByKey = new Map();
+  for (const entry of nightCutInventory || []) {
+    const fecha = dateKey(entry?.fecha);
+    const producto = normalizeProduct(entry?.producto);
+    if (!fecha || !producto) continue;
+    directByKey.set(`${fecha}|${producto}`, entry);
+  }
   // Con el mapa de stock fijo por sucursal solo se resta el excedente; sin mapa
   // (llamadas antiguas) se resta todo el piso como antes.
   const excessByProductDate = branchStockTargets ? sumDailyBranchExcessByProductDate(dailyBranchStock, branchStockTargets) : null;
@@ -5893,14 +6292,31 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
         ? applyPromoUpliftToQuantity(product, allocated[index], promo)
         : allocated[index];
       const stockKey = `${row.key}|${normalizeProduct(product)}`;
-      const hasDailyBranchStock = stockByProductDate.has(stockKey);
-      const inventarioSucursalesDia = hasDailyBranchStock ? stockByProductDate.get(stockKey) : 0;
-      const hasDailyColdRoom = coldByProductDate.has(stockKey);
-      const cuartoFrioDia = hasDailyColdRoom ? coldByProductDate.get(stockKey) : 0;
-      const excessEntry = hasDailyBranchStock && excessByProductDate ? excessByProductDate.get(stockKey) || null : null;
-      const excedenteSucursalesDia = !hasDailyBranchStock ? 0 : excessByProductDate ? excessEntry?.excedente || 0 : inventarioSucursalesDia;
-      const sucursalesSinStockFijo = excessEntry?.sinStockFijo || 0;
-      const piezasSinStockFijo = excessEntry?.piezasSinStockFijo || 0;
+      let hasDailyBranchStock = stockByProductDate.has(stockKey);
+      let inventarioSucursalesDia = hasDailyBranchStock ? stockByProductDate.get(stockKey) : 0;
+      let hasDailyColdRoom = coldByProductDate.has(stockKey);
+      let cuartoFrioDia = hasDailyColdRoom ? coldByProductDate.get(stockKey) : 0;
+      let excessEntry = hasDailyBranchStock && excessByProductDate ? excessByProductDate.get(stockKey) || null : null;
+      let excedenteSucursalesDia = !hasDailyBranchStock ? 0 : excessByProductDate ? excessEntry?.excedente || 0 : inventarioSucursalesDia;
+      let sucursalesSinStockFijo = excessEntry?.sinStockFijo || 0;
+      let piezasSinStockFijo = excessEntry?.piezasSinStockFijo || 0;
+      const direct = directByKey.get(stockKey);
+      if (direct) {
+        hasDailyBranchStock = true;
+        hasDailyColdRoom = true;
+        inventarioSucursalesDia = Math.max(0, Math.round(toNumber(direct.existenciaSucursales)));
+        cuartoFrioDia = Math.max(0, Math.round(toNumber(direct.cuartoFrio)));
+        excedenteSucursalesDia = Math.max(0, Math.round(toNumber(direct.sobra)));
+        sucursalesSinStockFijo = 0;
+        piezasSinStockFijo = 0;
+        excessEntry = direct.stockAf == null ? null : {
+          pisoConStockFijo: inventarioSucursalesDia,
+          stockFijo: Math.max(0, Math.round(toNumber(direct.stockAf))),
+          excedente: excedenteSucursalesDia,
+          sinStockFijo: 0,
+          piezasSinStockFijo: 0,
+        };
+      }
       const produccionSugeridaDia = hasDailyBranchStock
         ? applyDailyBranchStockToPlantSuggestion(produccionBrutaDia, excedenteSucursalesDia)
         : produccionBrutaDia;
@@ -5948,7 +6364,18 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
 
       let reglaOperativa = getReglaOperativaLabel(product, productionWeights[index]);
       if (row.weekday === 0) reglaOperativa = "Domingo: no producir; demanda al sábado";
-      else if (hasInventoryDia) {
+      else if (direct && hasInventoryDia) {
+        let formula = `${formatLoteNumber(baseSinLoteDia)} base`;
+        if (excedenteSucursalesDia > 0) {
+          const contraStock = direct.stockAf == null
+            ? ""
+            : ` (en sucursales ${formatNumber(inventarioSucursalesDia, 0)} vs stock ${formatNumber(direct.stockAf, 0)})`;
+          formula = `${formula} − ${formatNumber(excedenteSucursalesDia, 0)} sobrante${contraStock}`;
+        }
+        formula = `${formula} − ${formatNumber(cuartoFrioDia, 0)} cuarto frío`;
+        reglaOperativa = `${formula} = ${formatLoteNumber(netoAntesDeLoteDia)} → ${getLoteTrasRestarLabel(product, netoAntesDeLoteDia, aProducirDia)}`;
+        if (receivedSunday) reglaOperativa = `${reglaOperativa} · incluye demanda del domingo`;
+      } else if (hasInventoryDia) {
         // Orden nuevo: base − sobrante − cuarto frío = neto → lote.
         let formula = `${formatLoteNumber(baseSinLoteDia)} base`;
         if (hasDailyBranchStock && !excessByProductDate) {
@@ -5986,6 +6413,11 @@ function calculateDailyForecast({ monthlyRows, ventasReales, realProduction, sel
         hasDailyBranchStock,
         cuartoFrioDia,
         hasDailyColdRoom,
+        corteTotal: Boolean(direct),
+        sumaSucCf: direct ? nightCutNullableInt(direct.sumaSucCf) : null,
+        stockAf: direct ? nightCutNullableInt(direct.stockAf) : null,
+        stockAg: direct ? nightCutNullableInt(direct.stockAg) : null,
+        diferenciaStock: direct ? nightCutNullableInt(direct.diferenciaStock) : null,
         produccionSugeridaDia,
         baseSinLoteDia,
         netoAntesDeLoteDia,
@@ -7677,9 +8109,10 @@ function NightCutOrderSection({
   onExport,
   onPrint,
 }) {
-  const [sort, setSort] = useState({ key: "mandar", dir: "desc" });
+  const [sort, setSort] = useState(null);
   const [query, setQuery] = useState("");
   const [hideZeros, setHideZeros] = useState(true);
+  const [formulaOpen, setFormulaOpen] = useState(false);
   if (!draft && !order) return null;
 
   const today = todayKey();
@@ -7688,38 +8121,50 @@ function NightCutOrderSection({
   const chosenDate = draft?.chosenDate || order?.inventoryDate || today;
   const productionDate = productionDayForNightCut(chosenDate);
   const totals = summarizeNightCutOrder(rows);
-  const filtered = sortNightCutOrderRows(
-    (rows || []).filter((row) => {
-      if (hideZeros && !(row.mandar > 0)) return false;
-      if (!query.trim()) return true;
-      return norm(row.producto).includes(norm(query));
-    }),
-    sort
-  );
+  const filtered = presentNightCutRows(rows, { hideZeros, query, sort });
   const visibleTotals = summarizeNightCutOrder(filtered);
   const listIsFiltered = filtered.length !== (rows || []).length;
   const visibleUnmatched = (unmatched || []).filter((product) => product.existenciaSucursales > 0 || product.cuartoFrio > 0);
 
   function toggleSort(key) {
-    setSort((current) => (
-      current.key === key
-        ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
-        : { key, dir: key === "producto" ? "asc" : "desc" }
-    ));
+    const firstDir = key === "producto" ? "asc" : "desc";
+    setSort((current) => {
+      if (!current || current.key !== key) return { key, dir: firstDir };
+      if (current.dir === firstDir) return { key, dir: firstDir === "asc" ? "desc" : "asc" };
+      return null;
+    });
   }
 
   function sortLabel(key) {
-    if (sort.key !== key) return "";
+    if (sort?.key !== key) return "";
     return sort.dir === "asc" ? " ↑" : " ↓";
   }
 
+  const equation = [
+    { key: "pronostico", label: "Pronóstico", hint: "sin margen", value: totals.pronostico },
+    { key: "margen", op: "+", label: "Margen de seguridad", hint: `${formatNumber(marginPct, 0)}%`, value: totals.margen },
+    { key: "recomendado", op: "=", label: "Recomendado", value: totals.recomendado },
+    { key: "cuartoFrio", op: "−", label: "Cuarto frío", value: totals.cuartoFrio },
+    { key: "sobra", op: "−", label: "Sobra en sucursales", value: totals.sobra },
+    {
+      key: "mandar",
+      op: "=",
+      label: "Mandar a producir",
+      hint: `${formatNumber(totals.productos, 0)} productos`,
+      value: totals.mandar,
+      result: true,
+    },
+  ];
+
   return (
     <section className="night-cut-section night-cut-order">
-      <div className="section-heading compact-heading">
+      <div className="section-heading compact-heading night-cut-heading">
         <div>
           <span className="eyebrow">Para el encargado de turno</span>
           <h3>Mandar a producir</h3>
-          <p>Después del reparto, este corte dice cuánto pedir a planta. El pedido es del día siguiente (de lunes a sábado). El domingo se pide el lunes.</p>
+          {!order && (
+            <p>Después del reparto, este corte dice cuánto pedir a planta. El pedido es del día siguiente (de lunes a sábado). El domingo se pide el lunes.</p>
+          )}
         </div>
       </div>
 
@@ -7760,18 +8205,70 @@ function NightCutOrderSection({
 
       {order && (
         <div className="night-cut-result">
-          <p className="night-cut-when">
-            Inventario del <strong>{displayWeekdayDate(order.inventoryDate)}</strong>
-            {order.fileName ? ` · ${order.fileName}` : ""}. Pedido para el <strong>{displayWeekdayDate(order.productionDate)}</strong>.
-          </p>
-          <p className="night-cut-formula">{NIGHT_CUT_FORMULA} Margen de seguridad de este pedido: {formatNumber(marginPct, 0)}%.</p>
-          <div className="night-cut-hero">
-            <span>Total a mandar</span>
-            <strong>{formatNumber(totals.mandar, 0)}</strong>
-            <small>
-              {formatNumber(totals.productos, 0)} productos · recomendado {formatNumber(totals.recomendado, 0)} · cuarto frío {formatNumber(totals.cuartoFrio, 0)} · sobra en sucursales {formatNumber(totals.sobra, 0)}
-            </small>
+          <div className="night-cut-dates">
+            <div className="night-cut-date">
+              <span>Inventario</span>
+              <strong>{displayWeekdayDate(order.inventoryDate) || "Sin fecha"}</strong>
+              {order.fileName ? <small>{order.fileName}</small> : null}
+            </div>
+            <div className="night-cut-date night-cut-date-order">
+              <span>Pedido para</span>
+              <strong>{displayWeekdayDate(order.productionDate) || "Sin fecha"}</strong>
+            </div>
           </div>
+          {rows.length > 0 && (
+            <div
+              className="night-cut-equation"
+              role="group"
+              aria-label={`Pronóstico ${formatNightCutQty(totals.pronostico)} sin margen, más margen de seguridad ${formatNightCutQty(totals.margen)}, recomendado ${formatNightCutQty(totals.recomendado)}, menos cuarto frío ${formatNightCutQty(totals.cuartoFrio)}, menos sobra en sucursales ${formatNightCutQty(totals.sobra)}, mandar a producir ${formatNightCutQty(totals.mandar)}`}
+            >
+              <div className="night-cut-math">
+                {equation.slice(0, 3).map((step) => (
+                  <article key={step.key} className="night-cut-step">
+                    <span className="night-cut-step-label">
+                      {step.op ? <span className="night-cut-op" aria-hidden="true">{step.op}</span> : null}
+                      {step.label}
+                    </span>
+                    <strong>{formatNightCutQty(step.value)}</strong>
+                    {step.hint ? <small>{step.hint}</small> : <small aria-hidden="true">&nbsp;</small>}
+                  </article>
+                ))}
+              </div>
+              <div className="night-cut-math night-cut-math-result">
+                {equation.slice(3).map((step) => (
+                  <article key={step.key} className={`night-cut-step${step.result ? " is-result" : ""}`}>
+                    <span className="night-cut-step-label">
+                      {step.op ? <span className="night-cut-op" aria-hidden="true">{step.op}</span> : null}
+                      {step.label}
+                    </span>
+                    <strong>{formatNightCutQty(step.value)}</strong>
+                    {step.hint ? <small>{step.hint}</small> : <small aria-hidden="true">&nbsp;</small>}
+                  </article>
+                ))}
+              </div>
+            </div>
+          )}
+          <p className="night-cut-caption">
+            Pronóstico del día, más el margen de seguridad, menos el cuarto frío y lo que sobra del stock. En sucursales, la suma y la diferencia contra el stock son las del Excel. En pasteles se redondea al lote de planta.
+            <button
+              type="button"
+              className="night-cut-help-button night-cut-no-print"
+              aria-expanded={formulaOpen}
+              aria-controls="night-cut-formula-tip"
+              onClick={() => setFormulaOpen((open) => !open)}
+            >
+              <Info size={15} aria-hidden="true" />
+              Fórmula
+            </button>
+          </p>
+          {formulaOpen && (
+            <p className="night-cut-help-text" id="night-cut-formula-tip">
+              {NIGHT_CUT_FORMULA} Margen de seguridad de este pedido: {formatNumber(marginPct, 0)}%.
+            </p>
+          )}
+          {listIsFiltered && rows.length > 0 && (
+            <p className="night-cut-hint">Los recuadros suman el pedido completo. El total de la tabla es solo la lista filtrada.</p>
+          )}
           <div className="night-cut-toolbar night-cut-no-print">
             <div className="search">
               <Search size={18} />
@@ -7782,16 +8279,24 @@ function NightCutOrderSection({
                 aria-label="Buscar producto"
               />
             </div>
-            <label className="night-cut-hide">
-              <input type="checkbox" checked={hideZeros} onChange={(event) => setHideZeros(event.target.checked)} />
-              Ocultar productos en cero
+            <label className="night-cut-toggle">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={hideZeros}
+                onChange={(event) => setHideZeros(event.target.checked)}
+              />
+              <span className="night-cut-switch" aria-hidden="true" />
+              <span>Ocultar productos en cero</span>
             </label>
-            <button className="secondary" type="button" onClick={onPrint} disabled={!rows.length}>
-              <Printer size={17} /> Imprimir
-            </button>
-            <button className="secondary" type="button" onClick={onExport} disabled={!rows.length}>
-              <Download size={17} /> Excel
-            </button>
+            <div className="night-cut-toolbar-actions">
+              <button className="secondary" type="button" onClick={onPrint} disabled={!rows.length}>
+                <Printer size={17} /> Imprimir
+              </button>
+              <button className="secondary" type="button" onClick={onExport} disabled={!rows.length}>
+                <Download size={17} /> Excel
+              </button>
+            </div>
           </div>
           <div className="table-card">
             <table className="night-cut-table">
@@ -7799,12 +8304,21 @@ function NightCutOrderSection({
                 <tr>
                   {[
                     ["producto", "Producto"],
+                    ["pronostico", "Pronóstico"],
                     ["recomendado", "Recomendado"],
+                    ["existencia", "En sucursales"],
                     ["cuartoFrio", "Cuarto frío"],
+                    ["sumaSucCf", "Suma suc. y C.F."],
+                    ["stockAf", "Stock"],
+                    ["diferenciaStock", "Diferencia"],
                     ["sobra", "Sobra en sucursales"],
                     ["mandar", "Mandar a producir"],
                   ].map(([key, label]) => (
-                    <th key={key} className={key === "producto" ? "" : "num"} aria-sort={sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+                    <th
+                      key={key}
+                      className={[key === "producto" ? "" : "num", key === "mandar" ? "produce-col" : ""].filter(Boolean).join(" ")}
+                      aria-sort={sort?.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+                    >
                       <button type="button" onClick={() => toggleSort(key)}>
                         {label}{sortLabel(key)}
                       </button>
@@ -7813,23 +8327,52 @@ function NightCutOrderSection({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((row) => (
-                  <tr key={row.producto}>
+                {filtered.map((row) => row.esSeccion ? (
+                  <tr key={`seccion-${row.orden}-${row.producto}`} className="night-cut-section-row">
                     <td>{row.producto}</td>
-                    <td className="num">{formatNumber(row.recomendado, 1)}</td>
-                    <td className="num">{formatNumber(row.cuartoFrio, 0)}</td>
-                    <td className="num">{formatNumber(row.sobra, 0)}</td>
-                    <td className="num produce-col"><span className="produce-badge">{formatNumber(row.mandar, 0)}</span></td>
+                    <td className="num">—</td>
+                    <td className="num">—</td>
+                    <td className="num">{formatNightCutOptional(row.existencia)}</td>
+                    <td className="num">{formatNightCutQty(row.cuartoFrio)}</td>
+                    <td className="num">{formatNightCutOptional(row.sumaSucCf)}</td>
+                    <td className="num">
+                      {formatNightCutOptional(row.stockAf)}
+                      {row.stockAg != null ? <small className="night-cut-other-stock">otro {formatNightCutQty(row.stockAg)}</small> : null}
+                    </td>
+                    <td className={`num${Number(row.diferenciaStock) < 0 ? " is-short" : ""}`}>{formatNightCutOptional(row.diferenciaStock)}</td>
+                    <td className="num">—</td>
+                    <td className="num">—</td>
+                  </tr>
+                ) : (
+                  <tr key={`${row.orden ?? ""}-${row.producto}`}>
+                    <td>{row.producto}</td>
+                    <td className="num">{formatNightCutQty(row.pronostico)}</td>
+                    <td className="num">{formatNightCutQty(row.recomendado)}</td>
+                    <td className="num">{formatNightCutOptional(row.existencia)}</td>
+                    <td className="num">{formatNightCutQty(row.cuartoFrio)}</td>
+                    <td className="num">{formatNightCutOptional(row.sumaSucCf)}</td>
+                    <td className="num">
+                      {formatNightCutOptional(row.stockAf)}
+                      {row.stockAg != null ? <small className="night-cut-other-stock">otro {formatNightCutQty(row.stockAg)}</small> : null}
+                    </td>
+                    <td className={`num${Number(row.diferenciaStock) < 0 ? " is-short" : ""}`}>{formatNightCutOptional(row.diferenciaStock)}</td>
+                    <td className="num">{formatNightCutQty(row.sobra)}</td>
+                    <td className="num produce-col">{formatNightCutQty(row.mandar)}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot>
                 <tr>
                   <th>{listIsFiltered ? "Total de la lista" : "Total"}</th>
-                  <th className="num">{formatNumber(visibleTotals.recomendado, 0)}</th>
-                  <th className="num">{formatNumber(visibleTotals.cuartoFrio, 0)}</th>
-                  <th className="num">{formatNumber(visibleTotals.sobra, 0)}</th>
-                  <th className="num">{formatNumber(visibleTotals.mandar, 0)}</th>
+                  <th className="num">{formatNightCutQty(visibleTotals.pronostico)}</th>
+                  <th className="num">{formatNightCutQty(visibleTotals.recomendado)}</th>
+                  <th className="num">{formatNightCutOptional(visibleTotals.conTotal || visibleTotals.existencia ? visibleTotals.existencia : null)}</th>
+                  <th className="num">{formatNightCutQty(visibleTotals.cuartoFrio)}</th>
+                  <th className="num">{visibleTotals.conTotal ? formatNightCutQty(visibleTotals.sumaSucCf) : "—"}</th>
+                  <th className="num">{visibleTotals.conTotal ? formatNightCutQty(visibleTotals.stockAf) : "—"}</th>
+                  <th className={`num${visibleTotals.diferenciaStock < 0 ? " is-short" : ""}`}>{visibleTotals.conTotal ? formatNightCutQty(visibleTotals.diferenciaStock) : "—"}</th>
+                  <th className="num">{formatNightCutQty(visibleTotals.sobra)}</th>
+                  <th className="num produce-col">{formatNightCutQty(visibleTotals.mandar)}</th>
                 </tr>
               </tfoot>
             </table>
@@ -9347,6 +9890,24 @@ function Dashboard({ session, onLogout }) {
     }
     return map;
   }, [stockRows, nightCutTargets]);
+  const nightCutInventory = useMemo(() => {
+    const fecha = dateKey(nightCutOrder?.productionDate);
+    if (!fecha) return [];
+    const { matched } = matchNightCutProducts(nightCutOrder?.products || [], officialProducts, productAliases);
+    return matched
+      .filter((product) => product.corteTotal && !product.esSeccion)
+      .map((product) => ({
+        fecha,
+        producto: product.producto,
+        existenciaSucursales: product.existenciaSucursales,
+        cuartoFrio: product.cuartoFrio,
+        sobra: product.sobra,
+        sumaSucCf: product.sumaSucCf,
+        stockAf: product.stockAf,
+        stockAg: product.stockAg,
+        diferenciaStock: product.diferenciaStock,
+      }));
+  }, [nightCutOrder, officialProducts, productAliases]);
   const dailyRows = useMemo(
     () =>
       calculateDailyForecast({
@@ -9359,18 +9920,29 @@ function Dashboard({ session, onLogout }) {
         dailyBranchStock: effectiveDailyBranchStock,
         dailyColdRoom: effectiveDailyColdRoom,
         branchStockTargets,
+        nightCutInventory,
       }),
-    [forecast, ventasRealesMes, effectiveRealProduction, selectedMonth, dailyBufferPct, activePromos, effectiveDailyBranchStock, effectiveDailyColdRoom, branchStockTargets]
+    [forecast, ventasRealesMes, effectiveRealProduction, selectedMonth, dailyBufferPct, activePromos, effectiveDailyBranchStock, effectiveDailyColdRoom, branchStockTargets, nightCutInventory]
   );
   const dailyHasInventory = dailyRows.some((row) => row.hasDailyBranchStock || row.hasDailyColdRoom);
   const nightCutMatch = useMemo(() => {
     if (!nightCutOrder?.products?.length) return { matched: [], unmatched: [] };
     return matchNightCutProducts(nightCutOrder.products, officialProducts, productAliases);
   }, [nightCutOrder, officialProducts, productAliases]);
-  const nightCutRows = useMemo(
-    () => buildNightCutOrderRows(dailyRows, nightCutOrder?.productionDate),
-    [dailyRows, nightCutOrder]
-  );
+  const nightCutRows = useMemo(() => {
+    const catalogName = new Map();
+    for (const row of nightCutMatch.matched || []) {
+      const key = normalizeProduct(row.productoOriginal || row.producto);
+      if (key && !catalogName.has(key)) catalogName.set(key, row.producto);
+    }
+    const sheet = (nightCutOrder?.products || []).map((product) => {
+      if (product?.esSeccion) return product;
+      const key = normalizeProduct(product?.productoOriginal || product?.producto);
+      const catalog = catalogName.get(key);
+      return catalog ? { ...product, producto: catalog } : product;
+    });
+    return buildNightCutOrderRows(dailyRows, nightCutOrder?.productionDate, dailyBufferPct, sheet);
+  }, [dailyRows, nightCutOrder, dailyBufferPct, nightCutMatch]);
   const nightCutSinDetalle = nightCutMatch.matched.filter((product) => product.sinDetalleSucursal && product.existenciaSucursales > 0);
   const filteredDailyRows = dailyRows.filter((row) => {
     if (dailyDateFilter && row.fecha !== dailyDateFilter) return false;
@@ -10363,6 +10935,7 @@ export {
   buildNightCutOrderRows,
   summarizeNightCutOrder,
   sortNightCutOrderRows,
+  presentNightCutRows,
   buildNightCutExportRows,
   buildNightCutExportWorkbook,
   NIGHT_CUT_FORMULA,
