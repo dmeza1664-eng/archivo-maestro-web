@@ -50,6 +50,7 @@ async function main() {
     sortNightCutOrderRows,
     summarizeNightCutOrder,
     buildNightCutExportRows,
+    buildNightCutExportWorkbook,
     sumDailyBranchExcessByProductDate,
     branchStockKey,
     normalizeProduct,
@@ -70,6 +71,20 @@ async function main() {
   assert(section.includes("Calcular mandar a producir"), "el encargado confirma antes de calcular");
   assert(section.includes("Esa fecha se ve atrasada"), "se avisa si la fecha del archivo se ve atrasada");
   assert(section.includes("NIGHT_CUT_FORMULA"), "la fórmula de una línea está en la página");
+  assert(section.includes("night-cut-equation"), "el desglose se ve en recuadros");
+  assert(section.includes("Pronóstico"), "la tabla muestra el pronóstico");
+  assert(section.includes("sin margen"), "el pronóstico se marca sin margen");
+  assert(section.includes("Margen de seguridad"), "el margen de seguridad es un recuadro");
+  assert(section.includes('role="switch"'), "ocultar ceros es un interruptor con etiqueta");
+  assert(section.includes("Ocultar productos en cero"), "el interruptor dice qué oculta");
+  assert(section.includes("night-cut-dates"), "el encabezado muestra inventario y pedido");
+  assert(section.includes("Pedido para"), "la fecha del pedido queda a la vista");
+  assert(section.includes("night-cut-caption"), "la explicación queda en una línea corta");
+  assert(!section.includes('className="night-cut-formula"'), "la fórmula larga ya no es un bloque gris");
+  const css = fs.readFileSync(path.join(__dirname, "..", "style.css"), "utf8");
+  assert(/\.night-cut-table\s*\{[^}]*min-width:\s*0/.test(css), "la tabla del corte no fuerza el ancho de las demás tablas");
+  assert(css.includes(".night-cut-toggle"), "el interruptor de ceros tiene estilo propio");
+  assert(/\.night-cut-table th\.produce-col[\s\S]*?text-align:\s*right/.test(css), "Mandar a producir queda alineado a la derecha");
   assert(page.includes("<NightCutOrderSection"), "el tablero muestra el pedido del corte");
   assert(!/Inventario del día/.test(page), "no regresa el panel viejo de inventario del día");
   assert(!/colch[oó]n/i.test(section), "el bloque del encargado no dice colchón");
@@ -158,16 +173,62 @@ async function main() {
   ], "2026-10-15");
   assert(orderRows.length === 1 && orderRows[0].mandar === 11 && orderRows[0].recomendado === 20, "la tabla del encargado es la del día de producción");
   assert(orderRows[0].cuartoFrio === 5 && orderRows[0].sobra === 4, "la tabla muestra cuarto frío y sobra");
+  assert(Math.abs(orderRows[0].pronostico - 20 / 1.1) < 1e-9, "el pronóstico es el recomendado sin el margen de seguridad");
+  assert(Math.abs(orderRows[0].pronostico + orderRows[0].margen - orderRows[0].recomendado) < 1e-9, "pronóstico más margen de seguridad es el recomendado");
+  const conPronostico = buildNightCutOrderRows([
+    {
+      fecha: "2026-10-15",
+      producto: "PINA GDE",
+      pronosticoVentaDia: 20,
+      colchonDiario: 2,
+      baseConColchonDia: 22,
+      baseSinLoteDia: 22,
+      aProducirDia: 20,
+    },
+  ], "2026-10-15", 10);
+  assert(conPronostico[0].pronostico === 20 && conPronostico[0].margen === 2, "si el día ya trae pronóstico, se muestra ese número");
+  const sabado = buildNightCutOrderRows([
+    {
+      fecha: "2026-10-17",
+      producto: "FRUTAS GDE",
+      pronosticoVentaDia: 20,
+      colchonDiario: 2,
+      baseConColchonDia: 22,
+      baseSinLoteDia: 33,
+      aProducirDia: 30,
+    },
+  ], "2026-10-17", 10);
+  assert(Math.abs(sabado[0].pronostico - 30) < 1e-9 && Math.abs(sabado[0].margen - 3) < 1e-9, "el sábado incluye el pronóstico del domingo, todavía sin margen");
+  const promo = buildNightCutOrderRows([
+    {
+      fecha: "2026-10-15",
+      producto: "GELATINA IND FRESA",
+      promoActiva: true,
+      pronosticoVentaDia: 10,
+      colchonDiario: 1,
+      baseSinLoteDia: 15,
+      aProducirDia: 12,
+    },
+  ], "2026-10-15", 10);
+  assert(promo[0].pronostico === 10 && promo[0].margen === 1 && promo[0].recomendado === 15, "la promo no se disfraza de margen de seguridad");
   const sorted = sortNightCutOrderRows([
-    { producto: "MOKA GDE", mandar: 2, recomendado: 1, cuartoFrio: 0, sobra: 0 },
-    { producto: "PINA GDE", mandar: 11, recomendado: 3, cuartoFrio: 0, sobra: 0 },
-  ], { key: "mandar", dir: "desc" });
-  assert(sorted[0].producto === "PINA GDE", "se puede ordenar por Mandar a producir");
-  const totals = summarizeNightCutOrder(sorted);
-  assert(totals.mandar === 13 && totals.productos === 2, "el total suma lo que se manda");
-  const exported = buildNightCutExportRows(sorted);
+    { producto: "MOKA GDE", mandar: 2, recomendado: 1, pronostico: 0.9, margen: 0.1, cuartoFrio: 0, sobra: 0 },
+    { producto: "PINA GDE", mandar: 11, recomendado: 3, pronostico: 2.7, margen: 0.3, cuartoFrio: 0, sobra: 0 },
+  ], { key: "pronostico", dir: "desc" });
+  assert(sorted[0].producto === "PINA GDE", "se puede ordenar por pronóstico");
+  const byMandar = sortNightCutOrderRows(sorted, { key: "mandar", dir: "desc" });
+  assert(byMandar[0].producto === "PINA GDE", "se puede ordenar por Mandar a producir");
+  const totals = summarizeNightCutOrder(byMandar);
+  assert(totals.mandar === 13 && totals.productos === 2 && Math.abs(totals.pronostico - 3.6) < 1e-9, "el total suma pronóstico y lo que se manda");
+  const exported = buildNightCutExportRows(byMandar);
+  assert(Object.keys(exported[0]).join("|") === ["Producto", "Pronóstico", "Recomendado", "Cuarto frío restante", "Sobra en sucursales", "Mandar a producir"].join("|"), "el Excel incluye Pronóstico junto a Recomendado");
   assert(exported.at(-1).Producto === "TOTAL" && exported.at(-1)["Mandar a producir"] === 13, "el Excel cierra con el total");
+  assert(exported.at(-1)["Pronóstico"] === 3.6, "el total del Excel incluye el pronóstico");
   assert(!exported.some((row) => Object.keys(row).some((key) => /error|%/i.test(key))), "el Excel no lleva columnas de error");
+  assert(!exported.some((row) => Object.keys(row).some((key) => /colch[oó]n/i.test(key))), "el Excel no dice colchón");
+  const exportWorkbook = buildNightCutExportWorkbook(byMandar, { productionDate: "2026-10-16", inventoryDate: "2026-10-15" });
+  const note = XLSX.utils.sheet_to_json(exportWorkbook.Sheets.Nota, { header: 1 });
+  assert(String(note[2][1]).includes("margen de seguridad") && !/colch[oó]n/i.test(String(note[2][1])), "la nota del Excel conserva la fórmula");
 
   console.log("night-cut-inventory-test ok");
   console.log(`ejemplo 2026-10-14 → pedido 2026-10-15: PIÑA existencia ${pina.existenciaSucursales}, sobra ${pina.sobra}, CF ${pina.cuartoFrio}; FRUTAS existencia ${frutas.existenciaSucursales}, sobra ${frutas.sobra}, CF ${frutas.cuartoFrio}; MOKA existencia ${moka.existenciaSucursales}, sobra ${moka.sobra}, CF ${moka.cuartoFrio}; sin catálogo con piezas ${unmatched.filter((row) => row.existenciaSucursales > 0 || row.cuartoFrio > 0).length}`);
