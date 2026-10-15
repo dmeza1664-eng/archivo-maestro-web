@@ -4525,6 +4525,19 @@ label.night-cut-toggle input:focus-visible + .night-cut-switch {
   text-align: right;
 }
 
+.night-cut-other-stock {
+  color: #8a6a52;
+  display: block;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.night-cut-table td.is-short,
+.night-cut-table tfoot th.is-short {
+  color: #9b2c2c;
+}
+
 .night-cut-unmatched {
   background: #fff7ef;
   border-radius: 12px;
