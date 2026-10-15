@@ -7789,21 +7789,10 @@ function NightCutOrderSection({
         <div>
           <span className="eyebrow">Para el encargado de turno</span>
           <h3>Mandar a producir</h3>
-          <p>Después del reparto, este corte dice cuánto pedir a planta. El pedido es del día siguiente (de lunes a sábado). El domingo se pide el lunes.</p>
+          {!order && (
+            <p>Después del reparto, este corte dice cuánto pedir a planta. El pedido es del día siguiente (de lunes a sábado). El domingo se pide el lunes.</p>
+          )}
         </div>
-        {order && (
-          <div className="night-cut-dates">
-            <div className="night-cut-date">
-              <span>Inventario</span>
-              <strong>{displayWeekdayDate(order.inventoryDate) || "Sin fecha"}</strong>
-              {order.fileName ? <small>{order.fileName}</small> : null}
-            </div>
-            <div className="night-cut-date night-cut-date-order">
-              <span>Pedido para</span>
-              <strong>{displayWeekdayDate(order.productionDate) || "Sin fecha"}</strong>
-            </div>
-          </div>
-        )}
       </div>
 
       {draft && (
@@ -7843,22 +7832,47 @@ function NightCutOrderSection({
 
       {order && (
         <div className="night-cut-result">
+          <div className="night-cut-dates">
+            <div className="night-cut-date">
+              <span>Inventario</span>
+              <strong>{displayWeekdayDate(order.inventoryDate) || "Sin fecha"}</strong>
+              {order.fileName ? <small>{order.fileName}</small> : null}
+            </div>
+            <div className="night-cut-date night-cut-date-order">
+              <span>Pedido para</span>
+              <strong>{displayWeekdayDate(order.productionDate) || "Sin fecha"}</strong>
+            </div>
+          </div>
           {rows.length > 0 && (
             <div
               className="night-cut-equation"
               role="group"
               aria-label={`Pronóstico ${formatNightCutQty(totals.pronostico)} sin margen, más margen de seguridad ${formatNightCutQty(totals.margen)}, recomendado ${formatNightCutQty(totals.recomendado)}, menos cuarto frío ${formatNightCutQty(totals.cuartoFrio)}, menos sobra en sucursales ${formatNightCutQty(totals.sobra)}, mandar a producir ${formatNightCutQty(totals.mandar)}`}
             >
-              {equation.map((step) => (
-                <article key={step.key} className={`night-cut-step${step.result ? " is-result" : ""}`}>
-                  <span className="night-cut-step-label">
-                    {step.op ? <span className="night-cut-op" aria-hidden="true">{step.op}</span> : null}
-                    {step.label}
-                  </span>
-                  <strong>{formatNightCutQty(step.value)}</strong>
-                  {step.hint ? <small>{step.hint}</small> : <small aria-hidden="true">&nbsp;</small>}
-                </article>
-              ))}
+              <div className="night-cut-math">
+                {equation.slice(0, 3).map((step) => (
+                  <article key={step.key} className="night-cut-step">
+                    <span className="night-cut-step-label">
+                      {step.op ? <span className="night-cut-op" aria-hidden="true">{step.op}</span> : null}
+                      {step.label}
+                    </span>
+                    <strong>{formatNightCutQty(step.value)}</strong>
+                    {step.hint ? <small>{step.hint}</small> : <small aria-hidden="true">&nbsp;</small>}
+                  </article>
+                ))}
+              </div>
+              <div className="night-cut-math night-cut-math-result">
+                {equation.slice(3).map((step) => (
+                  <article key={step.key} className={`night-cut-step${step.result ? " is-result" : ""}`}>
+                    <span className="night-cut-step-label">
+                      {step.op ? <span className="night-cut-op" aria-hidden="true">{step.op}</span> : null}
+                      {step.label}
+                    </span>
+                    <strong>{formatNightCutQty(step.value)}</strong>
+                    {step.hint ? <small>{step.hint}</small> : <small aria-hidden="true">&nbsp;</small>}
+                  </article>
+                ))}
+              </div>
             </div>
           )}
           <p className="night-cut-caption">

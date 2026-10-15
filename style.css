@@ -4210,7 +4210,6 @@ tbody tr:hover {
 }
 
 .night-cut-heading > div:first-child {
-  flex: 1 1 280px;
   min-width: 0;
 }
 
@@ -4268,11 +4267,34 @@ tbody tr:hover {
   min-width: 0;
 }
 
+.night-cut-result > .night-cut-dates {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+  width: 100%;
+}
+
+.night-cut-result > .night-cut-dates .night-cut-date {
+  min-width: 0;
+}
+
+.night-cut-result > .night-cut-dates .night-cut-date strong {
+  font-size: 22px;
+}
+
 .night-cut-equation {
-  align-items: stretch;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 8px;
+}
+
+.night-cut-math {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.night-cut-math-result {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr);
 }
 
 .night-cut-step {
@@ -4280,10 +4302,9 @@ tbody tr:hover {
   border: 1px solid rgba(154, 84, 36, 0.16);
   border-radius: 12px;
   display: grid;
-  flex: 1 1 148px;
   gap: 2px;
   min-width: 0;
-  padding: 12px 12px 10px;
+  padding: 12px 14px 10px;
 }
 
 .night-cut-step-label {
@@ -4291,12 +4312,10 @@ tbody tr:hover {
   color: #6d5c4e;
   display: flex;
   flex-wrap: wrap;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
   gap: 6px;
-  letter-spacing: 0.01em;
   line-height: 1.25;
-  text-transform: uppercase;
 }
 
 .night-cut-op {
@@ -4324,7 +4343,6 @@ tbody tr:hover {
 .night-cut-step.is-result {
   background: #6b3817;
   border-color: #6b3817;
-  flex: 1.4 1 190px;
 }
 
 .night-cut-step.is-result .night-cut-step-label,
@@ -4532,15 +4550,22 @@ label.night-cut-toggle input:focus-visible + .night-cut-switch {
     flex: 1 1 180px;
     min-width: 0;
   }
+
+  .night-cut-result > .night-cut-dates .night-cut-date strong {
+    font-size: 18px;
+  }
 }
 
 @media (max-width: 720px) {
-  .night-cut-date-card {
+  .night-cut-date-card,
+  .night-cut-result > .night-cut-dates,
+  .night-cut-math,
+  .night-cut-math-result {
     grid-template-columns: 1fr;
   }
 
   .night-cut-step.is-result {
-    flex-basis: 100%;
+    grid-column: auto;
   }
 
   .night-cut-step.is-result strong {

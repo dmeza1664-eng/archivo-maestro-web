@@ -78,6 +78,11 @@ async function main() {
   assert(section.includes('role="switch"'), "ocultar ceros es un interruptor con etiqueta");
   assert(section.includes("Ocultar productos en cero"), "el interruptor dice qué oculta");
   assert(section.includes("night-cut-dates"), "el encabezado muestra inventario y pedido");
+  const resultAt = section.indexOf('className="night-cut-result"');
+  const datesAt = section.indexOf("night-cut-dates", resultAt);
+  const equationAt = section.indexOf("night-cut-equation", resultAt);
+  const tableAt = section.indexOf("night-cut-table", resultAt);
+  assert(resultAt > 0 && datesAt < equationAt && equationAt < tableAt, "el resultado muestra fechas, luego el desglose y luego la tabla");
   assert(section.includes("Pedido para"), "la fecha del pedido queda a la vista");
   assert(section.includes("night-cut-caption"), "la explicación queda en una línea corta");
   assert(!section.includes('className="night-cut-formula"'), "la fórmula larga ya no es un bloque gris");
