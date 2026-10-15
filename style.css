@@ -4135,3 +4135,174 @@ tbody tr:hover {
 .daily-table td:nth-child(-n+3) {
   text-align: left;
 }
+
+.main > .night-cut-section { order: 4; }
+
+.night-cut-section {
+  background: #fffdf9;
+  border: 1px solid rgba(154, 84, 36, 0.18);
+  border-radius: 16px;
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.night-cut-date-card {
+  align-items: start;
+  background: #fff7ef;
+  border-radius: 14px;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  padding: 16px;
+}
+
+.night-cut-date-label {
+  display: grid;
+  font-size: 15px;
+  font-weight: 650;
+  gap: 8px;
+}
+
+.night-cut-date-label input {
+  font-size: 18px;
+  min-height: 48px;
+  padding: 8px 10px;
+}
+
+.night-cut-date-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.night-cut-date-copy p,
+.night-cut-formula,
+.night-cut-when,
+.night-cut-hint {
+  margin: 0;
+}
+
+.night-cut-stale {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+}
+
+.night-cut-confirm {
+  font-size: 16px;
+  justify-self: start;
+  min-height: 52px;
+  padding-inline: 22px;
+}
+
+.night-cut-formula {
+  background: #f6f3ef;
+  border-radius: 10px;
+  line-height: 1.45;
+  padding: 10px 12px;
+}
+
+.night-cut-hero {
+  display: grid;
+  gap: 2px;
+}
+
+.night-cut-hero span,
+.night-cut-hero small {
+  color: #6d5c4e;
+}
+
+.night-cut-hero strong {
+  color: #6b3817;
+  font-size: 56px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.night-cut-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.night-cut-hide {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.night-cut-table {
+  width: 100%;
+}
+
+.night-cut-table th,
+.night-cut-table td {
+  padding: 10px 8px;
+}
+
+.night-cut-table th button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  padding: 0;
+}
+
+.night-cut-table th.num,
+.night-cut-table td.num,
+.night-cut-table tfoot th.num {
+  text-align: right;
+}
+
+.night-cut-table tfoot th {
+  border-top: 2px solid rgba(154, 84, 36, 0.35);
+  font-size: 16px;
+}
+
+.night-cut-table .produce-col {
+  text-align: center;
+}
+
+.night-cut-unmatched {
+  background: #fff7ef;
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.night-cut-unmatched ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+@media (max-width: 720px) {
+  .night-cut-date-card {
+    grid-template-columns: 1fr;
+  }
+
+  .night-cut-hero strong {
+    font-size: 42px;
+  }
+}
+
+@media print {
+  .main > *:not(.night-cut-section) {
+    display: none !important;
+  }
+
+  .night-cut-no-print {
+    display: none !important;
+  }
+
+  .night-cut-section {
+    border: 0;
+    padding: 0;
+  }
+
+  .night-cut-hero strong {
+    font-size: 32px;
+  }
+}

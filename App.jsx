@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   Target,
   TrendingUp,
+  Printer,
   Upload,
   UserRound,
   Megaphone,
@@ -24,6 +25,7 @@ import {
 } from "lucide-react";
 import "./style.css";
 import diaDeMuertosTemporada from "./datos/catalogo/temporada-dia-muertos.json";
+import stockCodigoMap from "./datos/catalogo/stock-codigo-map.json";
 
 const INVALID_PRODUCTS = new Set([
   "",
@@ -2098,6 +2100,453 @@ function isUsableBranchLocation(value) {
   return true;
 }
 
+// Corte de noche (Inventario de hoy): el libro real trae muchas hojas que no
+// son piso ni restante. EXISTENCIA EN SUCURSALES es el piso por local;
+// EXIST. SUCURSALES Y RESTANTE CF es el total y el cuarto frío que sí se
+// resta; STOCK DE SUCURSALES (2) es el stock fijo del mismo corte. La celda A1
+// a menudo queda vieja: se lee solo para mostrarla, no para fechar las filas.
+const NIGHT_CUT_FORMULA = "Mandar a producir = pronóstico del día de producción + margen de seguridad − cuarto frío restante − lo que sobra del stock fijo en sucursales; nunca baja de 0 y en pasteles se redondea al lote de planta.";
+
+function sheetMatrix(sheet) {
+  return sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" }) : [];
+}
+
+function blankCell(value) {
+  return value === "" || value === null || value === undefined || String(value).trim() === "";
+}
+
+function isNightCutSummarySheet(name) {
+  const label = norm(name);
+  return label.includes("EXIST") && label.includes("SUCURSAL") && label.includes("RESTANTE") && (label.includes("CF") || label.includes("FRIO"));
+}
+
+function isNightCutExistenciaSheet(name) {
+  const label = norm(name);
+  return label.includes("EXISTENCIA EN SUCURSALES") && !label.includes("RESTANTE") && !label.includes("DISTRIB");
+}
+
+function isNightCutStockSheet(name) {
+  const label = norm(name);
+  return label.includes("STOCK") && label.includes("SUCURSAL") && !label.includes("TOTAL A TENER") && !label.includes("EXIST");
+}
+
+function isNightCutWorkbook(workbook) {
+  const names = workbook?.SheetNames || [];
+  return names.some(isNightCutSummarySheet) && names.some(isNightCutExistenciaSheet);
+}
+
+function isNightCutBranchHeader(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return false;
+  if (isReservedDailyStockHeader(raw) || looksLikeColdRoomHeader(raw) || looksLikeRollupOrTargetName(raw)) return false;
+  if (looksLikeProductHeader(raw) || looksLikeBareRestanteHeader(raw)) return false;
+  return true;
+}
+
+function findNightCutBranchHeader(rows) {
+  for (let i = 0; i < Math.min(rows.length, 8); i += 1) {
+    const row = rows[i] || [];
+    const productIdx = row.findIndex((cell) => looksLikeProductHeader(cell));
+    if (productIdx < 0) continue;
+    const branches = [];
+    row.forEach((cell, index) => {
+      if (index === productIdx || !isNightCutBranchHeader(cell)) return;
+      branches.push({ index, sucursal: String(cell).trim() });
+    });
+    if (branches.length >= 3) return { headerIndex: i, productIdx, branches };
+  }
+  return null;
+}
+
+function findNightCutSummaryHeader(rows) {
+  for (let i = 0; i < Math.min(rows.length, 8); i += 1) {
+    const row = (rows[i] || []).map(norm);
+    const productIdx = row.findIndex((cell) => looksLikeProductHeader(cell));
+    const sucIdx = row.findIndex((cell) => cell.includes("EXISTENCIA") && cell.includes("SUCURSAL"));
+    const cfIdx = row.findIndex((cell) => cell.includes("RESTANTE") && (cell.includes("CUARTO") || cell.includes("FRIO") || cell.includes("CF")));
+    if (productIdx >= 0 && sucIdx >= 0 && cfIdx >= 0) return { headerIndex: i, productIdx, sucIdx, cfIdx };
+  }
+  return null;
+}
+
+function readNightCutFileDate(workbook) {
+  const names = workbook?.SheetNames || [];
+  const preferred = [
+    names.find(isNightCutSummarySheet),
+    names.find(isNightCutExistenciaSheet),
+    names[0],
+  ].filter(Boolean);
+  for (const name of preferred) {
+    const rows = sheetMatrix(workbook.Sheets[name]);
+    const parsed = dateKey(parseDateCell(rows[0]?.[0]));
+    if (parsed) return parsed;
+  }
+  return "";
+}
+
+function nightCutFileDateLooksStale(fileDate, today = todayKey()) {
+  const file = dateKey(fileDate);
+  const now = dateKey(today);
+  if (!file || !now) return true;
+  const fileDateValue = parseDateCell(file);
+  const todayValue = parseDateCell(now);
+  if (!fileDateValue || !todayValue) return true;
+  const ageDays = Math.round((todayValue.getTime() - fileDateValue.getTime()) / 86400000);
+  return ageDays > 1 || ageDays < 0;
+}
+
+// El corte es de la noche, después del reparto. El pedido es para el siguiente
+// día de planta (lunes a sábado). El domingo se pide el lunes.
+function productionDayForNightCut(inventoryDate) {
+  const start = parseDateCell(inventoryDate);
+  if (!start) return "";
+  const next = addDays(start, 1);
+  while (next.getDay() === 0) next.setDate(next.getDate() + 1);
+  return dateKey(next);
+}
+
+function collectNightCutProductCodes(workbook) {
+  const codes = new Map();
+  for (const sheetName of workbook?.SheetNames || []) {
+    const rows = sheetMatrix(workbook.Sheets[sheetName]);
+    let headerIndex = -1;
+    let productCol = -1;
+    let codeCol = -1;
+    for (let i = 0; i < Math.min(rows.length, 8); i += 1) {
+      const row = (rows[i] || []).map(norm);
+      const productIdx = row.findIndex((cell) => cell === "PRODUCTO" || cell.startsWith("PRODUCTO "));
+      const codeIdx = row.findIndex((cell) => cell === "CODIGO");
+      if (productIdx >= 0 && codeIdx >= 0) {
+        headerIndex = i;
+        productCol = productIdx;
+        codeCol = codeIdx;
+        break;
+      }
+    }
+    if (headerIndex < 0) continue;
+    for (let i = headerIndex + 1; i < rows.length; i += 1) {
+      const original = String(rows[i][productCol] ?? "").trim();
+      const code = String(rows[i][codeCol] ?? "").trim();
+      if (!original || !code || !isValidInventoryProduct(original, rows[i])) continue;
+      const key = normalizeProduct(original);
+      if (!codes.has(key)) codes.set(key, code);
+    }
+  }
+  return codes;
+}
+
+function lookupStockCodigo(codigo) {
+  const raw = String(codigo ?? "").trim();
+  if (!raw || !stockCodigoMap || typeof stockCodigoMap !== "object") return null;
+  const upper = raw.toUpperCase();
+  return stockCodigoMap[raw]
+    || stockCodigoMap[upper]
+    || stockCodigoMap[raw.replace(/^0+(?=\d)/, "")]
+    || stockCodigoMap[upper.padStart(2, "0")]
+    || null;
+}
+
+function readNightCutBranchMatrix(workbook, sheetPredicate) {
+  const sheetName = (workbook?.SheetNames || []).find(sheetPredicate);
+  if (!sheetName) return new Map();
+  const rows = sheetMatrix(workbook.Sheets[sheetName]);
+  const header = findNightCutBranchHeader(rows);
+  if (!header) return new Map();
+  const byProduct = new Map();
+  for (let i = header.headerIndex + 1; i < rows.length; i += 1) {
+    const original = String(rows[i][header.productIdx] ?? "").trim();
+    if (!original || !isValidInventoryProduct(original, rows[i])) continue;
+    const key = normalizeProduct(original);
+    const cells = [];
+    for (const branch of header.branches) {
+      const raw = rows[i][branch.index];
+      if (blankCell(raw)) continue;
+      cells.push({ sucursal: branch.sucursal, value: Math.round(toNumber(raw)) });
+    }
+    if (!byProduct.has(key)) byProduct.set(key, cells);
+  }
+  return byProduct;
+}
+
+function nightCutExcess(sucursales, targets) {
+  const targetByBranch = new Map((targets || []).map((target) => [branchStockKey(target.sucursal), target.stock]));
+  let sobra = 0;
+  let piso = 0;
+  let stockFijo = 0;
+  let sinStockFijo = 0;
+  for (const row of sucursales || []) {
+    piso += row.cantidad;
+    const target = targetByBranch.get(branchStockKey(row.sucursal));
+    if (target === undefined) {
+      sinStockFijo += 1;
+      continue;
+    }
+    stockFijo += target;
+    sobra += Math.max(0, row.cantidad - target);
+  }
+  return { sobra, piso, stockFijo, sinStockFijo };
+}
+
+function isNightCutRollup(details, suc, cf) {
+  let accSuc = 0;
+  let accCf = 0;
+  let count = 0;
+  for (let index = details.length - 1; index >= 0; index -= 1) {
+    accSuc += details[index].suc;
+    accCf += details[index].cf;
+    count += 1;
+    if (count >= 2 && accSuc === suc && accCf === cf) return true;
+    if (accSuc > suc && accCf > cf) return false;
+  }
+  return false;
+}
+
+function parseNightCutWorkbook(workbook) {
+  if (!isNightCutWorkbook(workbook)) return null;
+  const summaryName = workbook.SheetNames.find(isNightCutSummarySheet);
+  const summaryRows = sheetMatrix(workbook.Sheets[summaryName]);
+  const summaryHeader = findNightCutSummaryHeader(summaryRows);
+  if (!summaryHeader) return null;
+
+  const existencia = readNightCutBranchMatrix(workbook, isNightCutExistenciaSheet);
+  const stock = readNightCutBranchMatrix(workbook, isNightCutStockSheet);
+  const codes = collectNightCutProductCodes(workbook);
+  const products = [];
+  const details = [];
+
+  for (let i = summaryHeader.headerIndex + 1; i < summaryRows.length; i += 1) {
+    const row = summaryRows[i] || [];
+    const productoOriginal = String(row[summaryHeader.productIdx] ?? "").trim();
+    if (!productoOriginal || !isValidInventoryProduct(productoOriginal, row)) continue;
+    const sucBlank = blankCell(row[summaryHeader.sucIdx]);
+    const cfBlank = blankCell(row[summaryHeader.cfIdx]);
+    if (sucBlank && cfBlank) continue;
+    const existenciaSucursales = Math.round(toNumber(row[summaryHeader.sucIdx]));
+    const cuartoFrioArchivo = Math.round(toNumber(row[summaryHeader.cfIdx]));
+    if (isNightCutRollup(details, existenciaSucursales, cuartoFrioArchivo)) continue;
+    details.push({ suc: existenciaSucursales, cf: cuartoFrioArchivo });
+
+    const producto = normalizeProduct(productoOriginal);
+    const sucursales = (existencia.get(producto) || [])
+      .filter((cell) => isUsableBranchLocation(cell.sucursal))
+      .map((cell) => ({ sucursal: cell.sucursal, cantidad: Math.max(0, cell.value) }));
+    const targets = (stock.get(producto) || [])
+      .filter((cell) => isUsableBranchLocation(cell.sucursal))
+      .map((cell) => ({ sucursal: cell.sucursal, stock: Math.max(0, cell.value) }));
+    const excess = nightCutExcess(sucursales, targets);
+    products.push({
+      producto,
+      productoOriginal,
+      codigo: codes.get(producto) || "",
+      existenciaSucursales: Math.max(0, existenciaSucursales),
+      cuartoFrio: Math.max(0, cuartoFrioArchivo),
+      sucursales,
+      targets,
+      sobra: excess.sobra,
+      piso: excess.piso,
+      stockFijo: excess.stockFijo,
+      sinStockFijo: excess.sinStockFijo,
+      sinDetalleSucursal: sucursales.length === 0 && existenciaSucursales > 0,
+    });
+  }
+
+  const branchRows = products.flatMap((product) => product.sucursales.map((row) => ({
+    sucursal: row.sucursal,
+    producto: product.producto,
+    productoOriginal: product.productoOriginal,
+    cantidad: row.cantidad,
+  })));
+  const coldRows = products.map((product) => ({
+    producto: product.producto,
+    productoOriginal: product.productoOriginal,
+    cantidad: product.cuartoFrio,
+  }));
+  const targets = products.flatMap((product) => product.targets.map((target) => ({
+    sucursal: target.sucursal,
+    producto: product.producto,
+    productoOriginal: product.productoOriginal,
+    stock: target.stock,
+  })));
+
+  return {
+    format: "corte-noche",
+    fileDate: readNightCutFileDate(workbook),
+    products,
+    branchRows,
+    coldRows,
+    targets,
+  };
+}
+
+function matchNightCutProduct(product, officialProducts = [], productAliases = {}) {
+  const catalog = Array.isArray(officialProducts) ? officialProducts : [];
+  const byName = findOfficialProduct(product?.productoOriginal || product?.producto, catalog)
+    || findOfficialProduct(product?.producto, catalog);
+  if (byName) return byName;
+  const normalized = normalizeProduct(product?.producto || product?.productoOriginal);
+  const manual = productAliases?.[normalized];
+  if (manual && catalog.includes(normalizeProduct(manual))) return normalizeProduct(manual);
+  const entry = lookupStockCodigo(product?.codigo);
+  if (!entry) return "";
+  return findOfficialProduct(entry.producto || entry.productoOriginal, catalog) || "";
+}
+
+function slimNightCutProduct(product) {
+  return {
+    producto: normalizeProduct(product?.productoOriginal || product?.producto),
+    productoOriginal: String(product?.productoOriginal || product?.producto || "").trim(),
+    codigo: String(product?.codigo || "").trim(),
+    existenciaSucursales: Math.max(0, Math.round(toNumber(product?.existenciaSucursales))),
+    cuartoFrio: Math.max(0, Math.round(toNumber(product?.cuartoFrio))),
+    sobra: Math.max(0, Math.round(toNumber(product?.sobra))),
+    sinDetalleSucursal: Boolean(product?.sinDetalleSucursal),
+  };
+}
+
+function matchNightCutProducts(products, officialProducts = [], productAliases = {}) {
+  const matched = [];
+  const unmatched = [];
+  for (const product of products || []) {
+    const producto = matchNightCutProduct(product, officialProducts, productAliases);
+    if (producto) matched.push({ ...product, producto });
+    else unmatched.push({ ...product, producto: "" });
+  }
+  return { matched, unmatched };
+}
+
+function nightCutRowsForDate(matchedProducts, fecha) {
+  const branchByKey = new Map();
+  const coldByKey = new Map();
+  const targetByKey = new Map();
+  for (const product of matchedProducts || []) {
+    if (!product?.producto || !fecha) continue;
+    for (const row of product.sucursales || []) {
+      const key = `${normalizeProduct(product.producto)}|${branchStockKey(row.sucursal)}`;
+      const current = branchByKey.get(key);
+      if (current) current.cantidad += row.cantidad;
+      else {
+        branchByKey.set(key, {
+          fecha,
+          sucursal: row.sucursal,
+          producto: product.producto,
+          productoOriginal: product.productoOriginal || product.producto,
+          cantidad: row.cantidad,
+        });
+      }
+    }
+    const coldKey = normalizeProduct(product.producto);
+    const cold = coldByKey.get(coldKey);
+    const cantidad = Math.max(0, Math.round(toNumber(product.cuartoFrio)));
+    if (cold) cold.cantidad += cantidad;
+    else {
+      coldByKey.set(coldKey, {
+        fecha,
+        producto: product.producto,
+        productoOriginal: product.productoOriginal || product.producto,
+        cantidad,
+      });
+    }
+    for (const target of product.targets || []) {
+      const key = `${normalizeProduct(product.producto)}|${branchStockKey(target.sucursal)}`;
+      if (!targetByKey.has(key)) {
+        targetByKey.set(key, {
+          sucursal: target.sucursal,
+          producto: product.producto,
+          stock: Math.max(0, Number(target.stock) || 0),
+        });
+      }
+    }
+  }
+  return {
+    branchStock: sanitizeDailyBranchStock([...branchByKey.values()]),
+    coldRoom: sanitizeDailyColdRoom([...coldByKey.values()]),
+    targets: [...targetByKey.values()],
+  };
+}
+
+function buildNightCutOrderRows(dailyRows, productionDate) {
+  const fecha = dateKey(productionDate);
+  if (!fecha) return [];
+  return (dailyRows || [])
+    .filter((row) => row.fecha === fecha)
+    .map((row) => ({
+      producto: row.producto,
+      recomendado: Number(row.baseSinLoteDia) || 0,
+      cuartoFrio: row.hasDailyColdRoom ? Number(row.cuartoFrioDia) || 0 : 0,
+      sobra: row.hasDailyBranchStock ? Number(row.excedenteSucursalesDia) || 0 : 0,
+      mandar: Number(row.aProducirDia ?? row.produccionSugeridaDia) || 0,
+      tieneInventario: Boolean(row.hasDailyBranchStock || row.hasDailyColdRoom),
+    }));
+}
+
+function summarizeNightCutOrder(rows) {
+  return (rows || []).reduce((totals, row) => ({
+    productos: totals.productos + 1,
+    recomendado: totals.recomendado + (Number(row.recomendado) || 0),
+    cuartoFrio: totals.cuartoFrio + (Number(row.cuartoFrio) || 0),
+    sobra: totals.sobra + (Number(row.sobra) || 0),
+    mandar: totals.mandar + (Number(row.mandar) || 0),
+  }), { productos: 0, recomendado: 0, cuartoFrio: 0, sobra: 0, mandar: 0 });
+}
+
+function sortNightCutOrderRows(rows, sort = { key: "mandar", dir: "desc" }) {
+  const key = sort?.key || "mandar";
+  const dir = sort?.dir === "asc" ? 1 : -1;
+  return [...(rows || [])].sort((left, right) => {
+    if (key === "producto") return dir * String(left.producto).localeCompare(String(right.producto), "es");
+    const delta = (Number(left[key]) || 0) - (Number(right[key]) || 0);
+    if (delta) return dir * delta;
+    return String(left.producto).localeCompare(String(right.producto), "es");
+  });
+}
+
+const NIGHT_CUT_EXPORT_COLUMNS = ["Producto", "Recomendado", "Cuarto frío restante", "Sobra en sucursales", "Mandar a producir"];
+
+function buildNightCutExportRows(rows) {
+  const body = (rows || []).map((row) => ({
+    Producto: row.producto,
+    Recomendado: Number((Number(row.recomendado) || 0).toFixed(2)),
+    "Cuarto frío restante": Math.round(Number(row.cuartoFrio) || 0),
+    "Sobra en sucursales": Math.round(Number(row.sobra) || 0),
+    "Mandar a producir": Math.round(Number(row.mandar) || 0),
+  }));
+  const totals = summarizeNightCutOrder(rows);
+  body.push({
+    Producto: "TOTAL",
+    Recomendado: Number(totals.recomendado.toFixed(2)),
+    "Cuarto frío restante": Math.round(totals.cuartoFrio),
+    "Sobra en sucursales": Math.round(totals.sobra),
+    "Mandar a producir": Math.round(totals.mandar),
+  });
+  return body;
+}
+
+function buildNightCutExportWorkbook(rows, { productionDate = "", inventoryDate = "" } = {}) {
+  const wb = XLSX.utils.book_new();
+  const sheet = XLSX.utils.json_to_sheet(buildNightCutExportRows(rows), { header: NIGHT_CUT_EXPORT_COLUMNS });
+  XLSX.utils.book_append_sheet(wb, sheet, "Mandar a producir");
+  const note = XLSX.utils.aoa_to_sheet([
+    ["Pedido para", productionDate || ""],
+    ["Inventario del corte", inventoryDate || ""],
+    ["Fórmula", NIGHT_CUT_FORMULA],
+  ]);
+  XLSX.utils.book_append_sheet(wb, note, "Nota");
+  return wb;
+}
+
+function exportNightCutToExcel(rows, meta = {}) {
+  const fecha = dateKey(meta.productionDate) || todayKey();
+  XLSX.writeFile(buildNightCutExportWorkbook(rows, meta), `mandar_a_producir_${fecha}.xlsx`);
+}
+
+function displayWeekdayDate(value) {
+  const date = parseDateCell(value);
+  if (!date) return "";
+  const months = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  const dayName = weekdayLabel(date.getDay()).toLowerCase();
+  return `${dayName} ${date.getDate()} de ${months[date.getMonth()]} de ${date.getFullYear()}`;
+}
+
 function inferDateFromSheetRows(rows, sheetName = "", fallbackDate = "") {
   for (const row of (rows || []).slice(0, 8)) {
     for (const cell of (row || []).slice(0, 10)) {
@@ -2112,6 +2561,19 @@ function inferDateFromSheetRows(rows, sheetName = "", fallbackDate = "") {
 
 function parseDailyInventory(workbook, fallbackDate = "") {
   if (!workbook?.SheetNames?.length) return { branchStock: [], coldRoom: [] };
+  const nightCut = parseNightCutWorkbook(workbook);
+  if (nightCut) {
+    const fecha = dateKey(fallbackDate);
+    const stamped = nightCutRowsForDate(nightCut.products.map((product) => ({ ...product, producto: product.producto })), fecha);
+    return {
+      format: nightCut.format,
+      fileDate: nightCut.fileDate,
+      products: nightCut.products,
+      targets: stamped.targets,
+      branchStock: stamped.branchStock,
+      coldRoom: stamped.coldRoom,
+    };
+  }
   const branchParsed = [];
   const coldParsed = [];
 
@@ -7201,6 +7663,209 @@ function AccessScreen({ needsSetup, loading, error, onSubmit }) {
   );
 }
 
+function NightCutOrderSection({
+  draft,
+  onChosenDate,
+  onConfirm,
+  confirmDisabled,
+  confirmHint,
+  order,
+  rows,
+  unmatched,
+  sinDetalle,
+  marginPct,
+  onExport,
+  onPrint,
+}) {
+  const [sort, setSort] = useState({ key: "mandar", dir: "desc" });
+  const [query, setQuery] = useState("");
+  const [hideZeros, setHideZeros] = useState(true);
+  if (!draft && !order) return null;
+
+  const today = todayKey();
+  const fileDate = draft?.fileDate || order?.fileDate || "";
+  const stale = Boolean(fileDate) && nightCutFileDateLooksStale(fileDate, today);
+  const chosenDate = draft?.chosenDate || order?.inventoryDate || today;
+  const productionDate = productionDayForNightCut(chosenDate);
+  const totals = summarizeNightCutOrder(rows);
+  const filtered = sortNightCutOrderRows(
+    (rows || []).filter((row) => {
+      if (hideZeros && !(row.mandar > 0)) return false;
+      if (!query.trim()) return true;
+      return norm(row.producto).includes(norm(query));
+    }),
+    sort
+  );
+  const visibleTotals = summarizeNightCutOrder(filtered);
+  const listIsFiltered = filtered.length !== (rows || []).length;
+  const visibleUnmatched = (unmatched || []).filter((product) => product.existenciaSucursales > 0 || product.cuartoFrio > 0);
+
+  function toggleSort(key) {
+    setSort((current) => (
+      current.key === key
+        ? { key, dir: current.dir === "asc" ? "desc" : "asc" }
+        : { key, dir: key === "producto" ? "asc" : "desc" }
+    ));
+  }
+
+  function sortLabel(key) {
+    if (sort.key !== key) return "";
+    return sort.dir === "asc" ? " ↑" : " ↓";
+  }
+
+  return (
+    <section className="night-cut-section night-cut-order">
+      <div className="section-heading compact-heading">
+        <div>
+          <span className="eyebrow">Para el encargado de turno</span>
+          <h3>Mandar a producir</h3>
+          <p>Después del reparto, este corte dice cuánto pedir a planta. El pedido es del día siguiente (de lunes a sábado). El domingo se pide el lunes.</p>
+        </div>
+      </div>
+
+      {draft && (
+        <div className="night-cut-date-card night-cut-no-print">
+          <label className="night-cut-date-label">
+            Fecha del inventario
+            <input
+              type="date"
+              min="2020-01-01"
+              max="2100-12-31"
+              value={isPlausibleIsoDate(chosenDate) ? chosenDate : ""}
+              onChange={(event) => onChosenDate(event.target.value)}
+            />
+          </label>
+          <div className="night-cut-date-copy">
+            {fileDate ? (
+              <p>La primera celda del archivo dice <strong>{displayDate(fileDate)}</strong>.</p>
+            ) : (
+              <p>El archivo no trae una fecha clara.</p>
+            )}
+            {stale && (
+              <p className="freeze-strip-alert warn night-cut-stale" role="status">
+                <AlertTriangle size={16} aria-hidden="true" />
+                <span>Esa fecha se ve atrasada. Elige el día real del corte. Si no lo cambias, se usa hoy.</span>
+              </p>
+            )}
+            <p>
+              Con el {displayWeekdayDate(chosenDate) || "día elegido"}, el pedido es para el <strong>{displayWeekdayDate(productionDate)}</strong>.
+            </p>
+            {confirmHint && <p className="night-cut-hint">{confirmHint}</p>}
+            <button className="primary night-cut-confirm" type="button" onClick={onConfirm} disabled={confirmDisabled}>
+              Calcular mandar a producir
+            </button>
+          </div>
+        </div>
+      )}
+
+      {order && (
+        <div className="night-cut-result">
+          <p className="night-cut-when">
+            Inventario del <strong>{displayWeekdayDate(order.inventoryDate)}</strong>
+            {order.fileName ? ` · ${order.fileName}` : ""}. Pedido para el <strong>{displayWeekdayDate(order.productionDate)}</strong>.
+          </p>
+          <p className="night-cut-formula">{NIGHT_CUT_FORMULA} Margen de seguridad de este pedido: {formatNumber(marginPct, 0)}%.</p>
+          <div className="night-cut-hero">
+            <span>Total a mandar</span>
+            <strong>{formatNumber(totals.mandar, 0)}</strong>
+            <small>
+              {formatNumber(totals.productos, 0)} productos · recomendado {formatNumber(totals.recomendado, 0)} · cuarto frío {formatNumber(totals.cuartoFrio, 0)} · sobra en sucursales {formatNumber(totals.sobra, 0)}
+            </small>
+          </div>
+          <div className="night-cut-toolbar night-cut-no-print">
+            <div className="search">
+              <Search size={18} />
+              <input
+                placeholder="Buscar producto"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                aria-label="Buscar producto"
+              />
+            </div>
+            <label className="night-cut-hide">
+              <input type="checkbox" checked={hideZeros} onChange={(event) => setHideZeros(event.target.checked)} />
+              Ocultar productos en cero
+            </label>
+            <button className="secondary" type="button" onClick={onPrint} disabled={!rows.length}>
+              <Printer size={17} /> Imprimir
+            </button>
+            <button className="secondary" type="button" onClick={onExport} disabled={!rows.length}>
+              <Download size={17} /> Excel
+            </button>
+          </div>
+          <div className="table-card">
+            <table className="night-cut-table">
+              <thead>
+                <tr>
+                  {[
+                    ["producto", "Producto"],
+                    ["recomendado", "Recomendado"],
+                    ["cuartoFrio", "Cuarto frío"],
+                    ["sobra", "Sobra en sucursales"],
+                    ["mandar", "Mandar a producir"],
+                  ].map(([key, label]) => (
+                    <th key={key} className={key === "producto" ? "" : "num"} aria-sort={sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+                      <button type="button" onClick={() => toggleSort(key)}>
+                        {label}{sortLabel(key)}
+                      </button>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((row) => (
+                  <tr key={row.producto}>
+                    <td>{row.producto}</td>
+                    <td className="num">{formatNumber(row.recomendado, 1)}</td>
+                    <td className="num">{formatNumber(row.cuartoFrio, 0)}</td>
+                    <td className="num">{formatNumber(row.sobra, 0)}</td>
+                    <td className="num produce-col"><span className="produce-badge">{formatNumber(row.mandar, 0)}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <th>{listIsFiltered ? "Total de la lista" : "Total"}</th>
+                  <th className="num">{formatNumber(visibleTotals.recomendado, 0)}</th>
+                  <th className="num">{formatNumber(visibleTotals.cuartoFrio, 0)}</th>
+                  <th className="num">{formatNumber(visibleTotals.sobra, 0)}</th>
+                  <th className="num">{formatNumber(visibleTotals.mandar, 0)}</th>
+                </tr>
+              </tfoot>
+            </table>
+            {!rows.length && (
+              <div className="empty">Carga stock fijo y ventas para ver el recomendado de este día. El inventario queda listo al calcular.</div>
+            )}
+            {rows.length > 0 && !filtered.length && (
+              <div className="empty">Ningún producto de esta lista tiene piezas por mandar. Quita el filtro para verlos todos.</div>
+            )}
+          </div>
+          {visibleUnmatched.length > 0 && (
+            <div className="night-cut-unmatched">
+              <strong>No están en el catálogo y no se restaron</strong>
+              <ul>
+                {visibleUnmatched.map((product) => (
+                  <li key={`${product.productoOriginal}-${product.codigo}`}>
+                    {product.productoOriginal}
+                    {product.codigo ? ` (código ${product.codigo})` : ""}
+                    {": "}
+                    {formatNumber(product.existenciaSucursales, 0)} en sucursales, {formatNumber(product.cuartoFrio, 0)} en cuarto frío
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {(sinDetalle || []).length > 0 && (
+            <p className="night-cut-hint">
+              Estos productos no traen piso por sucursal, así que no se resta lo que sobra del stock fijo; sí se resta el cuarto frío: {(sinDetalle || []).map((product) => product.producto).join(", ")}.
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function Dashboard({ session, onLogout }) {
   const [stockRows, setStockRows] = useState([]);
   const [stockSheetNotice, setStockSheetNotice] = useState(null);
@@ -7211,6 +7876,9 @@ function Dashboard({ session, onLogout }) {
   const [existenciasCutoff, setExistenciasCutoff] = useState({ date: "", source: "", fileName: "" });
   const [dailyBranchStock, setDailyBranchStock] = useState([]);
   const [dailyColdRoom, setDailyColdRoom] = useState([]);
+  const [nightCutDraft, setNightCutDraft] = useState(null);
+  const [nightCutOrder, setNightCutOrder] = useState(null);
+  const [nightCutTargets, setNightCutTargets] = useState([]);
   const [stockCaptureDate, setStockCaptureDate] = useState(() => defaultInventoryDate(defaultMonthValue()));
   const [stockCaptureQuery, setStockCaptureQuery] = useState("");
   const [newSucursalName, setNewSucursalName] = useState("");
@@ -7416,6 +8084,8 @@ function Dashboard({ session, onLogout }) {
         : { date: "", source: "", fileName: "" });
       setDailyBranchStock(sanitizeDailyBranchStock(data.dailyBranchStock));
       setDailyColdRoom(sanitizeDailyColdRoom(data.dailyColdRoom));
+      setNightCutTargets(Array.isArray(data.nightCutTargets) ? data.nightCutTargets : []);
+      setNightCutOrder(data.nightCutOrder && typeof data.nightCutOrder === "object" ? data.nightCutOrder : null);
       if (Array.isArray(data.manualSucursales)) {
         setManualSucursales(data.manualSucursales.map((name) => String(name || "").trim()).filter(Boolean));
       }
@@ -7543,6 +8213,8 @@ function Dashboard({ session, onLogout }) {
         existenciasCutoff,
         dailyBranchStock: sanitizeDailyBranchStock(dailyBranchStock),
         dailyColdRoom: sanitizeDailyColdRoom(dailyColdRoom),
+        nightCutTargets,
+        nightCutOrder,
         manualSucursales,
         realProduction: snapshotOperationalRows(realProduction, productionRecordKey, persistedKeys.production),
         producedMay,
@@ -7658,6 +8330,28 @@ function Dashboard({ session, onLogout }) {
   async function handleDailyBranchStockFile(file) {
     if (!file) return;
     const workbook = await readWorkbook(file);
+    const nightCut = parseNightCutWorkbook(workbook);
+    if (nightCut) {
+      if (!nightCut.products.length) {
+        setToast({ tone: "warning", message: "No se reconocieron productos en el corte de la noche." });
+        return;
+      }
+      setNightCutDraft({
+        fileName: file.name,
+        fileDate: nightCut.fileDate,
+        chosenDate: todayKey(),
+        products: nightCut.products,
+      });
+      setFiles((current) => ({ ...current, dailyBranchStock: file.name }));
+      const stale = nightCutFileDateLooksStale(nightCut.fileDate, todayKey());
+      setToast({
+        tone: stale ? "warning" : "success",
+        message: stale
+          ? `El archivo dice ${displayDate(nightCut.fileDate) || "una fecha vieja"}. Confirma el día del corte antes de calcular.`
+          : "Revisa la fecha del inventario y calcula cuánto mandar a producir.",
+      });
+      return;
+    }
     const parsed = parseDailyInventory(workbook, stockCaptureDate);
     if (!parsed.branchStock.length && !parsed.coldRoom.length) {
       setToast({ tone: "warning", message: "No se reconocieron filas de inventario. Usa sucursales y/o Cuarto frío (RAIZ: Total suc + Restante CF). TOTAL A TENER y sumas no entran como sucursal." });
@@ -7690,6 +8384,49 @@ function Dashboard({ session, onLogout }) {
     setToast({
       tone: "success",
       message: `Inventario diario: ${parts.join(" · ")} (${dateLabel}).`,
+    });
+  }
+
+  function confirmNightCut() {
+    if (!nightCutDraft) return;
+    const inventoryDate = dateKey(nightCutDraft.chosenDate) || todayKey();
+    if (!isPlausibleIsoDate(inventoryDate)) return;
+    if (!officialProducts.length) {
+      setToast({ tone: "warning", message: "Carga el stock fijo para emparejar los productos del corte." });
+      return;
+    }
+    const productionDate = productionDayForNightCut(inventoryDate);
+    const { matched, unmatched } = matchNightCutProducts(nightCutDraft.products, officialProducts, productAliases);
+    const stamped = nightCutRowsForDate(matched, productionDate);
+    const previousDate = nightCutOrder?.productionDate || "";
+    setDailyBranchStock((current) => sanitizeDailyBranchStock([
+      ...(current || []).filter((row) => row.fecha !== previousDate && row.fecha !== productionDate),
+      ...stamped.branchStock,
+    ]));
+    setDailyColdRoom((current) => sanitizeDailyColdRoom([
+      ...(current || []).filter((row) => row.fecha !== previousDate && row.fecha !== productionDate),
+      ...stamped.coldRoom,
+    ]));
+    setNightCutTargets(stamped.targets);
+    setNightCutOrder({
+      fileName: nightCutDraft.fileName,
+      fileDate: nightCutDraft.fileDate || "",
+      inventoryDate,
+      productionDate,
+      products: nightCutDraft.products.map(slimNightCutProduct),
+    });
+    setNightCutDraft(null);
+    if (productionDate.slice(0, 7)) {
+      setSelectedMonth(productionDate.slice(0, 7));
+      setSelectedMonthTouched(true);
+    }
+    setDailyDateFilter(productionDate);
+    setStockCaptureDate(productionDate);
+    setHasUnsavedChanges(true);
+    const pendingCatalog = unmatched.filter((product) => product.existenciaSucursales > 0 || product.cuartoFrio > 0).length;
+    setToast({
+      tone: "success",
+      message: `Inventario del ${displayDate(inventoryDate)} listo. El pedido es para el ${displayDate(productionDate)}. ${matched.length} productos del catálogo${pendingCatalog ? ` · ${pendingCatalog} sin catálogo` : ""}.`,
     });
   }
 
@@ -8599,7 +9336,17 @@ function Dashboard({ session, onLogout }) {
   const comparableForecast = showMissingReal || !hasAnyRealProduction ? forecast : forecast.filter((r) => r.hasRealData);
   const filtered = comparableForecast.filter((r) => r.producto.includes(norm(query)));
 
-  const branchStockTargets = useMemo(() => buildBranchStockTargetMap(stockRows), [stockRows]);
+  const branchStockTargets = useMemo(() => {
+    const map = buildBranchStockTargetMap(stockRows);
+    for (const target of nightCutTargets || []) {
+      const product = normalizeProduct(target?.producto);
+      const sucursal = branchStockKey(target?.sucursal);
+      const stock = Number(target?.stock);
+      if (!product || !sucursal || !Number.isFinite(stock)) continue;
+      map.set(`${product}|${sucursal}`, Math.max(0, stock));
+    }
+    return map;
+  }, [stockRows, nightCutTargets]);
   const dailyRows = useMemo(
     () =>
       calculateDailyForecast({
@@ -8616,6 +9363,15 @@ function Dashboard({ session, onLogout }) {
     [forecast, ventasRealesMes, effectiveRealProduction, selectedMonth, dailyBufferPct, activePromos, effectiveDailyBranchStock, effectiveDailyColdRoom, branchStockTargets]
   );
   const dailyHasInventory = dailyRows.some((row) => row.hasDailyBranchStock || row.hasDailyColdRoom);
+  const nightCutMatch = useMemo(() => {
+    if (!nightCutOrder?.products?.length) return { matched: [], unmatched: [] };
+    return matchNightCutProducts(nightCutOrder.products, officialProducts, productAliases);
+  }, [nightCutOrder, officialProducts, productAliases]);
+  const nightCutRows = useMemo(
+    () => buildNightCutOrderRows(dailyRows, nightCutOrder?.productionDate),
+    [dailyRows, nightCutOrder]
+  );
+  const nightCutSinDetalle = nightCutMatch.matched.filter((product) => product.sinDetalleSucursal && product.existenciaSucursales > 0);
   const filteredDailyRows = dailyRows.filter((row) => {
     if (dailyDateFilter && row.fecha !== dailyDateFilter) return false;
     if (dailyProductQuery && !row.producto.includes(norm(dailyProductQuery))) return false;
@@ -9041,11 +9797,32 @@ function Dashboard({ session, onLogout }) {
           />
           <UploadBox
             title="Inventario de hoy"
-            description="Piso de venta de sucursales y cuarto frío del corte de la noche. Se resta de «Mandar a producir» del día en la columna Fecha del archivo."
+            description="Piso de venta de sucursales y cuarto frío del corte de la noche. Al subirlo confirmas la fecha: la primera celda a veces queda atrasada."
             onFile={handleDailyBranchStockFile}
             fileName={files.dailyBranchStock}
           />
         </section>
+
+        <NightCutOrderSection
+          draft={nightCutDraft}
+          onChosenDate={(value) => {
+            if (value && !isPlausibleIsoDate(value)) return;
+            setNightCutDraft((current) => (current ? { ...current, chosenDate: value } : current));
+          }}
+          onConfirm={confirmNightCut}
+          confirmDisabled={!nightCutDraft || !officialProducts.length || !isPlausibleIsoDate(nightCutDraft.chosenDate)}
+          confirmHint={nightCutDraft && !officialProducts.length ? "Carga el stock fijo para emparejar los productos del archivo." : ""}
+          order={nightCutOrder}
+          rows={nightCutRows}
+          unmatched={nightCutMatch.unmatched}
+          sinDetalle={nightCutSinDetalle}
+          marginPct={dailyBufferPct}
+          onExport={() => exportNightCutToExcel(nightCutRows, {
+            productionDate: nightCutOrder?.productionDate,
+            inventoryDate: nightCutOrder?.inventoryDate,
+          })}
+          onPrint={() => window.print()}
+        />
 
         {salesSourceDecisions.length > 0 && (
           <section className="sales-conflict-bar">
@@ -9576,6 +10353,20 @@ export {
   parseDailyBranchStock,
   parseDailyInventory,
   parseDailyColdRoom,
+  parseNightCutWorkbook,
+  isNightCutWorkbook,
+  matchNightCutProducts,
+  matchNightCutProduct,
+  nightCutRowsForDate,
+  nightCutFileDateLooksStale,
+  productionDayForNightCut,
+  buildNightCutOrderRows,
+  summarizeNightCutOrder,
+  sortNightCutOrderRows,
+  buildNightCutExportRows,
+  buildNightCutExportWorkbook,
+  NIGHT_CUT_FORMULA,
+  NIGHT_CUT_EXPORT_COLUMNS,
   sanitizeDailyBranchStock,
   sanitizeDailyColdRoom,
   upsertDailyBranchStock,
