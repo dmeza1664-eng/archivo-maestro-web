@@ -49,6 +49,7 @@ async function main() {
     productionDayForNightCut,
     buildNightCutOrderRows,
     sortNightCutOrderRows,
+    presentNightCutRows,
     summarizeNightCutOrder,
     buildNightCutExportRows,
     buildNightCutExportWorkbook,
@@ -84,6 +85,9 @@ async function main() {
   assert(section.includes("Margen de seguridad"), "el margen de seguridad es un recuadro");
   assert(section.includes('role="switch"'), "ocultar ceros es un interruptor con etiqueta");
   assert(section.includes("Ocultar productos en cero"), "el interruptor dice qué oculta");
+  assert(section.includes("useState(null)"), "la tabla sigue el orden del Excel hasta que se elige una columna");
+  assert(!section.includes('useState({ key: "mandar"'), "no arranca ordenada por Mandar a producir");
+  assert(section.includes("night-cut-section-row"), "los grupos del Excel son filas de sección");
   assert(section.includes("night-cut-dates"), "el encabezado muestra inventario y pedido");
   const resultAt = section.indexOf('className="night-cut-result"');
   const datesAt = section.indexOf("night-cut-dates", resultAt);
@@ -127,7 +131,10 @@ async function main() {
   assert(frutas.existenciaSucursales === 50 && frutas.cuartoFrio === 20 && frutas.sobra === 0, "FRUTAS GDE: 50 en sucursales, 0 de sobra, 20 de cuarto frío");
   assert(moka.existenciaSucursales === 57 && moka.cuartoFrio === 10 && moka.sobra === 0, "MOKA GDE: 57 en sucursales, sobra 0, cuarto frío 10");
 
-  assert(!parsed.products.some((row) => /3 LECHES GRANDES|3 LECHES MEDIANOS|3 LECHES CHICOS|MINI MEDIANOS 3 LECHES|MINI MINI 3 LECHES|TOTAL AREA|ESPECIALIDAD/.test(row.producto)), "los subtotales del archivo no son productos");
+  const sheetNames = parsed.products.map((row) => (row.esSeccion ? `>${row.productoOriginal}` : row.producto));
+  assert(sheetNames[0] === "PINA GDE" && sheetNames[1] === "DURAZNO GDE", "el corte empieza por el grupo 3 LECHES GRANDES: PIÑA GDE, DURAZNO GDE");
+  assert(sheetNames.indexOf(">3 LECHES GRANDES") > sheetNames.indexOf("DURAZNO GDE"), "3 LECHES GRANDES queda como título después de sus productos");
+  assert(!parsed.products.some((row) => !row.esSeccion && /3 LECHES GRANDES|3 LECHES MEDIANOS|3 LECHES CHICOS|MINI MEDIANOS 3 LECHES|MINI MINI 3 LECHES|TOTAL AREA|ESPECIALIDAD/.test(row.producto)), "los subtotales del archivo no son productos");
   assert(parsed.products.some((row) => row.producto === "GELATINA IND FRESA"), "un producto real después de un subtotal se conserva");
   assert(parsed.products.some((row) => row.producto === normalizeProduct("ROSCA C/CAJETA")), "ROSCA se conserva");
   const zanahoriaPetit = product(parsed, "ZANAHORIA PETIT");
@@ -253,9 +260,13 @@ async function main() {
   assert(durazno.sobra === 0, "DURAZNO está corto de stock: no hay sobra que restar");
   assert(pinero.existenciaSucursales === 113 && pinero.cuartoFrio === 22 && pinero.sumaSucCf === 135 && pinero.stockAf === 180 && pinero.stockAg === 180 && pinero.diferenciaStock === -45, `MINI MEDIANO PIÑERO debe ser Z 113, AB 22, AD 135, AF 180, AG 180, AH -45 (${JSON.stringify({ z: pinero.existenciaSucursales, ab: pinero.cuartoFrio, ad: pinero.sumaSucCf, af: pinero.stockAf, ag: pinero.stockAg, ah: pinero.diferenciaStock })})`);
   assert(pinero.sobra === 0, "MINI MEDIANO PIÑERO está corto de stock: no hay sobra que restar");
-  assert(!plantilla.products.some((row) => /3 LECHES GRANDES|3 LECHES MEDIANOS|3 LECHES CHICOS|MINI MEDIANOS 3 LECHES|MINI MINI 3 LECHES|TOTAL AREA|ESPECIALIDAD/.test(row.producto)), "los subtotales de la plantilla no son productos");
+  const plantillaNames = plantilla.products.map((row) => (row.esSeccion ? `>${row.productoOriginal}` : row.producto));
+  assert(plantillaNames[0] === "PINA GDE" && plantillaNames[1] === "DURAZNO GDE", "la plantilla empieza PIÑA GDE, DURAZNO GDE");
+  assert(plantillaNames.indexOf("PINA GDE") < plantillaNames.indexOf(">3 LECHES GRANDES") && plantillaNames.indexOf(">3 LECHES GRANDES") < plantillaNames.indexOf(">3 LECHES MEDIANOS"), "los grupos grandes y medianos van en el orden de la hoja");
+  assert(plantillaNames.indexOf(normalizeProduct("MINI MEDIANO PIÑERO")) < plantillaNames.indexOf(">MINI MEDIANOS 3 LECHES"), "el subtotal de mini medianos queda después de sus productos");
+  assert(!plantilla.products.some((row) => !row.esSeccion && /3 LECHES GRANDES|3 LECHES MEDIANOS|3 LECHES CHICOS|MINI MEDIANOS 3 LECHES|MINI MINI 3 LECHES|TOTAL AREA|ESPECIALIDAD/.test(row.producto)), "los subtotales de la plantilla no son productos");
   assert(plantilla.products.every((row) => row.corteTotal), "el corte sale de la hoja de total a tener");
-  const conSobra = plantilla.products.find((row) => row.sobra > 0 && row.stockAf !== null);
+  const conSobra = plantilla.products.find((row) => !row.esSeccion && row.sobra > 0 && row.stockAf !== null);
   assert(conSobra && conSobra.sobra === conSobra.existenciaSucursales - conSobra.stockAf, "la sobra es existencia menos stock, cuando la existencia es mayor");
 
   const scrambled = XLSX.utils.book_new();
@@ -313,22 +324,34 @@ async function main() {
   assert(duraznoOrder.mandar === getProduccionSugerida("DURAZNO GDE", 22 - 9), "DURAZNO manda el lote de pronóstico + margen − 9");
   assert(Math.abs(duraznoOrder.pronostico - 20) < 1e-9 && Math.abs(duraznoOrder.margen - 2) < 1e-9, "DURAZNO sigue mostrando el pronóstico sin el margen");
   assert(pineroOrder.cuartoFrio === 22 && pineroOrder.existencia === 113 && pineroOrder.diferenciaStock === -45 && pineroOrder.mandar === 0, "MINI MEDIANO PIÑERO resta los 22 de cuarto frío y no manda si el neto no llega a lote");
+  const skus = plantilla.products.filter((row) => !row.esSeccion);
   const fullDaily = calculateDailyForecast({
-    monthlyRows: plantilla.products.map((row) => ({ producto: row.producto, ...weekday })),
+    monthlyRows: skus.map((row) => ({ producto: row.producto, ...weekday })),
     ventasReales: [],
     realProduction: [],
     selectedMonth: "2026-10",
     dailyBufferPct: 10,
-    nightCutInventory: plantilla.products.map((row) => ({ ...row, fecha: "2026-10-15" })),
+    nightCutInventory: skus.map((row) => ({ ...row, fecha: "2026-10-15" })),
   });
   const fullOrder = buildNightCutOrderRows(fullDaily, "2026-10-15", 10);
   const fullTotals = summarizeNightCutOrder(fullOrder);
   const inOrder = new Set(fullOrder.map((row) => row.producto));
-  const forecastable = plantilla.products.filter((row) => inOrder.has(row.producto));
+  const forecastable = skus.filter((row) => inOrder.has(row.producto));
   const cold = forecastable.reduce((sum, row) => sum + row.cuartoFrio, 0);
   const surplus = forecastable.reduce((sum, row) => sum + row.sobra, 0);
   assert(forecastable.length === fullOrder.length && fullTotals.cuartoFrio === cold && fullTotals.sobra === surplus, "el pedido resta el cuarto frío y la sobra de los productos que sí se pronostican");
   assert(fullTotals.mandar === fullOrder.reduce((sum, row) => sum + row.mandar, 0), "el total a mandar suma la tabla");
+  const sheetView = buildNightCutOrderRows(fullDaily, "2026-10-15", 10, plantilla.products);
+  assert(sheetView[0].producto === "PINA GDE" && sheetView[1].producto === "DURAZNO GDE", "la tabla sale en el orden de la hoja, no por Mandar a producir");
+  assert(sheetView.find((row) => row.esSeccion)?.producto === "3 LECHES GRANDES", "el primer grupo cierra con el subtotal 3 LECHES GRANDES");
+  const shown = presentNightCutRows(sheetView, { hideZeros: false });
+  assert(shown[0].producto === "PINA GDE" && shown.some((row) => row.esSeccion && row.producto === "3 LECHES GRANDES"), "sin clic en un encabezado se conserva el grupo");
+  const byMandarView = presentNightCutRows(sheetView, { sort: { key: "mandar", dir: "desc" } });
+  assert(!byMandarView.some((row) => row.esSeccion) && byMandarView[0].mandar >= byMandarView[1].mandar, "ordenar por columna solo ocurre al elegirla, y entonces no mezcla los títulos");
+  const sheetExport = buildNightCutExportRows(sheetView);
+  assert(sheetExport[0].Producto === "PINA GDE" && sheetExport[1].Producto === "DURAZNO GDE", "el Excel sale en el orden de la hoja");
+  assert(sheetExport.some((row) => row.Producto === "3 LECHES GRANDES" && row["Mandar a producir"] === ""), "el Excel incluye el subtotal del grupo y no lo suma como pedido");
+  assert(sheetExport.at(-1)["Mandar a producir"] === sheetView.filter((row) => !row.esSeccion).reduce((sum, row) => sum + row.mandar, 0), "el total del Excel no suma los subtotales");
 
   console.log("night-cut-inventory-test ok");
   console.log(`DURAZNO GDE Z=${durazno.existenciaSucursales} AB=${durazno.cuartoFrio} AD=${durazno.sumaSucCf} AF=${durazno.stockAf} AG=${durazno.stockAg} AH=${durazno.diferenciaStock} sobra=${durazno.sobra} mandar(base 22)=${duraznoOrder.mandar}`);

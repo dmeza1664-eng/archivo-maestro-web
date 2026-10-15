@@ -4538,6 +4538,12 @@ label.night-cut-toggle input:focus-visible + .night-cut-switch {
   color: #9b2c2c;
 }
 
+.night-cut-table tr.night-cut-section-row td {
+  background: #f4e6d4;
+  color: #6b3817;
+  font-weight: 800;
+}
+
 .night-cut-unmatched {
   background: #fff7ef;
   border-radius: 12px;
