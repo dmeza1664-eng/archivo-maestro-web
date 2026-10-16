@@ -37,6 +37,8 @@ assert.match(page, /<FrozenMonthBanner/, "Un mes congelado se declara en la UI."
 assert.match(app, /no cambian si cargas más datos/, "El freeze avisa que planta no deriva en silencio.");
 assert.match(page, /<FreezeReadinessStrip/, "Se explica por qué no se puede congelar.");
 assert.match(page, /Paso 3 · Planta/, "La tabla diaria es el tercer paso visible.");
+assert.match(app, /Producción diaria vs pronóstico/, "Hay una vista de producción diaria vs pronóstico.");
+assert.match(dashboard, /<AppViewNav/, "Se puede cambiar entre planta y producción vs pronóstico.");
 assert.match(page, /Guardar ventas en la base/, "Se pueden guardar las ventas en la base para no depender del respaldo.");
 assert.match(page, /Mandar a producir/, "La tabla diaria muestra «Mandar a producir».");
 assert.match(page, /produce-col/, "La columna de producir está resaltada.");
